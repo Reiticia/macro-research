@@ -21,6 +21,10 @@ data class AdaptiveLayout(
     val cardPadding: Dp get() = (16 * spacingFactor).dp
     val gap: Dp get() = (12 * spacingFactor).dp
     val smallGap: Dp get() = (8 * spacingFactor).dp
+
+    /** Tighter rhythm for the home hero and mini cards, so the event list keeps the remaining height. */
+    val denseGap: Dp get() = (6 * spacingFactor).dp
+    val miniCardPadding: Dp get() = (8 * spacingFactor).dp
 }
 
 /** Uses window dp (not physical pixels): rotation, split-screen and display zoom work naturally. */

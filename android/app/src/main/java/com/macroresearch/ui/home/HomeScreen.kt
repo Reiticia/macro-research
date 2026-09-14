@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,7 +21,6 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,6 +36,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -147,12 +146,13 @@ private fun MarketOverview(
 ) {
     val live = liveQuotes.associateBy { it.symbol }
     val rows = marketOverviewRows(selectedMarkets)
-    Column {
-        Text(stringResource(R.string.market_overview), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Glanceable strip: compact header and one dense row per market line, so the event list below
+    // keeps most of the screen.
+    Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
+        Text(stringResource(R.string.market_overview), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
             rows.forEach { rowMarkets ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
                     rowMarkets.forEach { symbol ->
                         MarketMiniCard(
                             label = assetLabel(symbol),
@@ -187,44 +187,62 @@ private fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
         ),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
     ) {
-        Column(Modifier.padding(ResearchLayout.cardPadding), verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap)) {
-            Text(stringResource(R.string.next_event), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-            FlowRow(
+        Column(Modifier.padding(ResearchLayout.cardPadding), verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
+            Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap),
-                verticalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap),
-                maxItemsInEachRow = if (ResearchLayout.stackMetadata) 1 else 2,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("${flag(event.country)}  ${event.localizedName(locale)}", modifier = Modifier.weight(1f).padding(end = 12.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    stringResource(R.string.next_event),
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelLarge,
+                )
                 Text(
                     countdown(event.eventTime, now),
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    style = MaterialTheme.typography.headlineSmall,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(event.localTime())
-                Spacer(Modifier.width(8.dp)); Text("· ${importanceLabel(event.importance)}", color = MaterialTheme.colorScheme.tertiary); Spacer(Modifier.width(8.dp)); ImportanceDots(event.importance)
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.16f))
+            Text(
+                "${flag(event.country)}  ${event.localizedName(locale)}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // Schedule and values share one flow row: the hero card stays short, and a large system
+            // font scale stacks the entries instead of clipping them.
             FlowRow(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap),
-                verticalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap),
+                verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap),
+                maxItemsInEachRow = if (ResearchLayout.stackMetadata) 1 else Int.MAX_VALUE,
             ) {
-                ValueColumn(stringResource(R.string.previous), event.value(event.previous))
-                ValueColumn(stringResource(R.string.consensus), event.value(event.consensus))
-                ValueColumn(stringResource(R.string.forecast), event.value(event.forecast))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(event.localTime(), style = MaterialTheme.typography.labelLarge)
+                    Text(" · ${importanceLabel(event.importance)}", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.width(ResearchLayout.smallGap))
+                    ImportanceDots(event.importance)
+                }
+                InlineValue(stringResource(R.string.previous), event.value(event.previous))
+                InlineValue(stringResource(R.string.consensus), event.value(event.consensus))
+                InlineValue(stringResource(R.string.forecast), event.value(event.forecast))
             }
         }
     }
 }
 
+/** Label and value on a single line keep the hero card short; the label stays secondary. */
 @Composable
-private fun ValueColumn(label: String, value: String) = Column {
+private fun InlineValue(label: String, value: String) = Row(verticalAlignment = Alignment.CenterVertically) {
     Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.width(4.dp))
+    Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
 }
 
 @Composable
@@ -236,23 +254,41 @@ private fun MarketMiniCard(
     val locale = LocalConfiguration.current.locales[0]
     val price = liveQuote?.price
     Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-        Column(Modifier.padding(ResearchLayout.gap)) {
-            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+            modifier = Modifier.padding(
+                horizontal = ResearchLayout.miniCardPadding,
+                vertical = ResearchLayout.denseGap,
+            ),
+            horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    stringResource(
+                        when {
+                            price == null -> R.string.waiting_quotes
+                            liveQuote?.stale == true -> R.string.market_stale
+                            else -> R.string.live_snapshot
+                        },
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
                 price?.let { formatMarketPrice(it, locale) } ?: "--",
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-            )
-            Text(
-                stringResource(
-                    when {
-                        price == null -> R.string.waiting_quotes
-                        liveQuote?.stale == true -> R.string.market_stale
-                        else -> R.string.live_snapshot
-                    },
-                ),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.secondary,
+                maxLines = 1,
             )
         }
     }
