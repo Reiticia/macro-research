@@ -215,8 +215,9 @@ private fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Schedule and values share one flow row: the hero card stays short, and a large system
-            // font scale stacks the entries instead of clipping them.
+            // Schedule and values share one flow row, and the three values travel as a single unit:
+            // when the line is too narrow the whole previous/consensus/forecast group moves to the
+            // next line instead of splitting apart. A large system font scale stacks the two groups.
             FlowRow(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap),
@@ -229,9 +230,11 @@ private fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
                     Spacer(Modifier.width(ResearchLayout.smallGap))
                     ImportanceDots(event.importance)
                 }
-                InlineValue(stringResource(R.string.previous), event.value(event.previous))
-                InlineValue(stringResource(R.string.consensus), event.value(event.consensus))
-                InlineValue(stringResource(R.string.forecast), event.value(event.forecast))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
+                    InlineValue(stringResource(R.string.previous), event.value(event.previous))
+                    InlineValue(stringResource(R.string.consensus), event.value(event.consensus))
+                    InlineValue(stringResource(R.string.forecast), event.value(event.forecast))
+                }
             }
         }
     }
