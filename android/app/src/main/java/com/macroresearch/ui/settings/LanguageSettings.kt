@@ -25,14 +25,14 @@ import com.macroresearch.R
 import com.macroresearch.ui.common.appLocale
 
 @Composable
-fun LanguageSettings(apiKeyConfigured: Boolean) {
+fun LanguageSettings(chineseEnabled: Boolean) {
     val selected = AppLanguage.fromLocale(appLocale())
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.language), fontWeight = FontWeight.Bold)
             Column(Modifier.selectableGroup()) {
                 AppLanguage.entries.forEach { language ->
-                    val enabled = language == AppLanguage.English || apiKeyConfigured
+                    val enabled = language == AppLanguage.English || chineseEnabled
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -71,7 +71,7 @@ fun LanguageSettings(apiKeyConfigured: Boolean) {
             }
             Text(
                 stringResource(
-                    if (apiKeyConfigured) R.string.language_note
+                    if (chineseEnabled) R.string.language_note
                     else R.string.language_key_required_note,
                 ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

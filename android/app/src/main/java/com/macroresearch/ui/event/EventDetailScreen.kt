@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.CalendarWarning
+import com.macroresearch.data.CorrectionOutcome
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.data.model.currentStatus
 import com.macroresearch.data.model.MarketResponse
@@ -281,6 +282,7 @@ private fun TranslationCorrectionDialog(
     var operation by remember { mutableStateOf<Job?>(null) }
     val configured = repository.translationSettings.collectAsStateWithLifecycle().value.configured
     val retranslateFailed = stringResource(R.string.retranslate_failed)
+    val queuedMessage = stringResource(R.string.translation_correction_queued)
 
     fun cancelAndDismiss() {
         operation?.cancel()
@@ -381,7 +383,15 @@ private fun TranslationCorrectionDialog(
                     error = null
                     operation = scope.launch {
                         try {
-                            repository.correctTranslation(event, zhCn, zhTw)
+                            when (repository.submitTranslationCorrection(event, zhCn, zhTw)) {
+                                // The server holds the shared translation cache, so a reader's
+                                // suggestion is queued until the admin approves it.
+                                is CorrectionOutcome.Queued -> {
+                                    error = queuedMessage
+                                    return@launch
+                                }
+                                CorrectionOutcome.AppliedLocally -> Unit
+                            }
                             onChanged()
                             onDismiss()
                         } catch (cancelled: CancellationException) {

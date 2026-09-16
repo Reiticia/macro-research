@@ -71,6 +71,22 @@ interface EventDao {
     @Upsert
     suspend fun upsert(events: List<CachedEventEntity>)
 
+    /**
+     * Drops every cached event and follow. Called when the data-source mode changes, because
+     * direct-mode ids are content digests while backend ids are database keys.
+     */
+    @Transaction
+    suspend fun clearCache() {
+        clearFollows()
+        clearEvents()
+    }
+
+    @Query("DELETE FROM cached_event")
+    suspend fun clearEvents()
+
+    @Query("DELETE FROM followed_event")
+    suspend fun clearFollows()
+
     @Query("DELETE FROM cached_event WHERE eventTime < :before")
     suspend fun deleteOlderThan(before: String)
 

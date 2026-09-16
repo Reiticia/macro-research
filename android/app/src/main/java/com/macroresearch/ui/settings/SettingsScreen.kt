@@ -51,6 +51,7 @@ import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.macroresearch.R
 import com.macroresearch.data.CountryPreferences
+import com.macroresearch.data.DataSourceMode
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.MarketPreferences
 import com.macroresearch.ui.common.assetLabel
@@ -65,6 +66,7 @@ fun SettingsScreen(repository: MacroRepository, padding: PaddingValues) {
     val selectedMarkets by repository.selectedMarkets.collectAsStateWithLifecycle()
     val markets = MarketPreferences.SUPPORTED_MARKETS.associateWith { it in selectedMarkets }
     val translation by repository.translationSettings.collectAsStateWithLifecycle()
+    val dataSource by repository.dataSourceSettings.collectAsStateWithLifecycle()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -88,11 +90,21 @@ fun SettingsScreen(repository: MacroRepository, padding: PaddingValues) {
             contentPadding = PaddingValues(bottom = 4.dp),
             verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
         ) {
+            item { DataSourceSettings(repository) }
             item { DisplaySettingsCard() }
-            item { DataNetworkSettings(repository) }
-            item { TranslationApiSettings(repository) }
+            if (dataSource.mode == DataSourceMode.DIRECT) {
+                item { DataNetworkSettings(repository) }
+                item { TranslationApiSettings(repository) }
+            }
             item { AnalysisMethodSettings(repository) }
-            item { LanguageSettings(translation.configured) }
+            item {
+                // In backend mode the server supplies Chinese event names, so the language is
+                // not gated behind a personal API key there.
+                LanguageSettings(
+                    chineseEnabled = translation.configured ||
+                        dataSource.mode == DataSourceMode.BACKEND,
+                )
+            }
             item {
                 SettingsGroup(
                     stringResource(R.string.countries_regions),

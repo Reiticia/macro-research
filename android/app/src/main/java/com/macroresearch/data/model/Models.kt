@@ -138,8 +138,18 @@ data class TransmissionStep(
 )
 
 /** AI market analysis for a released event, cached locally and re-runnable. */
+/** Token usage a relay reported for the calls behind one briefing. */
+data class AiUsage(
+    val promptTokens: Int = 0,
+    val completionTokens: Int = 0,
+    val totalTokens: Int = 0,
+    /** Number of model calls; a two-pass method makes two. */
+    val calls: Int = 0,
+)
+
 data class AiAnalysis(
     val eventId: Long,
+    val method: Int,
     val revision: Int,
     val chain: List<TransmissionStep>,
     val dataAnalysis: String,
@@ -147,5 +157,41 @@ data class AiAnalysis(
     val risks: String?,
     val model: String,
     val generatedAt: String,
-)
+    /** Tokens the server spent producing this row, when the relay reported them. */
+    val usage: AiUsage? = null,
+    /** True when no model call happened for this request. */
+    val fromCache: Boolean = false,
+    /** True when the rate limit served this result instead of a fresh run. */
+    val rateLimited: Boolean = false,
+    val retryAfterSeconds: Long? = null,
+) {
+    /** Short audit line for the analysis screen; null when the relay reported nothing. */
+    fun usageSummary(): String? {
+        val usage = usage ?: return null
+        if (usage.calls <= 0) return null
+        return if (usage.totalTokens > 0) {
+            "${usage.calls} × ${usage.totalTokens} tokens"
+        } else {
+            "${usage.calls} ×"
+        }
+    }
+}
+
+/** Message pushed by the backend over its WebSocket. */
+data class SocketEvent(
+    val type: String,
+    val eventId: Long? = null,
+    val event: String? = null,
+    val eventZhCn: String? = null,
+    val eventZhTw: String? = null,
+    val actual: String? = null,
+    val consensus: String? = null,
+) {
+    /** Event name in the reader's language, falling back to the source name. */
+    fun localizedName(isTraditionalChinese: Boolean): String? = when {
+        isTraditionalChinese -> eventZhTw ?: event
+        eventZhCn != null -> eventZhCn
+        else -> event
+    }
+}
 

@@ -12,15 +12,15 @@ import kotlinx.coroutines.flow.asStateFlow
  * explaining the chain backwards. [EX_ANTE_THEN_COMPARE] asks for the expectation first and only
  * then reveals the moves, which keeps the first pass honest.
  */
-enum class AnalysisMethod(val key: String) {
+enum class AnalysisMethod(val key: String, val wireValue: Int) {
     /** Released numbers and rule signal only; market moves are never sent. */
-    NUMBERS_ONLY("numbers_only"),
+    NUMBERS_ONLY("numbers_only", 1),
 
     /** First pass without moves, second pass comparing that expectation with the moves. */
-    EX_ANTE_THEN_COMPARE("ex_ante_then_compare"),
+    EX_ANTE_THEN_COMPARE("ex_ante_then_compare", 2),
 
     /** One pass with numbers, rules and moves together. */
-    SINGLE_PASS("single_pass"),
+    SINGLE_PASS("single_pass", 3),
 
     ;
 

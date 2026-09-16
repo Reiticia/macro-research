@@ -19,6 +19,8 @@ fun calendarWarningMessage(warning: CalendarWarning): String {
 
         CalendarWarning.Reason.ALL_SOURCES_UNAVAILABLE -> stringResource(R.string.calendar_warning_offline)
 
+        CalendarWarning.Reason.BACKEND_UNAVAILABLE -> stringResource(R.string.calendar_warning_backend)
+
         CalendarWarning.Reason.FALLBACK_RATE_LIMITED -> if (minutes != null) {
             stringResource(R.string.calendar_warning_rate_limited, minutes)
         } else {

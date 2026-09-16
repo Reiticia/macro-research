@@ -21,6 +21,9 @@ data class CalendarWarning(
 
         /** No provider answered; the list is served from the local cache. */
         ALL_SOURCES_UNAVAILABLE,
+
+        /** Backend mode, and the configured backend cannot be reached or rejected the token. */
+        BACKEND_UNAVAILABLE,
     }
 }
 

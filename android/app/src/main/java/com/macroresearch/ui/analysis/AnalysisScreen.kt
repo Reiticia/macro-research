@@ -170,6 +170,16 @@ private fun AiAnalysisCard(
                 }
                 else -> {
                     val analysis = ai.analysis
+                    // The rate limit serves the previous result instead of an error, so the user
+                    // must be told that this text is not a fresh run.
+                    if (analysis.rateLimited) {
+                        AiHint(
+                            stringResource(
+                                R.string.ai_rate_limited,
+                                analysis.retryAfterSeconds ?: 0L,
+                            ),
+                        )
+                    }
                     if (analysis.chain.isNotEmpty()) {
                         Text(stringResource(R.string.ai_chain), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
                         analysis.chain.forEach { step -> ChainStepRow(step) }
@@ -182,6 +192,13 @@ private fun AiAnalysisCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    analysis.usageSummary()?.let { usage ->
+                        Text(
+                            stringResource(R.string.ai_usage, usage),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
             ai.error?.let {
