@@ -75,6 +75,44 @@ request_timeout_seconds = 20
   [限流](#限流超限时回退到上一次结果) 与 [审计](#模型调用审计按类别分类)。
 - 错误统一为 `{"error":{"code","message"}}`，客户端按 `code` 本地化。
 
+### 令牌怎么发放、吊销
+
+令牌不在线上申请，由管理员自己生成并写进服务器环境；App 里填的就是这个字符串。
+
+1. 生成一段随机值（不要用可猜的词）：
+
+   ```bash
+   openssl rand -hex 24        # Linux / Git Bash / WSL
+   ```
+
+   ```powershell
+   # Windows PowerShell
+   -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
+   ```
+
+2. 以 `名字:令牌` 写入 `API_TOKENS`，一台设备一个名字，审计时才能分清是谁用的：
+
+   ```bash
+   sudo API_TOKENS="pixel:9f2c…,emulator:5a1d…" \
+        ./deploy.sh deploy --tls-cert … --tls-key … --proxy …
+   ```
+
+   已部署过的机器也可以直接改 env 文件后重启：
+
+   ```bash
+   sudo nano /etc/market-analyzer/market-event-analyzer.env   # API_TOKENS=…
+   sudo systemctl restart market-event-analyzer
+   ```
+
+3. 把令牌填进 App（设置 → 数据来源 → 后端 → 访问令牌）。
+
+- **吊销**：从 `API_TOKENS` 里删掉对应条目并重启服务即可，旧 App 立即收到 401。
+- **审计**：`/api/v1/usage` 与 Telegram `/usage` 按令牌名字区分消耗，所以建议按设备命名。
+- **本机调试**不想发令牌：`config.toml` 里 `[auth] enabled = false`，接口完全公开，
+  仅限回环或内网使用。
+- 注意：`[auth] enabled = true` 而 `API_TOKENS` 为空时，服务端拒绝启动（部署脚本会
+  自动改写为关闭鉴权并告警）。
+
 ## API
 
 免鉴权：
