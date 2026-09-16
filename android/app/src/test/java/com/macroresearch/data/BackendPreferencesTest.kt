@@ -45,6 +45,12 @@ class BackendPreferencesTest {
             "http://localhost:8080",
             BackendPreferences.normalizeBaseUrl("http://localhost:8080", allowsCleartext = true),
         )
+        // The emulator's alias for the host loopback lives inside 10/8, so a development
+        // backend running on the developer's machine is reachable without a certificate.
+        assertEquals(
+            "http://10.0.2.2:8080",
+            BackendPreferences.normalizeBaseUrl("http://10.0.2.2:8080", allowsCleartext = true),
+        )
         assertThrows(IllegalArgumentException::class.java) {
             BackendPreferences.normalizeBaseUrl("http://macro.example.com", allowsCleartext = true)
         }
