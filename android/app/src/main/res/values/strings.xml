@@ -151,6 +151,7 @@
     <string name="backend_allow_cleartext">Allow plain HTTP (private or tunneled address only)</string>
     <string name="backend_cleartext_warning">The access token will travel unencrypted. Only use this over a private network or an encrypted tunnel.</string>
     <string name="backend_clear">Clear</string>
+    <string name="backend_setup_hint">Fill in the backend address and access token, tap Test connection, then tap Backend to switch.</string>
     <string name="data_source_incomplete">Fill in the backend address and access token first.</string>
     <string name="data_source_switch_title">Switch data source?</string>
     <string name="data_source_switch_body">The cached events and your follow list are cleared, because the two modes use different event identifiers. Filter settings are kept.</string>

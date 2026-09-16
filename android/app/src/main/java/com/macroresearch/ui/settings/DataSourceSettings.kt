@@ -52,6 +52,11 @@ fun DataSourceSettings(repository: MacroRepository) {
     var status by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var pendingMode by remember { mutableStateOf<DataSourceMode?>(null) }
+    // The backend fields must be reachable *before* the mode switches, otherwise a first-time
+    // user would be asked for an address they cannot enter anywhere.
+    var showBackendConfig by rememberSaveable {
+        mutableStateOf(settings.mode == DataSourceMode.BACKEND)
+    }
     // Strings must be resolved in composition; the click handler runs in a coroutine.
     val verifiedLabel = stringResource(R.string.backend_verified)
     val unauthorizedLabel = stringResource(R.string.backend_unauthorized)
@@ -75,8 +80,9 @@ fun DataSourceSettings(repository: MacroRepository) {
                 FilterChip(
                     selected = settings.mode == DataSourceMode.BACKEND,
                     onClick = {
-                        // Switching wipes the local cache, so require a usable endpoint first;
-                        // otherwise the user would lose data and land on an error screen.
+                        // First tap: open the configuration. Switching still goes through the
+                        // confirmation dialog, and only once address and token are usable.
+                        showBackendConfig = true
                         val incomplete = baseUrl.isBlank() ||
                             (token.isBlank() && !settings.tokenConfigured)
                         if (incomplete) {
@@ -98,7 +104,15 @@ fun DataSourceSettings(repository: MacroRepository) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            if (settings.mode == DataSourceMode.BACKEND) {
+            if (showBackendConfig && settings.mode != DataSourceMode.BACKEND) {
+                Text(
+                    stringResource(R.string.backend_setup_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (showBackendConfig) {
                 OutlinedTextField(
                     value = baseUrl,
                     onValueChange = { baseUrl = it; error = null; status = null },
@@ -208,6 +222,8 @@ fun DataSourceSettings(repository: MacroRepository) {
                 Button(onClick = {
                     val target = mode
                     pendingMode = null
+                    // Leaving the backend collapses its configuration block again.
+                    if (target == DataSourceMode.DIRECT) showBackendConfig = false
                     scope.launch { repository.setDataSourceMode(target) }
                 }) { Text(stringResource(R.string.data_source_switch_confirm)) }
             },

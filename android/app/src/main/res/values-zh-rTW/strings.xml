@@ -150,6 +150,7 @@
     <string name="backend_allow_cleartext">允許明文 HTTP（僅限內網或隧道位址）</string>
     <string name="backend_cleartext_warning">存取權杖會以明文傳輸。僅應在私有網路或加密隧道下使用。</string>
     <string name="backend_clear">清除</string>
+    <string name="backend_setup_hint">填寫後端位址與存取權杖，點「測試連線」確認可用後，再點「後端」完成切換。</string>
     <string name="data_source_incomplete">請先填寫後端位址與存取權杖。</string>
     <string name="data_source_switch_title">切換資料來源？</string>
     <string name="data_source_switch_body">切換會清空本機事件快取與追蹤清單，因為兩種模式使用不同的事件識別碼。篩選設定會保留。</string>
