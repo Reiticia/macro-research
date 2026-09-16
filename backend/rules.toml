@@ -1,0 +1,99 @@
+strong_surprise_threshold = "0.2"
+
+[[indicator]]
+name = "Inflation Rate YoY"
+aliases = ["CPI YoY", "Consumer Price Index CPI"]
+category = "inflation"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "Core Inflation Rate YoY"
+aliases = ["Core CPI YoY", "Core Consumer Prices"]
+category = "inflation"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "Inflation Rate MoM"
+aliases = ["CPI MoM"]
+category = "inflation"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "Core Inflation Rate MoM"
+aliases = ["Core CPI MoM"]
+category = "inflation"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "Non Farm Payrolls"
+aliases = ["Nonfarm Payrolls", "NFP"]
+category = "employment"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "Unemployment Rate"
+aliases = []
+category = "employment"
+higher_than_expected = "dovish"
+lower_than_expected = "hawkish"
+
+[[indicator]]
+name = "Initial Jobless Claims"
+aliases = ["Jobless Claims"]
+category = "employment"
+higher_than_expected = "dovish"
+lower_than_expected = "hawkish"
+
+[[indicator]]
+name = "Average Hourly Earnings"
+aliases = ["Average Hourly Earnings MoM", "Average Hourly Earnings YoY"]
+category = "employment"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "PCE Price Index"
+aliases = ["PCE Price Index MoM", "PCE Price Index YoY"]
+category = "inflation"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "Core PCE Price Index"
+aliases = ["Core PCE"]
+category = "inflation"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "GDP Growth Rate"
+aliases = ["GDP Growth Rate QoQ", "GDP Growth Rate Annualized"]
+category = "gdp"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "ISM Manufacturing PMI"
+aliases = ["ISM Manufacturing", "ISM Services PMI", "ISM Non-Manufacturing PMI"]
+category = "business confidence"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "Fed Interest Rate Decision"
+aliases = ["FOMC Rate Decision", "Federal Funds Rate"]
+category = "interest rate"
+higher_than_expected = "hawkish"
+lower_than_expected = "dovish"
+
+[[indicator]]
+name = "Crude Oil Stocks Change"
+aliases = ["EIA Crude Oil Stocks Change", "Crude Oil Inventories"]
+category = "energy"
+higher_than_expected = "bearish_oil"
+lower_than_expected = "bullish_oil"

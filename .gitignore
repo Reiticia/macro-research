@@ -2,6 +2,11 @@
 /.pi
 /android/.kotlin
 
+# Rust backend
+/backend/target
+/backend/dist
+/backend/data
+
 # Android / IntelliJ
 /android/.gradle
 /android/.idea

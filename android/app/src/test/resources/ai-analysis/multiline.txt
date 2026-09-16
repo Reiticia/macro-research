@@ -1,0 +1,2 @@
+{"dataAnalysis":"first line
+second line","marketOutlook":"ok for now"}

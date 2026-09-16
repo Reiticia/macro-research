@@ -1,0 +1,119 @@
+[server]
+host = "127.0.0.1"
+port = 8080
+# 直出 HTTPS：两项同时填写即由后端自己终结 TLS，无需 Caddy/Nginx。
+# 证书也可以是 Cloudflare Origin Certificate（长期有效，不用续期）。
+# 留空则监听明文 HTTP，仅适合内网或已经被隧道加密的场景。
+tls_cert = ""
+tls_key = ""
+
+[database]
+url = "sqlite://data/market.db"
+
+# Which upstreams must be tunnelled. Leave proxy_url empty when the host can reach the
+# calendar, rate and Telegram endpoints directly.
+[network]
+proxy_url = ""
+proxied = ["tradingview", "forexfactory", "cnbc", "yahoo", "telegram"]
+# A relay that is itself blocked on this network can be tunnelled too: add "translation"
+# and/or "ai" here. Both stay direct by default.
+request_timeout_seconds = 20
+
+[calendar]
+primary_url = "https://economic-calendar.tradingview.com/events"
+fallback_url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+base_url = "https://tradingeconomics.com/calendar"
+sync_days = 7
+minimum_importance = 3
+
+[scheduler]
+calendar_sync_seconds = 43200
+watch_scan_seconds = 15
+watch_before_minutes = 5
+release_timeout_minutes = 30
+market_poll_seconds = 15
+market_collect_after_minutes = 60
+
+[market]
+yahoo_base_url = "https://query1.finance.yahoo.com/v8/finance/chart"
+binance_base_url = "https://data-api.binance.vision/api/v3"
+biquote_base_url = "https://biquote.io"
+cnbc_quote_url = "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol"
+cnbc_chart_url = "https://ts-api.cnbc.com/harmony/app/charts"
+live_quote_cache_seconds = 30
+live_quote_stale_seconds = 300
+# Must stay within the set the Android client can display.
+symbols = ["nasdaq100", "dxy", "gold", "us10y", "bitcoin"]
+
+# Tokens live in the API_TOKENS environment variable as "name:token,name:token".
+[auth]
+enabled = true
+tokens_env = "API_TOKENS"
+
+# Only the endpoints a client can trigger need a budget. Translation runs inside the sync
+# loop, so it is not exposed here.
+[limits]
+ai_analysis_per_token_per_day = 60
+# 同一 (事件, 方法) 两次生成之间的最小间隔；窗口内的重试直接返回上一次结果。
+ai_regenerate_cooldown_seconds = 600
+ai_concurrency = 2
+# 模型调用审计记录保留天数（0 = 关闭审计）。
+llm_usage_retention_days = 180
+
+# Event-name translation. Any OpenAI-compatible endpoint works: the official API, or a relay
+# station. base_url may be written as https://relay.example.com/v1 (recommended) or as the full
+# .../v1/chat/completions URL. The key is read from the named environment variable and is never
+# stored in this file or the database.
+[translation]
+enabled = true
+base_url = "https://tokenrhythm.studio/v1"
+model = "deepseek-v4-flash-0731"
+api_key_env = "OPENAI_API_KEY"
+batch_size = 20
+backfill_on_startup = true
+# 翻译批次同样可以带思考等级等参数（一般不需要）。
+# extra_body = { temperature = 0.2 }
+# extra_headers = { "X-Title" = "macro-research" }
+# Optional relay headers: OpenRouter-style gateways want X-Title / HTTP-Referer, Azure-style
+# ones authenticate with api-key. An "Authorization" entry replaces the default Bearer header.
+# extra_headers = { "X-Title" = "macro-research" }
+
+# Server-side AI market briefing. It may use a different relay, model and key than translation:
+# point api_key_env at another variable and set a second key in the env file.
+[ai]
+enabled = true
+base_url = "https://tokenrhythm.studio/v1"
+model = "deepseek-v4-flash-0731"
+api_key_env = "AI_API_KEY"
+default_method = 2
+max_tokens = 4096
+# 推理模型的输出 token 参数名：gpt-5 / o 系列要写 max_completion_tokens。
+# 留空用默认 max_tokens；中转站报错时服务端也会自动换名重试一次。
+# max_tokens_param = "max_completion_tokens"
+# 思考等级等厂商专属参数，原样并入请求体（messages 受保护，不可覆盖）。
+# extra_body = { reasoning_effort = "low" }
+# extra_body = { enable_thinking = false }
+# extra_body = { thinking = { type = "enabled", budget_tokens = 2048 } }
+# extra_headers = { "api-key" = "azure-style-key" }
+
+# Admin alerts and the translation-correction review console.
+[telegram]
+enabled = true
+api_base = "https://api.telegram.org"
+bot_token_env = "TELEGRAM_BOT_TOKEN"
+admin_chat_ids_env = "TELEGRAM_ADMIN_CHAT_IDS"
+poll_timeout_seconds = 30
+
+[alerts]
+failure_threshold = 3
+cooldown_seconds = 3600
+data_missing_after_minutes = 30
+data_missing_cooldown_seconds = 21600
+digest_max_events = 10
+quiet_hours = ""
+quiet_hours_timezone = "Asia/Shanghai"
+
+# Only used by the explicit --backfill command. Set TE_API_KEY in the environment.
+[backfill]
+calendar_api_base_url = "https://api.tradingeconomics.com"
+request_delay_ms = 1000
