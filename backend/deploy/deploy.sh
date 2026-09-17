@@ -5,11 +5,11 @@
 # 用法:
 #   sudo ./deploy.sh                     # 构建并部署/升级 systemd 服务
 #   sudo ./deploy.sh deploy --port 9000  # 指定监听端口
-#   sudo OPENAI_API_KEY=sk-xxx ./deploy.sh
 #   sudo ./deploy.sh deploy --binary ./market-event-analyzer   # 使用预编译二进制
-#   sudo ./deploy.sh status              # 查看服务状态与健康检查
+#   sudo ./deploy.sh status              # 查看服务状态、健康检查与配置概览
 #   sudo ./deploy.sh logs                # 跟踪服务日志
-#   sudo ./deploy.sh backfill            # 补采最近三个月 (需 TE_API_KEY)
+#   sudo ./deploy.sh check-ai            # 中转站/模型连通性自检
+#   sudo ./deploy.sh backfill            # 补采最近三个月 (需 [backfill] te_api_key)
 #   sudo ./deploy.sh backfill 2026-06-08 2026-09-07
 #   sudo ./deploy.sh uninstall --purge   # 卸载服务并删除数据
 #
@@ -29,7 +29,6 @@ SERVICE_NAME="${SERVICE_NAME:-market-event-analyzer}"
 APP_USER="${APP_USER:-market}"
 APP_DIR="${APP_DIR:-/opt/market-analyzer}"
 CONF_DIR="${CONF_DIR:-/etc/market-analyzer}"
-ENV_FILE="${ENV_FILE:-${CONF_DIR}/market-event-analyzer.env}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/market-analyzer}"
 BACKUP_KEEP="${BACKUP_KEEP:-10}"
 
@@ -42,6 +41,7 @@ ENABLE_TRANSLATION="auto"   # auto | on | off
 ENABLE_AI="auto"            # auto | on | off
 OUTBOUND_PROXY=""           # http://127.0.0.1:7890 或 socks5://...
 BINARY_SRC=""
+CONFIG_SRC=""   # 安装时使用的配置来源，由 require_source_tree 决定
 RUN_TESTS=0
 
 # ---------------------------------------------------------------------------
@@ -66,8 +66,8 @@ usage() {
   --binary <PATH>       跳过构建，安装指定的预编译二进制
   --skip-tests          不运行 cargo test
   --test                部署前运行 cargo test
-  --translation <MODE>  auto | on | off (默认 auto: 有 OPENAI_API_KEY 则开启)
-  --ai <MODE>           auto | on | off (默认 auto: 有 OPENAI_API_KEY 则开启服务端 AI 分析)
+  --translation <MODE>  auto | on | off (默认 auto: 保留配置文件里已有的 enabled)
+  --ai <MODE>           auto | on | off (默认 auto: 保留配置文件里已有的 enabled)
   --proxy <URL>         出网代理 (如 http://127.0.0.1:7890)，写入 [network].proxy_url
   --tls-cert <PATH>     证书链 PEM；与 --tls-key 同时提供即由后端直出 HTTPS（无需反向代理）
   --tls-key <PATH>      私钥 PEM
@@ -75,16 +75,23 @@ usage() {
   --keep <N>            保留最近 N 份备份 (默认 10)
   -h, --help            显示帮助
 
-密钥 (均可通过环境变量传入或写在 env 文件中，文件权限 0640，不回显):
-  API_TOKENS              客户端访问令牌，格式 name:token,name:token
-  OPENAI_API_KEY          事件名翻译
-  AI_API_KEY              AI 市场简报（可与翻译用不同中转站/不同 Key）
-  TELEGRAM_BOT_TOKEN      Telegram 机器人令牌 (telegram.enabled)
-  TELEGRAM_ADMIN_CHAT_IDS 管理员 chat id 白名单，逗号分隔
-  TE_API_KEY              历史补采 --backfill
+密钥（全部写在安装目录的 config.toml 里，文件权限 0640；不再使用环境变量）:
+  [auth] tokens                客户端访问令牌，格式 name:token,name:token
+  [translation] api_key        事件名翻译
+  [ai] api_key                 AI 市场简报（可与翻译用不同中转站/不同 Key）
+  [telegram] bot_token         Telegram 机器人令牌
+  [telegram] admin_chat_ids    管理员 chat id，逗号分隔
+  [backfill] te_api_key        历史补采 --backfill
 
-环境变量覆盖:
-  APP_DIR CONF_DIR ENV_FILE BACKUP_DIR APP_USER SERVICE_NAME HOST PORT RUST_LOG
+首次部署后直接编辑配置文件再重启：
+  sudo nano /opt/market-analyzer/config.toml && sudo systemctl restart market-event-analyzer
+
+可选环境变量（只影响进程本身，不是凭据）:
+  APP_CONFIG   指定配置文件路径（默认取可执行文件同目录的 config.toml）
+  RUST_LOG     日志级别（优先于 [server] log_level）
+
+安装路径覆盖:
+  APP_DIR CONF_DIR BACKUP_DIR APP_USER SERVICE_NAME HOST PORT
 EOF
 }
 
@@ -172,7 +179,15 @@ require_systemd() {
 
 require_source_tree() {
     [[ -f "${BACKEND_DIR}/Cargo.toml" ]] || die "找不到 ${BACKEND_DIR}/Cargo.toml，请在仓库 backend/deploy 目录下运行本脚本"
-    [[ -f "${BACKEND_DIR}/config.toml" ]] || die "缺少 ${BACKEND_DIR}/config.toml"
+    # 真实 config.toml 不入库；没有时用跟踪的模板作为安装起点。
+    if [[ -f "${BACKEND_DIR}/config.toml" ]]; then
+        CONFIG_SRC="${BACKEND_DIR}/config.toml"
+    elif [[ -f "${BACKEND_DIR}/config.example.toml" ]]; then
+        CONFIG_SRC="${BACKEND_DIR}/config.example.toml"
+        info "使用配置模板 ${BACKEND_DIR}/config.example.toml 作为安装起点（部署后请编辑安装目录的 config.toml 填密钥）"
+    else
+        die "缺少 ${BACKEND_DIR}/config.toml 与 ${BACKEND_DIR}/config.example.toml"
+    fi
     [[ -f "${BACKEND_DIR}/rules.toml" ]] || die "缺少 ${BACKEND_DIR}/rules.toml"
 }
 
@@ -220,38 +235,8 @@ set_toml_value() {
 }
 
 # ---------------------------------------------------------------------------
-# 环境文件中的密钥 (保留已有值，命令行/环境变量优先)
+# 读取配置文件中已配置的密钥（升级时原样保留，不会被空值覆盖）
 # ---------------------------------------------------------------------------
-load_secrets() {
-    [[ -f "${ENV_FILE}" ]] || return 0
-    local k v
-    while IFS='=' read -r k v; do
-        [[ -z "${k}" || "${k}" == \#* ]] && continue
-        case "${k}" in
-            OPENAI_API_KEY) OPENAI_API_KEY="${OPENAI_API_KEY:-${v}}" ;;
-            AI_API_KEY)     AI_API_KEY="${AI_API_KEY:-${v}}" ;;
-            TE_API_KEY)     TE_API_KEY="${TE_API_KEY:-${v}}" ;;
-            API_TOKENS)     API_TOKENS="${API_TOKENS:-${v}}" ;;
-            TELEGRAM_BOT_TOKEN) TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-${v}}" ;;
-            TELEGRAM_ADMIN_CHAT_IDS) TELEGRAM_ADMIN_CHAT_IDS="${TELEGRAM_ADMIN_CHAT_IDS:-${v}}" ;;
-            RUST_LOG)       RUST_LOG="${RUST_LOG:-${v}}" ;;
-        esac
-    done < "${ENV_FILE}"
-}
-
-write_env_file() {
-    # Secrets live in config.toml now; the env file is kept only for a custom RUST_LOG.
-    local tmp
-    tmp="$(mktemp)"
-    {
-        printf 'RUST_LOG=%s\n' "${RUST_LOG}"
-    } > "${tmp}"
-    install -d -m 0750 -o root -g "${APP_GROUP}" "${CONF_DIR}"
-    install -m 0640 -o root -g "${APP_GROUP}" "${tmp}" "${ENV_FILE}"
-    rm -f "${tmp}"
-}
-
-# Reads one quoted value out of a TOML section, for preserving configured secrets across upgrades.
 toml_get() {
     local file="$1" section="[$2]" key="$3"
     [[ -f "${file}" ]] || return 0
@@ -268,13 +253,29 @@ toml_get() {
     ' "${file}"
 }
 
-# Writes a secret only when a value exists: an empty CLI value must never wipe a configured one.
+# Writes a secret only when a value exists: an empty value must never wipe a configured one.
 set_toml_secret() {
     local file="$1" section="$2" key="$3" previous="$4" next="$5"
     local value="${previous}"
     [[ -z "${value}" ]] && value="${next}"
     if [[ -n "${value}" ]]; then
         set_toml_value "${file}" "${section}" "${key}" "\"${value}\""
+    fi
+}
+
+# Keeps a subsystem's `enabled` switch intact across an upgrade, defaulting it to false only
+# when the file has neither a switch nor a credential (i.e. the very first deploy).
+apply_enabled() {
+    local section="$1" requested="$2" previous="$3" credential="$4"
+    case "${requested}" in
+        on)  set_toml_value "${APP_DIR}/config.toml" "${section}" enabled "true"; return ;;
+        off) set_toml_value "${APP_DIR}/config.toml" "${section}" enabled "false"; return ;;
+    esac
+    if [[ -n "${previous}" ]]; then
+        set_toml_value "${APP_DIR}/config.toml" "${section}" enabled "${previous}"
+    elif [[ -z "${credential}" ]]; then
+        set_toml_value "${APP_DIR}/config.toml" "${section}" enabled "false"
+        warn "[${section}] 没有密钥：本次部署默认关闭该子系统，填好密钥后把 enabled 改为 true"
     fi
 }
 
@@ -326,7 +327,6 @@ render_unit() {
     sed -e "s|@APP_USER@|${APP_USER}|g" \
         -e "s|@APP_GROUP@|${APP_GROUP}|g" \
         -e "s|@APP_DIR@|${APP_DIR}|g" \
-        -e "s|@ENV_FILE@|${ENV_FILE}|g" \
         "${UNIT_TEMPLATE}" > "${SERVICE_FILE}"
     chmod 0644 "${SERVICE_FILE}"
 }
@@ -398,63 +398,21 @@ cmd_deploy() {
         info "使用预编译二进制: ${BINARY_SRC}"
     fi
 
-    load_secrets
 
-    # 既有配置里已经写好的密钥先读出来，升级时不能被空值覆盖。
+    # 既有配置里已经写好的密钥与开关先读出来（install 会用仓库版覆盖该文件）。
     local prev_config="${APP_DIR}/config.toml"
     local prev_tokens prev_translation_key prev_ai_key prev_bot_token prev_chat_ids prev_te_key
+    local prev_enabled_translation prev_enabled_ai prev_enabled_telegram prev_enabled_auth
     prev_tokens="$(toml_get "${prev_config}" auth tokens)"
     prev_translation_key="$(toml_get "${prev_config}" translation api_key)"
     prev_ai_key="$(toml_get "${prev_config}" ai api_key)"
     prev_bot_token="$(toml_get "${prev_config}" telegram bot_token)"
     prev_chat_ids="$(toml_get "${prev_config}" telegram admin_chat_ids)"
     prev_te_key="$(toml_get "${prev_config}" backfill te_api_key)"
-
-    # 翻译开关决策（配置文件里已有密钥也算可用）
-    local translation_enabled="true"
-    case "${ENABLE_TRANSLATION}" in
-        on)
-            [[ -n "${OPENAI_API_KEY:-}${prev_translation_key}" ]] || die "--translation on 但没有密钥（OPENAI_API_KEY 或 translation.api_key）"
-            ;;
-        off)
-            translation_enabled="false"
-            ;;
-        auto)
-            if [[ -z "${OPENAI_API_KEY:-}" && -z "${prev_translation_key}" ]]; then
-                translation_enabled="false"
-                warn "未提供翻译密钥（OPENAI_API_KEY / translation.api_key）：已关闭事件名翻译"
-                warn "如需三语事件名，设置后重新部署: sudo OPENAI_API_KEY=sk-xxx $0"
-            fi
-            ;;
-    esac
-
-    # 服务端 AI 分析开关
-    local ai_enabled="true"
-    case "${ENABLE_AI}" in
-        on)
-            [[ -n "${AI_API_KEY:-}${prev_ai_key}" ]] || die "--ai on 但没有密钥（AI_API_KEY 或 ai.api_key）"
-            ;;
-        off)
-            ai_enabled="false"
-            ;;
-        auto)
-            [[ -n "${AI_API_KEY:-}${prev_ai_key}" ]] || ai_enabled="false"
-            ;;
-    esac
-
-    # Telegram 告警：缺少任一项则关闭，而不是让服务启动失败
-    local telegram_enabled="true"
-    if [[ -z "${TELEGRAM_BOT_TOKEN:-}${prev_bot_token}" || -z "${TELEGRAM_ADMIN_CHAT_IDS:-}${prev_chat_ids}" ]]; then
-        telegram_enabled="false"
-        warn "未配置 TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_CHAT_IDS：数据源异常只会写入日志"
-    fi
-
-    # 客户端令牌：启用鉴权时至少需要一个，否则所有客户端都会 401
-    local auth_enabled="true"
-    if [[ -z "${API_TOKENS:-}${prev_tokens}" ]]; then
-        auth_enabled="false"
-        warn "未提供访问令牌（API_TOKENS / auth.tokens）：数据接口将对外公开，建议设置后重新部署"
-    fi
+    prev_enabled_translation="$(toml_get "${prev_config}" translation enabled)"
+    prev_enabled_ai="$(toml_get "${prev_config}" ai enabled)"
+    prev_enabled_telegram="$(toml_get "${prev_config}" telegram enabled)"
+    prev_enabled_auth="$(toml_get "${prev_config}" auth enabled)"
 
     # 停服 -> 备份
     log "停止服务 ${SERVICE_NAME}"
@@ -467,28 +425,42 @@ cmd_deploy() {
     install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${DATA_DIR}"
 
     install -m 0755 -o root -g root "${BINARY_SRC}" "${APP_DIR}/${APP_NAME}"
-    install -m 0640 -o root -g "${APP_GROUP}" "${BACKEND_DIR}/config.toml" "${APP_DIR}/config.toml"
+    install -m 0640 -o root -g "${APP_GROUP}" "${CONFIG_SRC}" "${APP_DIR}/config.toml"
     install -m 0640 -o root -g "${APP_GROUP}" "${BACKEND_DIR}/rules.toml"  "${APP_DIR}/rules.toml"
 
     set_toml_value "${APP_DIR}/config.toml" server host "\"${HOST}\""
     set_toml_value "${APP_DIR}/config.toml" server port "${PORT}"
-    set_toml_value "${APP_DIR}/config.toml" translation enabled "${translation_enabled}"
-    set_toml_value "${APP_DIR}/config.toml" ai enabled "${ai_enabled}"
-    set_toml_value "${APP_DIR}/config.toml" telegram enabled "${telegram_enabled}"
-    set_toml_value "${APP_DIR}/config.toml" auth enabled "${auth_enabled}"
     if [[ -n "${OUTBOUND_PROXY}" ]]; then
         set_toml_value "${APP_DIR}/config.toml" network proxy_url "\"${OUTBOUND_PROXY}\""
         info "出网代理: ${OUTBOUND_PROXY}（仅 [network].proxied 中列出的源与 Telegram 经过它）"
     fi
 
-    # 密钥全部写进配置文件：升级时已有的值优先，命令行/环境变量只在为空时填充。
-    set_toml_secret "${APP_DIR}/config.toml" auth tokens "${prev_tokens}" "${API_TOKENS:-}"
-    set_toml_secret "${APP_DIR}/config.toml" translation api_key "${prev_translation_key}" "${OPENAI_API_KEY:-}"
-    set_toml_secret "${APP_DIR}/config.toml" ai api_key "${prev_ai_key}" "${AI_API_KEY:-}"
-    set_toml_secret "${APP_DIR}/config.toml" telegram bot_token "${prev_bot_token}" "${TELEGRAM_BOT_TOKEN:-}"
-    set_toml_secret "${APP_DIR}/config.toml" telegram admin_chat_ids "${prev_chat_ids}" "${TELEGRAM_ADMIN_CHAT_IDS:-}"
-    set_toml_secret "${APP_DIR}/config.toml" backfill te_api_key "${prev_te_key}" "${TE_API_KEY:-}"
-    info "密钥已写入 ${APP_DIR}/config.toml（权限 0640；已配置的值不会被空参数覆盖）"
+    # 配置文件是唯一事实来源：升级时把已配置的密钥与开关原样写回新文件（仓库版是空值）。
+    # 首次部署后直接编辑 ${APP_DIR}/config.toml 填密钥并重启即可，无需重跑部署。
+    set_toml_secret "${APP_DIR}/config.toml" auth tokens "${prev_tokens}" ""
+    set_toml_secret "${APP_DIR}/config.toml" translation api_key "${prev_translation_key}" ""
+    set_toml_secret "${APP_DIR}/config.toml" ai api_key "${prev_ai_key}" ""
+    set_toml_secret "${APP_DIR}/config.toml" telegram bot_token "${prev_bot_token}" ""
+    set_toml_secret "${APP_DIR}/config.toml" telegram admin_chat_ids "${prev_chat_ids}" ""
+    set_toml_secret "${APP_DIR}/config.toml" backfill te_api_key "${prev_te_key}" ""
+
+    # enabled 开关：只有显式传 --translation/--ai 才改写；否则保留文件里已有的值。
+    # 首次部署（既无密钥也无开关记录）时把没有凭据的子系统写成 false，避免服务干跑。
+    apply_enabled translation "${ENABLE_TRANSLATION}" "${prev_enabled_translation}" "${prev_translation_key}"
+    apply_enabled ai "${ENABLE_AI}" "${prev_enabled_ai}" "${prev_ai_key}"
+    if [[ -n "${prev_bot_token}" && -n "${prev_chat_ids}" ]]; then
+        set_toml_value "${APP_DIR}/config.toml" telegram enabled "${prev_enabled_telegram:-true}"
+    else
+        set_toml_value "${APP_DIR}/config.toml" telegram enabled "${prev_enabled_telegram:-false}"
+        warn "[telegram] 未配置 bot_token / admin_chat_ids：告警关闭，数据源异常只写日志"
+    fi
+    if [[ -n "${prev_tokens}" ]]; then
+        set_toml_value "${APP_DIR}/config.toml" auth enabled "${prev_enabled_auth:-true}"
+    else
+        set_toml_value "${APP_DIR}/config.toml" auth enabled "${prev_enabled_auth:-false}"
+        warn "[auth] tokens 未配置：鉴权关闭，数据接口公开"
+    fi
+    info "配置与密钥保留于 ${APP_DIR}/config.toml（权限 0640）"
 
     # 直出 HTTPS：证书与私钥只读给运行用户，私钥不放在仓库与安装目录之外
     if [[ -n "${TLS_CERT}" ]]; then
@@ -503,7 +475,6 @@ cmd_deploy() {
         set_toml_value "${APP_DIR}/config.toml" server tls_key  '""'
     fi
 
-    write_env_file
     info "配置文件: ${APP_DIR}/config.toml（含密钥，权限 0640；可用 APP_CONFIG 指向其他文件）"
 
     # systemd
@@ -534,12 +505,10 @@ cmd_deploy() {
 cmd_check_ai() {
     require_root "${COMMAND}"
     [[ -x "${APP_DIR}/${APP_NAME}" ]] || die "未找到已安装的二进制，请先部署: $0"
-    load_secrets
 
-    # 通过环境而不是命令行传凭据，避免密钥出现在 ps 输出中。
+    # 密钥不经过命令行，也不走环境：全部从安装目录的配置文件读。
     export APP_CONFIG="${APP_DIR}/config.toml"
-    export OPENAI_API_KEY AI_API_KEY RUST_LOG
-    export RUST_LOG="${RUST_LOG%%,*}=warn"   # 只保留自检输出
+    export RUST_LOG="market_event_analyzer=warn"
 
     cd "${APP_DIR}"
     local status=0
@@ -547,7 +516,7 @@ cmd_check_ai() {
         runuser -u "${APP_USER}" --preserve-environment -- \
             "${APP_DIR}/${APP_NAME}" --check-ai || status=$?
     else
-        sudo -u "${APP_USER}" --preserve-env=APP_CONFIG,OPENAI_API_KEY,AI_API_KEY,RUST_LOG -- \
+        sudo -u "${APP_USER}" --preserve-env=APP_CONFIG,RUST_LOG -- \
             "${APP_DIR}/${APP_NAME}" --check-ai || status=$?
     fi
     return "${status}"
@@ -568,9 +537,20 @@ cmd_status() {
         code="$(curl -s ${insecure} -o /dev/null -w '%{http_code}' --max-time 3 "${scheme}://127.0.0.1:${port}/health" || true)"
         [[ "${code}" == "200" ]] && log "健康检查 /health (${scheme}, port ${port}) -> 200" || warn "健康检查 /health (${scheme}, port ${port}) -> ${code:-无响应}"
     fi
-    if [[ -f "${ENV_FILE}" ]]; then
+    if [[ -f "${APP_DIR}/config.toml" ]]; then
         echo
-        info "环境文件中的键 (值已隐藏): $(grep -oE '^[A-Z_]+' "${ENV_FILE}" | paste -sd, -)"
+        info "配置文件: ${APP_DIR}/config.toml（值不回显）"
+        local section name key
+        for key in "auth:tokens" "translation:api_key" "ai:api_key" \
+                   "telegram:bot_token" "telegram:admin_chat_ids" "backfill:te_api_key"; do
+            section="${key%%:*}"
+            name="${key##*:}"
+            if [[ -n "$(toml_get "${APP_DIR}/config.toml" "${section}" "${name}")" ]]; then
+                info "  [${section}] ${name} = 已配置"
+            else
+                info "  [${section}] ${name} = （空）"
+            fi
+        done
     fi
 }
 
@@ -586,15 +566,16 @@ cmd_logs() {
 cmd_backfill() {
     require_root "${COMMAND}"
     [[ -x "${APP_DIR}/${APP_NAME}" ]] || die "未找到已安装的二进制，请先部署: $0"
-    load_secrets
-    [[ -n "${TE_API_KEY:-}" ]] || die "未设置 TE_API_KEY (写入 ${ENV_FILE} 或: sudo TE_API_KEY=xxx $0 backfill)"
+    if [[ -z "$(toml_get "${APP_DIR}/config.toml" backfill te_api_key)" ]]; then
+        die "未配置 [backfill] te_api_key（写入 ${APP_DIR}/config.toml 后重试）"
+    fi
 
     systemctl is-active --quiet "${SERVICE_NAME}" && \
         warn "服务正在运行，补采与实时采集共用数据库 (WAL 并发安全，但建议错峰)"
 
     # 通过环境而不是命令行传凭据，避免密钥出现在 ps 输出中。
     export APP_CONFIG="${APP_DIR}/config.toml"
-    export TE_API_KEY RUST_LOG
+    export RUST_LOG
 
     log "开始补采: ${EXTRA_ARGS[*]:-默认最近三个月}"
     cd "${APP_DIR}"
@@ -602,7 +583,7 @@ cmd_backfill() {
         runuser -u "${APP_USER}" --preserve-environment -- \
             "${APP_DIR}/${APP_NAME}" --backfill "${EXTRA_ARGS[@]}"
     else
-        sudo -u "${APP_USER}" --preserve-env=APP_CONFIG,TE_API_KEY,RUST_LOG -- \
+        sudo -u "${APP_USER}" --preserve-env=APP_CONFIG,RUST_LOG -- \
             "${APP_DIR}/${APP_NAME}" --backfill "${EXTRA_ARGS[@]}"
     fi
     log "补采结束"

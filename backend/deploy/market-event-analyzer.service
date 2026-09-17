@@ -12,10 +12,7 @@ User=@APP_USER@
 Group=@APP_GROUP@
 WorkingDirectory=@APP_DIR@
 Environment=RUST_LOG=market_event_analyzer=info,tower_http=info
-# KEY=value 文件，保存 API_TOKENS / OPENAI_API_KEY / TELEGRAM_BOT_TOKEN /
-# TELEGRAM_ADMIN_CHAT_IDS / TE_API_KEY 等密钥，权限 0640。
-# 前缀 "-" 表示文件不存在时不报错。
-EnvironmentFile=-@ENV_FILE@
+# 凭据不再走环境：全部读自 @APP_DIR@/config.toml（可用 [server] log_level 代替上面的 RUST_LOG）。
 ExecStart=@APP_DIR@/market-event-analyzer
 Restart=always
 RestartSec=5

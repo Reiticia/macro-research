@@ -184,16 +184,15 @@ impl NetworkConfig {
     }
 }
 
-/// Token gate for every `/api/v1` route. The tokens themselves live in the
-/// `API_TOKENS` environment variable so they never enter the config file.
+/// Token gate for every `/api/v1` route. The tokens live in this file; the deployment script
+/// writes them with `0640 root:market` permissions.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
 pub struct AuthConfig {
     pub enabled: bool,
-    /// Access tokens written straight into this file as `name:token,name:token`.
+    /// Access tokens as `name:token,name:token`, one name per device so the audit can tell
+    /// callers apart.
     pub tokens: String,
-    /// Alternative: read the tokens from this environment variable instead of the file.
-    pub tokens_env: String,
 }
 
 impl Default for AuthConfig {
@@ -201,7 +200,6 @@ impl Default for AuthConfig {
         Self {
             enabled: true,
             tokens: String::new(),
-            tokens_env: "API_TOKENS".into(),
         }
     }
 }
@@ -214,11 +212,8 @@ pub struct TranslationConfig {
     /// full `.../v1/chat/completions` URL.
     pub base_url: String,
     pub model: String,
-    /// Key for the relay, written straight into this file. Prefer this over the env
-    /// indirection below; a set environment variable still wins.
+    /// Key for the relay, written straight into this file.
     pub api_key: String,
-    /// Alternative: read the key from this environment variable instead of the file.
-    pub api_key_env: String,
     /// Extra headers for the relay (for example `X-Title`, or `api-key` for Azure-style
     /// gateways). An `Authorization` entry replaces the default bearer header.
     pub extra_headers: BTreeMap<String, String>,
@@ -235,7 +230,6 @@ impl Default for TranslationConfig {
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-5-mini".into(),
             api_key: String::new(),
-            api_key_env: "OPENAI_API_KEY".into(),
             extra_headers: BTreeMap::new(),
             extra_body: BTreeMap::new(),
             batch_size: 20,
@@ -254,9 +248,8 @@ pub struct AiConfig {
     /// `.../v1/chat/completions` URL are both accepted.
     pub base_url: String,
     pub model: String,
-    /// Key for the relay, written straight into this file; the environment variable wins when set.
+    /// Key for the relay, written straight into this file.
     pub api_key: String,
-    pub api_key_env: String,
     /// Extra headers for the relay; an `Authorization` entry replaces the bearer header.
     pub extra_headers: BTreeMap<String, String>,
     /// Free-form JSON merged into every request body: reasoning effort, thinking budget and
@@ -283,7 +276,6 @@ impl Default for AiConfig {
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-5-mini".into(),
             api_key: String::new(),
-            api_key_env: "OPENAI_API_KEY".into(),
             extra_headers: BTreeMap::new(),
             extra_body: BTreeMap::new(),
             max_tokens_param: default_max_tokens_param(),
@@ -295,31 +287,24 @@ impl Default for AiConfig {
 
 impl TranslationConfig {
     pub fn api_key(&self) -> Result<String, AppError> {
-        resolve_secret(&self.api_key, &self.api_key_env, "translation")
+        require_secret(&self.api_key, "translation.api_key")
     }
 }
 
 impl AiConfig {
     pub fn api_key(&self) -> Result<String, AppError> {
-        resolve_secret(&self.api_key, &self.api_key_env, "ai")
+        require_secret(&self.api_key, "ai.api_key")
     }
 }
 
-/// Resolves a credential: the value from the configuration file wins unless the named
-/// environment variable is set, so an emergency override never requires editing the file.
-pub fn resolve_secret(file_value: &str, env_name: &str, scope: &str) -> Result<String, AppError> {
-    if let Ok(from_env) = env::var(env_name) {
-        let trimmed = from_env.trim();
-        if !trimmed.is_empty() {
-            return Ok(trimmed.to_owned());
-        }
-    }
-    let from_file = file_value.trim();
-    if !from_file.is_empty() {
-        return Ok(from_file.to_owned());
+/// Rejects an empty credential with the exact config key that has to be filled.
+pub fn require_secret(value: &str, what: &str) -> Result<String, AppError> {
+    let trimmed = value.trim();
+    if !trimmed.is_empty() {
+        return Ok(trimmed.to_owned());
     }
     Err(AppError::Config(format!(
-        "{scope} is enabled but has no key: set `{scope}.api_key` in the config file or {env_name}"
+        "{what} is empty: set it in the config file"
     )))
 }
 
@@ -328,12 +313,10 @@ pub fn resolve_secret(file_value: &str, env_name: &str, scope: &str) -> Result<S
 pub struct TelegramConfig {
     pub enabled: bool,
     pub api_base: String,
-    /// Bot token written straight into this file; the env variable wins when set.
+    /// Bot token written straight into this file.
     pub bot_token: String,
-    pub bot_token_env: String,
-    /// Comma-separated admin chat ids; the env variable wins when the file leaves it empty.
+    /// Comma-separated admin chat ids.
     pub admin_chat_ids: String,
-    pub admin_chat_ids_env: String,
     pub poll_timeout_seconds: u64,
 }
 
@@ -343,36 +326,22 @@ impl Default for TelegramConfig {
             enabled: false,
             api_base: "https://api.telegram.org".into(),
             bot_token: String::new(),
-            bot_token_env: "TELEGRAM_BOT_TOKEN".into(),
             admin_chat_ids: String::new(),
-            admin_chat_ids_env: "TELEGRAM_ADMIN_CHAT_IDS".into(),
             poll_timeout_seconds: 30,
         }
     }
 }
 
 impl TelegramConfig {
-    /// The bot token from this file, or the environment variable when that is set.
     pub fn bot_token(&self) -> Option<String> {
-        if let Ok(from_env) = env::var(&self.bot_token_env) {
-            let trimmed = from_env.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_owned());
-            }
-        }
-        let from_file = self.bot_token.trim();
-        (!from_file.is_empty()).then(|| from_file.to_owned())
+        let value = self.bot_token.trim();
+        (!value.is_empty()).then(|| value.to_owned())
     }
 
-    /// Only these chats may read status or decide translation corrections. The config file wins
-    /// over the environment: one list, visible next to the rest of the deployment.
+    /// Only these chats may read status or decide translation corrections.
     pub fn admin_chat_ids(&self) -> Vec<i64> {
-        let raw = if self.admin_chat_ids.trim().is_empty() {
-            env::var(&self.admin_chat_ids_env).unwrap_or_default()
-        } else {
-            self.admin_chat_ids.clone()
-        };
-        raw.split(',')
+        self.admin_chat_ids
+            .split(',')
             .filter_map(|value| value.trim().parse::<i64>().ok())
             .collect()
     }
@@ -433,8 +402,7 @@ impl Default for LimitConfig {
 pub struct BackfillConfig {
     pub calendar_api_base_url: String,
     pub request_delay_ms: u64,
-    /// Trading Economics credential for the `--backfill` CLI; the `TE_API_KEY` environment
-    /// variable wins when set.
+    /// Trading Economics credential for the `--backfill` CLI, written straight into this file.
     pub te_api_key: String,
 }
 
@@ -452,10 +420,17 @@ impl AppConfig {
     /// Loads the configuration from `APP_CONFIG` when set, otherwise from a `config.toml` next
     /// to the executable, falling back to the working directory for `cargo run`.
     pub fn load() -> Result<Self, AppError> {
-        Self::from_path(Self::resolve_path()?)
+        let path = Self::resolve_path()?;
+        if !path.is_file() {
+            return Err(AppError::Config(format!(
+                "没有读到配置文件 {}；请先复制模板：cp config.example.toml config.toml（或用 APP_CONFIG 指定路径）",
+                path.display()
+            )));
+        }
+        Self::from_path(path)
     }
 
-    /// The configuration file that was loaded, so logs and the startup notice can name it.
+    /// The configuration file that will be loaded, so logs and the startup notice can name it.
     pub fn resolve_path() -> Result<std::path::PathBuf, AppError> {
         if let Ok(explicit) = env::var("APP_CONFIG")
             && !explicit.trim().is_empty()
@@ -582,34 +557,10 @@ market_collect_after_minutes = 60
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// The environment variable stays a working override for operators who prefer it.
     #[test]
-    fn environment_still_overrides_the_file() {
-        // Safety: single-threaded test touching one variable.
-        let config = AiConfig {
-            enabled: true,
-            api_key: "from-file".into(),
-            ..AiConfig::default()
-        };
-        assert_eq!(config.api_key().unwrap(), "from-file");
-
-        let name = "MACRO_TEST_OVERRIDE_KEY";
-        unsafe { std::env::set_var(name, "from-env") };
-        let config = AiConfig {
-            enabled: true,
-            api_key: "from-file".into(),
-            api_key_env: name.into(),
-            ..AiConfig::default()
-        };
-        assert_eq!(config.api_key().unwrap(), "from-env");
-        unsafe { std::env::remove_var(name) };
-    }
-
-    #[test]
-    fn a_missing_credential_names_both_places() {
+    fn a_missing_credential_names_the_config_key() {
         let config = TranslationConfig::default();
         let error = config.api_key().unwrap_err().to_string();
         assert!(error.contains("translation.api_key"), "{error}");
-        assert!(error.contains("OPENAI_API_KEY"), "{error}");
     }
 }

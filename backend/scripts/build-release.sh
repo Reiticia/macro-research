@@ -163,7 +163,7 @@ archive="${OUT_DIR}/${PKG_NAME}-${VERSION}-${TARGET}.tar.gz"
 rm -rf "${pkg_dir}" "${archive}" "${archive}.sha256"
 mkdir -p "${pkg_dir}"
 install -m 0755 "${BIN_PATH}"                "${pkg_dir}/${BIN_NAME}"
-install -m 0644 "${BACKEND_DIR}/config.toml" "${pkg_dir}/config.toml"
+install -m 0644 "${BACKEND_DIR}/config.example.toml" "${pkg_dir}/config.toml"   # 真实配置不入库，产物里放模板
 install -m 0644 "${BACKEND_DIR}/rules.toml"  "${pkg_dir}/rules.toml"
 
 cat > "${pkg_dir}/README.txt" <<EOF

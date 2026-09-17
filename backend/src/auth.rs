@@ -1,4 +1,4 @@
-use std::{env, sync::Arc};
+use std::sync::Arc;
 
 use axum::{
     Json,
@@ -28,8 +28,7 @@ pub struct TokenStore {
 }
 
 impl TokenStore {
-    /// Reads `name:token,name:token` from the config file, or from the configured environment
-    /// variable when that is set — the override keeps older deployments working unchanged.
+    /// Reads `name:token,name:token` from the configuration file.
     pub fn from_config(config: &AuthConfig) -> Result<Self, AppError> {
         if !config.enabled {
             return Ok(Self {
@@ -37,13 +36,8 @@ impl TokenStore {
                 entries: Vec::new(),
             });
         }
-        let mut raw = config.tokens.clone();
-        if let Ok(from_env) = env::var(&config.tokens_env)
-            && !from_env.trim().is_empty()
-        {
-            raw = from_env;
-        }
-        let entries: Vec<(String, String)> = raw
+        let entries: Vec<(String, String)> = config
+            .tokens
             .split(',')
             .filter_map(|entry| {
                 let (name, token) = entry.trim().split_once(':')?;
@@ -53,10 +47,9 @@ impl TokenStore {
             })
             .collect();
         if entries.is_empty() {
-            return Err(AppError::Config(format!(
-                "auth is enabled but has no tokens: set `auth.tokens` in the config file or {}",
-                config.tokens_env
-            )));
+            return Err(AppError::Config(
+                "auth is enabled but has no tokens: set `auth.tokens` in the config file".into(),
+            ));
         }
         Ok(Self {
             enabled: true,

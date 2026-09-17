@@ -68,12 +68,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let history_key = if history_range.is_some() {
         Some(
-            config::resolve_secret(
-                &config.backfill.te_api_key,
-                "TE_API_KEY",
-                "historical import",
-            )
-            .map_err(|error| error.to_string())?,
+            config::require_secret(&config.backfill.te_api_key, "backfill.te_api_key")
+                .map_err(|error| error.to_string())?,
         )
     } else {
         None
@@ -312,7 +308,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 TokenStore::from_config(&crate::config::AuthConfig {
                     enabled: false,
                     tokens: config.auth.tokens.clone(),
-                    tokens_env: config.auth.tokens_env.clone(),
                 })
                 .expect("a disabled auth store always resolves"),
             )
@@ -537,7 +532,7 @@ async fn check_ai_relays(
     }
 
     println!("\nbase_url 可填 https://relay/v1 或完整的 .../v1/chat/completions");
-    println!("两个模块可以用不同的中转站与不同的 Key (api_key_env)。");
+    println!("两个模块可以用不同的中转站与不同的 Key（都写在配置文件的 api_key 里）。");
     Ok(())
 }
 

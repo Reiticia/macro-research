@@ -11,7 +11,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /build/target/release/market-event-analyzer /app/market-event-analyzer
-COPY config.toml rules.toml /app/
+COPY rules.toml /app/
+# 真实配置不入库：镜像里带模板，运行时用 -v 挂载填好密钥的 config.toml。
+COPY config.example.toml /app/config.toml
 RUN mkdir -p /app/data
 EXPOSE 8080
 ENTRYPOINT ["/app/market-event-analyzer"]

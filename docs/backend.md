@@ -21,22 +21,25 @@ Android (direct | backend)
      出网代理 / 直连
 ```
 
-## 启动：一个配置文件，一个环境变量
+## 启动：一个配置文件，零必需环境变量
 
 需要 Rust 1.85+（edition 2024）：
 
 ```bash
 cd backend
+cp config.example.toml config.toml   # 真实配置不入库，密钥写在这份里
 cargo run
 ```
 
-配置全部在 **一个 TOML 文件** 里，包括令牌、中转站密钥和 Telegram 凭据。查找顺序：
+配置全部在 **一个 TOML 文件** 里，包括令牌、中转站密钥与 Telegram 凭据。`config.toml` 已进
+`.gitignore`（仓库只跟踪模板 `config.example.toml`）。查找顺序：
 
-1. `APP_CONFIG` 环境变量指向的文件（唯一需要记的环境变量，通常不用设）；
-2. 可执行文件同目录的 `config.toml`（systemd 部署就是 `/opt/market-analyzer/config.toml`）；
+1. `APP_CONFIG` 环境变量指向的文件（唯一可选的环境变量，通常不用设）；
+2. 可执行文件同目录的 `config.toml`（systemd 部署即 `/opt/market-analyzer/config.toml`）；
 3. 当前工作目录的 `config.toml`（`cargo run` 的开发场景）。
 
-首次启动创建 `data/market.db` 并执行迁移；日志里会打印实际加载的配置路径。对外只需在
+找不到时不会静默使用默认值，而是报 `没有读到配置文件 …，请先 cp config.example.toml config.toml`。
+首次启动创建 `data/market.db` 并执行迁移；日志首行打印实际加载的配置路径。对外只需在
 `[server]` 里填一对证书路径即可直出 HTTPS，见下文 [TLS](#tls后端直出不需要反向代理)。
 
 部署相关的键（其余默认值见 `config.toml` 注释）：
@@ -67,10 +70,12 @@ te_api_key = ""                      # 仅 --backfill 需要
 
 规则：
 
-- **环境变量仍然优先**（`API_TOKENS` / `OPENAI_API_KEY` / `AI_API_KEY` / `TELEGRAM_BOT_TOKEN` /
-  `TELEGRAM_ADMIN_CHAT_IDS` / `TE_API_KEY`），老部署无需改动，也适合临时覆盖；
-- 配置文件里没有对应密钥时，启用中的子系统会拒绝启动并指出缺哪个键；
-- 文件里是明文密钥，部署脚本会把它设为 `0640 root:market`，请勿提交到仓库。
+- **凭据只从配置文件读**，不再有 `API_TOKENS` / `OPENAI_API_KEY` 这类环境变量；只剩
+  `APP_CONFIG`（路径）与 `RUST_LOG`（日志）两个普通变量，都不是凭据；
+- 缺某个密钥只关闭对应的子系统并打印缺哪个键，服务本身照常启动：
+  日历、行情、历史仍可用，只是没有翻译/AI/告警/鉴权；
+- 文件里是明文密钥：仓库只放模板，`config.toml` 被忽略；服务器上部署脚本会把它设为
+  `0640 root:market`。
 
 缺少令牌/密钥时的行为：`[auth]` 自动关闭并在日志与部署脚本中告警；Telegram 未配置时告警
 只写日志；翻译与 AI 未配置密钥则拒绝启动该子系统（服务本身仍能起来）。
@@ -93,7 +98,7 @@ request_timeout_seconds = 20
 
 ## 鉴权与配额
 
-- `[auth] enabled = true`，令牌来自 `API_TOKENS`（`name:token,name:token`），
+- `[auth] enabled = true`，令牌来自配置文件的 `auth.tokens`（`name:token,name:token`），
   常量时间比较；`GET /health` 与 `GET /api/v1/meta` 免鉴权，其余全部要求
   `Authorization: Bearer <token>`。
 - 令牌是配额与审计身份：`POST /events/{id}/ai-analysis` 按令牌每日计数
@@ -118,28 +123,23 @@ request_timeout_seconds = 20
    -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
    ```
 
-2. 以 `名字:令牌` 写进部署时的 `API_TOKENS`，或直接改服务器上的配置文件：
-
-   ```bash
-   sudo API_TOKENS="pixel:9f2c…,emulator:5a1d…" \
-        ./deploy.sh deploy --tls-cert … --tls-key … --proxy …
-   ```
-
-   已部署过的机器直接改配置文件后重启（脚本升级时会保留已填的值）：
+2. 以 `名字:令牌` 写进服务器上的配置文件（一台设备一个名字，审计时才能分清是谁用的）：
 
    ```bash
    sudo nano /opt/market-analyzer/config.toml   # [auth] tokens = "pixel:…,emulator:…"
    sudo systemctl restart market-event-analyzer
    ```
 
+   升级时 deploy.sh 会保留已填的密钥，不会被仓库里的模板覆盖。
+
 3. 把令牌填进 App（设置 → 数据来源 → 后端 → 访问令牌）。
 
-- **吊销**：从 `API_TOKENS` 里删掉对应条目并重启服务即可，旧 App 立即收到 401。
+- **吊销**：从 `auth.tokens` 里删掉对应条目并重启服务即可，旧 App 立即收到 401。
 - **审计**：`/api/v1/usage` 与 Telegram `/usage` 按令牌名字区分消耗，所以建议按设备命名。
 - **本机调试**不想发令牌：`config.toml` 里 `[auth] enabled = false`，接口完全公开，
   仅限回环或内网使用。
-- 注意：`[auth] enabled = true` 而 `API_TOKENS` 为空时，服务端拒绝启动（部署脚本会
-  自动改写为关闭鉴权并告警）。
+- 注意：`auth.enabled = true` 而 `auth.tokens` 为空时，服务会告警并自动关闭鉴权（不会
+  默默公开接口而无人知晓）；部署脚本也会明确提示。
 
 ## API
 
@@ -209,7 +209,7 @@ WebSocket 消息：
 [translation]
 base_url = "https://relay-a.example.com/v1"
 model = "deepseek-flash"
-api_key = "sk-relay-a-..."          # 中转站密钥直接写文件；也可用 api_key_env 走环境变量
+api_key = "sk-relay-a-..."          # 中转站密钥就写在配置文件里
 
 [ai]
 base_url = "https://api.openai.com/v1"
@@ -217,8 +217,8 @@ model = "gpt-5-mini"
 api_key = "sk-openai-..."           # 分析用另一个厂商/模型
 ```
 
-环境变量 `OPENAI_API_KEY` / `AI_API_KEY`（由 `api_key_env` 指定变量名）仍然可用，且**优先于**
-配置文件里的值 —— 老部署无需改动。
+凭据只从配置文件读（已没有 `OPENAI_API_KEY` 之类的环境变量）。缺哪个键，启动日志会直接指出，
+并且只关闭对应的子系统，不影响其余功能。
 
 ### base_url 怎么写
 
@@ -280,7 +280,7 @@ cargo run -- --check-ai            # 开发机上，读当前目录 config.toml
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| `HTTP 401: invalid api key` | Key 与 base_url 不匹配（常见：拿 A 站的 key 填了 B 站地址），或环境变量没进 `ENV_FILE` |
+| `HTTP 401: invalid api key` | Key 与 base_url 不匹配（常见：拿 A 站的 key 填了 B 站地址），或 `[translation]/[ai] api_key` 忘了填 |
 | `HTTP 404: model not found` | 模型名要写中转站的写法（常带日期后缀或厂商前缀） |
 | `HTTP 400 ... response_format` | 已自动降级：第一次被拒后后续批次不再发送 `response_format` |
 | `HTTP 429` | 中转站限流；事件名翻译会自动重试，AI 简报会返回错误并让客户端稍后再点 |
@@ -381,8 +381,8 @@ reasoning 混排、schema 回显、截断、`snake_case`、`verdict` 归一化�
 4. 采纳 → 写入 `event_name_translation` 并回写所有同名事件，所有设备下次刷新即生效；
    屏蔽 → 写入 `translation_correction_mute`，该词条不再接受勘正、不再通知。
 
-机器人命令：`/status`（数据源健康）、`/pending`（待审勘正）、`/help`。仅
-`TELEGRAM_ADMIN_CHAT_IDS` 白名单内的 chat 会被响应。
+机器人命令：`/status`（数据源健康）、`/pending`（待审译名勘正）、`/usage`（近 24 小时模型用量）。
+仅配置文件里 `telegram.admin_chat_ids` 白名单中的 chat 会被响应。
 
 ## 告警
 
@@ -428,7 +428,7 @@ quiet_hours_timezone = "Asia/Shanghai"
 补采是**管理员 CLI 命令**，需要具有历史日历权限的 Trading Economics 凭据，默认不执行：
 
 ```bash
-sudo TE_API_KEY=xxx ./deploy.sh backfill
+sudo ./deploy.sh backfill            # 需先在配置文件里填 [backfill] te_api_key
 # 或指定 UTC 日期区间（最多 93 天）
 cargo run -- --backfill 2026-06-08 2026-09-07
 ```
@@ -463,8 +463,7 @@ tls_key  = "/etc/market-analyzer/tls/privkey.pem"
 两项同时填写即启用，任一为空（或都为空）则退回明文 HTTP。部署脚本直接接受证书：
 
 ```bash
-sudo API_TOKENS="alice:$(openssl rand -hex 24)" \
-     ./deploy.sh deploy --tls-cert /tmp/fullchain.pem --tls-key /tmp/privkey.pem
+sudo ./deploy.sh deploy --tls-cert /tmp/fullchain.pem --tls-key /tmp/privkey.pem
 ```
 
 它会以 `0640 root:market` 安装到 `/etc/market-analyzer/tls/`，把 `--host` 默认改为 `0.0.0.0`，
@@ -515,18 +514,19 @@ location / {
 
 ```bash
 cd backend/deploy
-sudo API_TOKENS="alice:$(openssl rand -hex 24)" \
-     TELEGRAM_BOT_TOKEN="123456:ABC..." \
-     TELEGRAM_ADMIN_CHAT_IDS="123456789" \
-     OPENAI_API_KEY="sk-xxx" \
-     ./deploy.sh deploy --proxy http://127.0.0.1:7890 \
+sudo ./deploy.sh deploy --proxy http://127.0.0.1:7890 \
                         --tls-cert /tmp/fullchain.pem --tls-key /tmp/privkey.pem
+# 然后填密钥并重启：
+sudo nano /opt/market-analyzer/config.toml   # auth.tokens / translation.api_key / ai.api_key / telegram.*
+sudo systemctl restart market-event-analyzer
+sudo ./deploy.sh check-ai                    # 验证中转站连通
 ```
 
-`deploy.sh` 负责构建、安装、升级、备份、健康检查与卸载；密钥全部写进
-`/opt/market-analyzer/config.toml`（`0640 root:market`），升级时会保留已配置的值，不会被空
-参数覆盖。也可以完全不用命令行参数：部署后直接编辑该配置文件再重启。常用子命令：
-`status`、`logs`、`check-ai`、`backfill [START END]`、`uninstall [--purge]`。
+`deploy.sh` 负责构建、安装、升级、备份、健康检查与卸载；它把仓库里的 `config.toml`（或
+模板 `config.example.toml`）装到 `/opt/market-analyzer/config.toml`（`0640 root:market`），
+**升级时保留已填的密钥**。凭据一律写在配置文件里，不再使用环境变量。常用子命令：
+`status`（含各密钥是否已配置，值不回显）、`logs`、`check-ai`、`backfill [START END]`、
+`uninstall [--purge]`。
 
 ### Docker
 

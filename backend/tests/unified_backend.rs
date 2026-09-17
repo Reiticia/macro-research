@@ -1,4 +1,4 @@
-use std::sync::{Arc, Once};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::{
@@ -28,8 +28,6 @@ use serde_json::json;
 use sqlx::sqlite::SqlitePoolOptions;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
-
-const TEST_TOKENS_ENV: &str = "API_TOKENS_UNIFIED_BACKEND_TEST";
 
 struct StubCalendar(Vec<EconomicEvent>);
 
@@ -116,13 +114,11 @@ struct TestApp {
 }
 
 async fn app() -> TestApp {
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        // Safe in tests: the variable is written once, before any reader runs.
-        unsafe { std::env::set_var(TEST_TOKENS_ENV, "alice:secret-token") };
-    });
-    let mut config = AppConfig::from_path("config.toml").expect("config.toml is present");
-    config.auth.tokens_env = TEST_TOKENS_ENV.into();
+    // The tracked template is the test fixture; the developer's own config.toml stays private.
+    let mut config =
+        AppConfig::from_path("config.example.toml").expect("config.example.toml is present");
+    config.auth.enabled = true;
+    config.auth.tokens = "alice:secret-token".into();
     config.ai.enabled = false;
     config.translation.enabled = false;
     config.telegram.enabled = false;

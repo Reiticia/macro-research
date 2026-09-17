@@ -61,9 +61,12 @@ cd android
 
 ```bash
 cd backend
+cp config.example.toml config.toml   # 真实配置不入库，令牌与中转站密钥写在这份里
 cargo test
 cargo run
 ```
+
+全部配置（含密钥）都在那一个文件里，不再需要环境变量；`APP_CONFIG` 只是可选地指向其他路径。
 
 详见 [Android 客户端说明](android/README.md)、[客户端架构](docs/client_architecture.md) 与
 [后端说明](docs/backend.md)。

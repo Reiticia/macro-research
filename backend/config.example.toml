@@ -1,6 +1,12 @@
+# Macro Research 后端配置模板。
+#
+# 用法：复制成 config.toml 再填密钥（config.toml 被 .gitignore 忽略，不会被提交）：
+#   cp config.example.toml config.toml
+# 部署后 systemd 读取的是安装目录里的 config.toml（与可执行文件同目录）。
+
 [server]
-host = "0.0.0.0"
-port = 5090
+host = "127.0.0.1"
+port = 8080
 # 日志过滤级别；环境变量 RUST_LOG 仍然优先。留空用默认 info。
 # 例：market_event_analyzer=debug,tower_http=info
 log_level = ""
@@ -13,13 +19,11 @@ tls_key = ""
 [database]
 url = "sqlite://data/market.db"
 
-# Which upstreams must be tunnelled. Leave proxy_url empty when the host can reach the
-# calendar, rate and Telegram endpoints directly.
+# 哪些上游必须走代理。主机本身能直连日历、行情与 Telegram 时留空即可。
 [network]
 proxy_url = ""
 proxied = ["tradingview", "forexfactory", "cnbc", "yahoo", "telegram"]
-# A relay that is itself blocked on this network can be tunnelled too: add "translation"
-# and/or "ai" here. Both stay direct by default.
+# 中转站本身也被墙时，把 "translation" / "ai" 也加进来（默认直连）。
 request_timeout_seconds = 20
 
 [calendar]
@@ -45,20 +49,17 @@ cnbc_quote_url = "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolT
 cnbc_chart_url = "https://ts-api.cnbc.com/harmony/app/charts"
 live_quote_cache_seconds = 30
 live_quote_stale_seconds = 300
-# Must stay within the set the Android client can display.
+# 必须落在 Android 客户端可展示的符号集合内。
 symbols = ["nasdaq100", "dxy", "gold", "us10y", "bitcoin"]
 
-# Tokens live in the API_TOKENS environment variable as "name:token,name:token".
+# 客户端访问令牌。启用鉴权却没有任何令牌时，部署脚本会把它写成 false 并告警。
 [auth]
 enabled = true
-# 客户端访问令牌，多台设备用逗号分隔（建议按设备命名，便于审计区分）：
+# 多台设备用逗号分隔，建议按设备命名，便于审计区分：
 # tokens = "pixel:9f2c…,emulator:5a1d…"
 tokens = ""
-# 也可以改从环境变量读取（变量有值时优先于本文件）：
-tokens_env = "API_TOKENS"
 
-# Only the endpoints a client can trigger need a budget. Translation runs inside the sync
-# loop, so it is not exposed here.
+# 只有客户端能触发的接口需要预算；翻译在同步循环内部运行，不在此暴露。
 [limits]
 ai_analysis_per_token_per_day = 60
 # 同一 (事件, 方法) 两次生成之间的最小间隔；窗口内的重试直接返回上一次结果。
@@ -67,32 +68,27 @@ ai_concurrency = 2
 # 模型调用审计记录保留天数（0 = 关闭审计）。
 llm_usage_retention_days = 180
 
-# Event-name translation. Any OpenAI-compatible endpoint works: the official API, or a relay
-# station. base_url may be written as https://relay.example.com/v1 (recommended) or as the full
-# .../v1/chat/completions URL. The key is read from the named environment variable and is never
-# stored in this file or the database.
+# 事件名翻译。任何兼容 /chat/completions 的端点都能用：官方 API 或中转站。
+# base_url 可写 https://relay.example.com/v1（推荐）或完整的 .../v1/chat/completions。
 [translation]
-enabled = true
-base_url = "https://tokenrhythm.studio/v1"
+enabled = false
+base_url = "https://relay.example.com/v1"
 model = "deepseek-flash"
-# 中转站密钥直接写在这里；环境变量 OPENAI_API_KEY 有值时优先。
 api_key = ""
-api_key_env = "OPENAI_API_KEY"
 batch_size = 20
 backfill_on_startup = true
-# 翻译批次同样可以带思考等级等参数（一般不需要）。
+# 一般不需要，但翻译批次同样可以带思考/采样参数：
 # extra_body = { temperature = 0.2 }
-# Optional relay headers: OpenRouter-style gateways want X-Title / HTTP-Referer, Azure-style
-# ones authenticate with api-key. An "Authorization" entry replaces the default Bearer header.
+# OpenRouter 类要 X-Title / HTTP-Referer，Azure 类用 api-key 鉴权；
+# 写 Authorization 会替掉默认的 Bearer 头。
 # extra_headers = { "X-Title" = "macro-research" }
 
-# Server-side AI market briefing. It may use a different relay, model and key than translation.
+# 服务端 AI 市场简报。可以与翻译用不同的中转站、模型与密钥。
 [ai]
-enabled = true
-base_url = "https://tokenrhythm.studio/v1"
+enabled = false
+base_url = "https://relay.example.com/v1"
 model = "deepseek-flash"
 api_key = ""
-api_key_env = "AI_API_KEY"
 default_method = 2
 max_tokens = 4096
 # 推理模型的输出 token 参数名：gpt-5 / o 系列要写 max_completion_tokens。
@@ -104,15 +100,13 @@ max_tokens = 4096
 # extra_body = { thinking = { type = "enabled", budget_tokens = 2048 } }
 # extra_headers = { "api-key" = "azure-style-key" }
 
-# Admin alerts and the translation-correction review console.
+# 管理员告警与译名勘正审核控制台。缺凭据时服务照常运行，告警只写日志。
 [telegram]
-enabled = true
+enabled = false
 api_base = "https://api.telegram.org"
-# 机器人令牌与管理员 chat id 直接写在这里（环境变量有值时优先）。
 bot_token = ""
-bot_token_env = "TELEGRAM_BOT_TOKEN"
+# 逗号分隔的管理员 chat id；只有这些 chat 会收到消息并可做审核。
 admin_chat_ids = ""
-admin_chat_ids_env = "TELEGRAM_ADMIN_CHAT_IDS"
 poll_timeout_seconds = 30
 
 [alerts]
@@ -121,12 +115,12 @@ cooldown_seconds = 3600
 data_missing_after_minutes = 30
 data_missing_cooldown_seconds = 21600
 digest_max_events = 10
+# 例 "23:00-07:00"；静默时段只抑制非 critical 告警（启动通知不受抑制）。
 quiet_hours = ""
 quiet_hours_timezone = "Asia/Shanghai"
 
-# Only used by the explicit --backfill command. Set TE_API_KEY in the environment.
+# 仅显式的 --backfill 命令需要。
 [backfill]
 calendar_api_base_url = "https://api.tradingeconomics.com"
 request_delay_ms = 1000
-# 仅 --backfill 需要；环境变量 TE_API_KEY 有值时优先。
 te_api_key = ""
