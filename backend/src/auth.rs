@@ -28,7 +28,8 @@ pub struct TokenStore {
 }
 
 impl TokenStore {
-    /// Reads `name:token,name:token` from the configured environment variable.
+    /// Reads `name:token,name:token` from the config file, or from the configured environment
+    /// variable when that is set — the override keeps older deployments working unchanged.
     pub fn from_config(config: &AuthConfig) -> Result<Self, AppError> {
         if !config.enabled {
             return Ok(Self {
@@ -36,7 +37,12 @@ impl TokenStore {
                 entries: Vec::new(),
             });
         }
-        let raw = env::var(&config.tokens_env).unwrap_or_default();
+        let mut raw = config.tokens.clone();
+        if let Ok(from_env) = env::var(&config.tokens_env)
+            && !from_env.trim().is_empty()
+        {
+            raw = from_env;
+        }
         let entries: Vec<(String, String)> = raw
             .split(',')
             .filter_map(|entry| {
@@ -48,7 +54,7 @@ impl TokenStore {
             .collect();
         if entries.is_empty() {
             return Err(AppError::Config(format!(
-                "auth is enabled but {} does not contain any name:token entries",
+                "auth is enabled but has no tokens: set `auth.tokens` in the config file or {}",
                 config.tokens_env
             )));
         }

@@ -1,6 +1,9 @@
 [server]
-host = "127.0.0.1"
-port = 8080
+host = "0.0.0.0"
+port = 5090
+# 日志过滤级别；环境变量 RUST_LOG 仍然优先。留空用默认 info。
+# 例：market_event_analyzer=debug,tower_http=info
+log_level = ""
 # 直出 HTTPS：两项同时填写即由后端自己终结 TLS，无需 Caddy/Nginx。
 # 证书也可以是 Cloudflare Origin Certificate（长期有效，不用续期）。
 # 留空则监听明文 HTTP，仅适合内网或已经被隧道加密的场景。
@@ -48,6 +51,10 @@ symbols = ["nasdaq100", "dxy", "gold", "us10y", "bitcoin"]
 # Tokens live in the API_TOKENS environment variable as "name:token,name:token".
 [auth]
 enabled = true
+# 客户端访问令牌，多台设备用逗号分隔（建议按设备命名，便于审计区分）：
+# tokens = "pixel:9f2c…,emulator:5a1d…"
+tokens = ""
+# 也可以改从环境变量读取（变量有值时优先于本文件）：
 tokens_env = "API_TOKENS"
 
 # Only the endpoints a client can trigger need a budget. Translation runs inside the sync
@@ -67,23 +74,24 @@ llm_usage_retention_days = 180
 [translation]
 enabled = true
 base_url = "https://tokenrhythm.studio/v1"
-model = "deepseek-v4-flash-0731"
+model = "deepseek-flash"
+# 中转站密钥直接写在这里；环境变量 OPENAI_API_KEY 有值时优先。
+api_key = ""
 api_key_env = "OPENAI_API_KEY"
 batch_size = 20
 backfill_on_startup = true
 # 翻译批次同样可以带思考等级等参数（一般不需要）。
 # extra_body = { temperature = 0.2 }
-# extra_headers = { "X-Title" = "macro-research" }
 # Optional relay headers: OpenRouter-style gateways want X-Title / HTTP-Referer, Azure-style
 # ones authenticate with api-key. An "Authorization" entry replaces the default Bearer header.
 # extra_headers = { "X-Title" = "macro-research" }
 
-# Server-side AI market briefing. It may use a different relay, model and key than translation:
-# point api_key_env at another variable and set a second key in the env file.
+# Server-side AI market briefing. It may use a different relay, model and key than translation.
 [ai]
 enabled = true
 base_url = "https://tokenrhythm.studio/v1"
-model = "deepseek-v4-flash-0731"
+model = "deepseek-flash"
+api_key = ""
 api_key_env = "AI_API_KEY"
 default_method = 2
 max_tokens = 4096
@@ -100,7 +108,10 @@ max_tokens = 4096
 [telegram]
 enabled = true
 api_base = "https://api.telegram.org"
+# 机器人令牌与管理员 chat id 直接写在这里（环境变量有值时优先）。
+bot_token = ""
 bot_token_env = "TELEGRAM_BOT_TOKEN"
+admin_chat_ids = ""
 admin_chat_ids_env = "TELEGRAM_ADMIN_CHAT_IDS"
 poll_timeout_seconds = 30
 
@@ -117,3 +128,5 @@ quiet_hours_timezone = "Asia/Shanghai"
 [backfill]
 calendar_api_base_url = "https://api.tradingeconomics.com"
 request_delay_ms = 1000
+# 仅 --backfill 需要；环境变量 TE_API_KEY 有值时优先。
+te_api_key = ""

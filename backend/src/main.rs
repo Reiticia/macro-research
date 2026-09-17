@@ -39,14 +39,24 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("market_event_analyzer=info,tower_http=info")),
-        )
-        .init();
-
+    // The config decides the log filter too, so it must be loaded before tracing is installed.
+    // RUST_LOG still wins when the operator sets it.
     let config = AppConfig::load()?;
+    let config_path = AppConfig::resolve_path()?;
+    let config_dir = config.dir(&config_path);
+    let log_filter = std::env::var("RUST_LOG")
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            let from_config = config.server.log_level.trim();
+            (!from_config.is_empty()).then(|| from_config.to_owned())
+        })
+        .unwrap_or_else(|| "market_event_analyzer=info,tower_http=info".to_owned());
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new(log_filter))
+        .init();
+    tracing::info!("configuration: {}", config_path.display());
     let args: Vec<String> = std::env::args().skip(1).collect();
     // `--check-ai` is a diagnostic that does not touch the database, so it is intercepted
     // before the backfill range parser (which would reject the flag).
@@ -58,10 +68,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let history_key = if history_range.is_some() {
         Some(
-            std::env::var("TE_API_KEY")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-                .ok_or("Historical import requires TE_API_KEY with calendar history access. The public calendar page is not a historical data source.")?,
+            config::resolve_secret(
+                &config.backfill.te_api_key,
+                "TE_API_KEY",
+                "historical import",
+            )
+            .map_err(|error| error.to_string())?,
         )
     } else {
         None
@@ -159,33 +171,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
+    // 一个缺失的密钥只关闭它所属的子系统：日历、行情与告警仍然照常工作，这是文档承诺的
+    // 降级行为；启动横幅会说明哪个子系统被关了。
     let translation_service = if config.translation.enabled {
-        let api_key = std::env::var(&config.translation.api_key_env)
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| {
-                format!(
-                    "translation is enabled but {} is missing",
-                    config.translation.api_key_env
-                )
-            })?;
-        let translator = Arc::new(
-            OpenAiEventNameTranslator::with_options(
-                client_for("translation"),
-                &config.translation.base_url,
-                config.translation.model.clone(),
-                api_key,
-                market_event_analyzer::openai_compat::ExtraHeaders::from_map(
-                    &config.translation.extra_headers,
-                ),
-                config.translation.extra_body.clone(),
-            )?
-            .with_audit_opt(llm_usage.clone()),
-        );
-        Some(Arc::new(
-            TranslationService::new(events.clone(), translator, config.translation.batch_size)
-                .with_health(health.clone()),
-        ))
+        match config.translation.api_key() {
+            Ok(api_key) => {
+                let translator = Arc::new(
+                    OpenAiEventNameTranslator::with_options(
+                        client_for("translation"),
+                        &config.translation.base_url,
+                        config.translation.model.clone(),
+                        api_key,
+                        market_event_analyzer::openai_compat::ExtraHeaders::from_map(
+                            &config.translation.extra_headers,
+                        ),
+                        config.translation.extra_body.clone(),
+                    )?
+                    .with_audit_opt(llm_usage.clone()),
+                );
+                Some(Arc::new(
+                    TranslationService::new(
+                        events.clone(),
+                        translator,
+                        config.translation.batch_size,
+                    )
+                    .with_health(health.clone()),
+                ))
+            }
+            Err(error) => {
+                tracing::warn!(%error, "translation disabled");
+                None
+            }
+        }
     } else {
         None
     };
@@ -243,7 +260,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
     );
 
-    let rules = RuleEngine::from_path("rules.toml")?;
+    let rules = RuleEngine::from_path(
+        config_dir
+            .join("rules.toml")
+            .to_str()
+            .ok_or("rules.toml path is not valid UTF-8")?,
+    )?;
     let analysis_service = Arc::new(AnalysisService::new(
         events.clone(),
         market.clone(),
@@ -252,19 +274,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     let ai_analysis_service = if config.ai.enabled {
-        Some(Arc::new(
-            AiAnalysisService::new(
-                client_for("ai"),
-                config.ai.clone(),
-                pool.clone(),
-                events.clone(),
-                analyses.clone(),
-                market.clone(),
-            )?
-            .with_health(health.clone())
-            .with_regenerate_cooldown(config.limits.ai_regenerate_cooldown_seconds)
-            .with_audit_opt(llm_usage.clone()),
-        ))
+        match AiAnalysisService::new(
+            client_for("ai"),
+            config.ai.clone(),
+            pool.clone(),
+            events.clone(),
+            analyses.clone(),
+            market.clone(),
+        ) {
+            Ok(service) => Some(Arc::new(
+                service
+                    .with_health(health.clone())
+                    .with_regenerate_cooldown(config.limits.ai_regenerate_cooldown_seconds)
+                    .with_audit_opt(llm_usage.clone()),
+            )),
+            Err(error) => {
+                tracing::warn!(%error, "AI analysis disabled");
+                None
+            }
+        }
     } else {
         None
     };
@@ -275,7 +303,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(alerts.clone()),
     ));
     let quota = Arc::new(QuotaService::new(pool.clone(), config.limits.clone()));
-    let token_store = Arc::new(TokenStore::from_config(&config.auth)?);
+    let token_store = match TokenStore::from_config(&config.auth) {
+        Ok(store) => Arc::new(store),
+        Err(error) => {
+            // Missing tokens leave the API open, so say it loudly on every boot.
+            tracing::warn!(%error, "auth disabled; the API is public, set auth.tokens to lock it");
+            Arc::new(
+                TokenStore::from_config(&crate::config::AuthConfig {
+                    enabled: false,
+                    tokens: config.auth.tokens.clone(),
+                    tokens_env: config.auth.tokens_env.clone(),
+                })
+                .expect("a disabled auth store always resolves"),
+            )
+        }
+    };
     let auth = AuthState {
         store: token_store,
         quota: quota.clone(),
@@ -450,7 +492,7 @@ async fn check_ai_relays(
             "\n[翻译] base_url={} model={}",
             config.translation.base_url, config.translation.model
         );
-        match config::read_api_key(&config.translation.api_key_env, "translation") {
+        match config.translation.api_key() {
             Ok(api_key) => {
                 match OpenAiEventNameTranslator::with_headers(
                     client_for("translation"),

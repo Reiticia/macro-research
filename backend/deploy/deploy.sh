@@ -240,20 +240,42 @@ load_secrets() {
 }
 
 write_env_file() {
+    # Secrets live in config.toml now; the env file is kept only for a custom RUST_LOG.
     local tmp
     tmp="$(mktemp)"
     {
         printf 'RUST_LOG=%s\n' "${RUST_LOG}"
-        if [[ -n "${OPENAI_API_KEY:-}" ]]; then printf 'OPENAI_API_KEY=%s\n' "${OPENAI_API_KEY}"; fi
-        if [[ -n "${AI_API_KEY:-}" ]]; then printf 'AI_API_KEY=%s\n' "${AI_API_KEY}"; fi
-        if [[ -n "${TE_API_KEY:-}" ]]; then printf 'TE_API_KEY=%s\n' "${TE_API_KEY}"; fi
-        if [[ -n "${API_TOKENS:-}" ]]; then printf 'API_TOKENS=%s\n' "${API_TOKENS}"; fi
-        if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then printf 'TELEGRAM_BOT_TOKEN=%s\n' "${TELEGRAM_BOT_TOKEN}"; fi
-        if [[ -n "${TELEGRAM_ADMIN_CHAT_IDS:-}" ]]; then printf 'TELEGRAM_ADMIN_CHAT_IDS=%s\n' "${TELEGRAM_ADMIN_CHAT_IDS}"; fi
     } > "${tmp}"
     install -d -m 0750 -o root -g "${APP_GROUP}" "${CONF_DIR}"
     install -m 0640 -o root -g "${APP_GROUP}" "${tmp}" "${ENV_FILE}"
     rm -f "${tmp}"
+}
+
+# Reads one quoted value out of a TOML section, for preserving configured secrets across upgrades.
+toml_get() {
+    local file="$1" section="[$2]" key="$3"
+    [[ -f "${file}" ]] || return 0
+    awk -v section="${section}" -v key="${key}" '
+        { sub(/\r$/, "") }
+        $0 == section { in_section = 1; next }
+        /^\[/        { in_section = 0 }
+        in_section && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+            sub(/^[^=]*=/, "", $0)
+            gsub(/^[[:space:]]*"|"[[:space:]]*$/, "", $0)
+            print $0
+            exit
+        }
+    ' "${file}"
+}
+
+# Writes a secret only when a value exists: an empty CLI value must never wipe a configured one.
+set_toml_secret() {
+    local file="$1" section="$2" key="$3" previous="$4" next="$5"
+    local value="${previous}"
+    [[ -z "${value}" ]] && value="${next}"
+    if [[ -n "${value}" ]]; then
+        set_toml_value "${file}" "${section}" "${key}" "\"${value}\""
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -378,19 +400,29 @@ cmd_deploy() {
 
     load_secrets
 
-    # 翻译开关决策
+    # 既有配置里已经写好的密钥先读出来，升级时不能被空值覆盖。
+    local prev_config="${APP_DIR}/config.toml"
+    local prev_tokens prev_translation_key prev_ai_key prev_bot_token prev_chat_ids prev_te_key
+    prev_tokens="$(toml_get "${prev_config}" auth tokens)"
+    prev_translation_key="$(toml_get "${prev_config}" translation api_key)"
+    prev_ai_key="$(toml_get "${prev_config}" ai api_key)"
+    prev_bot_token="$(toml_get "${prev_config}" telegram bot_token)"
+    prev_chat_ids="$(toml_get "${prev_config}" telegram admin_chat_ids)"
+    prev_te_key="$(toml_get "${prev_config}" backfill te_api_key)"
+
+    # 翻译开关决策（配置文件里已有密钥也算可用）
     local translation_enabled="true"
     case "${ENABLE_TRANSLATION}" in
         on)
-            [[ -n "${OPENAI_API_KEY:-}" ]] || die "--translation on 但未设置 OPENAI_API_KEY"
+            [[ -n "${OPENAI_API_KEY:-}${prev_translation_key}" ]] || die "--translation on 但没有密钥（OPENAI_API_KEY 或 translation.api_key）"
             ;;
         off)
             translation_enabled="false"
             ;;
         auto)
-            if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+            if [[ -z "${OPENAI_API_KEY:-}" && -z "${prev_translation_key}" ]]; then
                 translation_enabled="false"
-                warn "未检测到 OPENAI_API_KEY：已关闭事件名翻译 (translation.enabled=false)"
+                warn "未提供翻译密钥（OPENAI_API_KEY / translation.api_key）：已关闭事件名翻译"
                 warn "如需三语事件名，设置后重新部署: sudo OPENAI_API_KEY=sk-xxx $0"
             fi
             ;;
@@ -400,28 +432,28 @@ cmd_deploy() {
     local ai_enabled="true"
     case "${ENABLE_AI}" in
         on)
-            [[ -n "${OPENAI_API_KEY:-}" ]] || die "--ai on 但未设置 OPENAI_API_KEY"
+            [[ -n "${AI_API_KEY:-}${prev_ai_key}" ]] || die "--ai on 但没有密钥（AI_API_KEY 或 ai.api_key）"
             ;;
         off)
             ai_enabled="false"
             ;;
         auto)
-            [[ -n "${OPENAI_API_KEY:-}" ]] || ai_enabled="false"
+            [[ -n "${AI_API_KEY:-}${prev_ai_key}" ]] || ai_enabled="false"
             ;;
     esac
 
     # Telegram 告警：缺少任一项则关闭，而不是让服务启动失败
     local telegram_enabled="true"
-    if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_ADMIN_CHAT_IDS:-}" ]]; then
+    if [[ -z "${TELEGRAM_BOT_TOKEN:-}${prev_bot_token}" || -z "${TELEGRAM_ADMIN_CHAT_IDS:-}${prev_chat_ids}" ]]; then
         telegram_enabled="false"
         warn "未配置 TELEGRAM_BOT_TOKEN / TELEGRAM_ADMIN_CHAT_IDS：数据源异常只会写入日志"
     fi
 
     # 客户端令牌：启用鉴权时至少需要一个，否则所有客户端都会 401
     local auth_enabled="true"
-    if [[ -z "${API_TOKENS:-}" ]]; then
+    if [[ -z "${API_TOKENS:-}${prev_tokens}" ]]; then
         auth_enabled="false"
-        warn "未设置 API_TOKENS：数据接口将对外公开，建议设置后重新部署"
+        warn "未提供访问令牌（API_TOKENS / auth.tokens）：数据接口将对外公开，建议设置后重新部署"
     fi
 
     # 停服 -> 备份
@@ -449,6 +481,15 @@ cmd_deploy() {
         info "出网代理: ${OUTBOUND_PROXY}（仅 [network].proxied 中列出的源与 Telegram 经过它）"
     fi
 
+    # 密钥全部写进配置文件：升级时已有的值优先，命令行/环境变量只在为空时填充。
+    set_toml_secret "${APP_DIR}/config.toml" auth tokens "${prev_tokens}" "${API_TOKENS:-}"
+    set_toml_secret "${APP_DIR}/config.toml" translation api_key "${prev_translation_key}" "${OPENAI_API_KEY:-}"
+    set_toml_secret "${APP_DIR}/config.toml" ai api_key "${prev_ai_key}" "${AI_API_KEY:-}"
+    set_toml_secret "${APP_DIR}/config.toml" telegram bot_token "${prev_bot_token}" "${TELEGRAM_BOT_TOKEN:-}"
+    set_toml_secret "${APP_DIR}/config.toml" telegram admin_chat_ids "${prev_chat_ids}" "${TELEGRAM_ADMIN_CHAT_IDS:-}"
+    set_toml_secret "${APP_DIR}/config.toml" backfill te_api_key "${prev_te_key}" "${TE_API_KEY:-}"
+    info "密钥已写入 ${APP_DIR}/config.toml（权限 0640；已配置的值不会被空参数覆盖）"
+
     # 直出 HTTPS：证书与私钥只读给运行用户，私钥不放在仓库与安装目录之外
     if [[ -n "${TLS_CERT}" ]]; then
         install -d -m 0750 -o root -g "${APP_GROUP}" "${CONF_DIR}/tls"
@@ -463,7 +504,7 @@ cmd_deploy() {
     fi
 
     write_env_file
-    info "环境文件: ${ENV_FILE} (RUST_LOG 已写入；密钥未回显)"
+    info "配置文件: ${APP_DIR}/config.toml（含密钥，权限 0640；可用 APP_CONFIG 指向其他文件）"
 
     # systemd
     render_unit

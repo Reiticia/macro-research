@@ -33,6 +33,10 @@ pub struct AppConfig {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    /// Tracing filter when `RUST_LOG` is unset, for example
+    /// `market_event_analyzer=info,tower_http=info`.
+    #[serde(default)]
+    pub log_level: String,
     /// Path to a PEM certificate chain. Set together with `tls_key` to serve HTTPS
     /// directly, without a reverse proxy.
     #[serde(default)]
@@ -186,7 +190,9 @@ impl NetworkConfig {
 #[serde(default)]
 pub struct AuthConfig {
     pub enabled: bool,
-    /// Environment variable holding `name:token,name:token`.
+    /// Access tokens written straight into this file as `name:token,name:token`.
+    pub tokens: String,
+    /// Alternative: read the tokens from this environment variable instead of the file.
     pub tokens_env: String,
 }
 
@@ -194,6 +200,7 @@ impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            tokens: String::new(),
             tokens_env: "API_TOKENS".into(),
         }
     }
@@ -207,6 +214,10 @@ pub struct TranslationConfig {
     /// full `.../v1/chat/completions` URL.
     pub base_url: String,
     pub model: String,
+    /// Key for the relay, written straight into this file. Prefer this over the env
+    /// indirection below; a set environment variable still wins.
+    pub api_key: String,
+    /// Alternative: read the key from this environment variable instead of the file.
     pub api_key_env: String,
     /// Extra headers for the relay (for example `X-Title`, or `api-key` for Azure-style
     /// gateways). An `Authorization` entry replaces the default bearer header.
@@ -223,6 +234,7 @@ impl Default for TranslationConfig {
             enabled: false,
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-5-mini".into(),
+            api_key: String::new(),
             api_key_env: "OPENAI_API_KEY".into(),
             extra_headers: BTreeMap::new(),
             extra_body: BTreeMap::new(),
@@ -242,6 +254,8 @@ pub struct AiConfig {
     /// `.../v1/chat/completions` URL are both accepted.
     pub base_url: String,
     pub model: String,
+    /// Key for the relay, written straight into this file; the environment variable wins when set.
+    pub api_key: String,
     pub api_key_env: String,
     /// Extra headers for the relay; an `Authorization` entry replaces the bearer header.
     pub extra_headers: BTreeMap<String, String>,
@@ -268,6 +282,7 @@ impl Default for AiConfig {
             enabled: false,
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-5-mini".into(),
+            api_key: String::new(),
             api_key_env: "OPENAI_API_KEY".into(),
             extra_headers: BTreeMap::new(),
             extra_body: BTreeMap::new(),
@@ -278,20 +293,34 @@ impl Default for AiConfig {
     }
 }
 
-impl AiConfig {
+impl TranslationConfig {
     pub fn api_key(&self) -> Result<String, AppError> {
-        read_api_key(&self.api_key_env, "ai")
+        resolve_secret(&self.api_key, &self.api_key_env, "translation")
     }
 }
 
-/// Reads a key from the named environment variable, rejecting an empty value so a half-set
-/// deployment fails loudly instead of sending unauthenticated requests to the relay.
-pub fn read_api_key(env_name: &str, scope: &str) -> Result<String, AppError> {
-    env::var(env_name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| AppError::Config(format!("{env_name} is required when {scope} is enabled")))
+impl AiConfig {
+    pub fn api_key(&self) -> Result<String, AppError> {
+        resolve_secret(&self.api_key, &self.api_key_env, "ai")
+    }
+}
+
+/// Resolves a credential: the value from the configuration file wins unless the named
+/// environment variable is set, so an emergency override never requires editing the file.
+pub fn resolve_secret(file_value: &str, env_name: &str, scope: &str) -> Result<String, AppError> {
+    if let Ok(from_env) = env::var(env_name) {
+        let trimmed = from_env.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_owned());
+        }
+    }
+    let from_file = file_value.trim();
+    if !from_file.is_empty() {
+        return Ok(from_file.to_owned());
+    }
+    Err(AppError::Config(format!(
+        "{scope} is enabled but has no key: set `{scope}.api_key` in the config file or {env_name}"
+    )))
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -299,7 +328,11 @@ pub fn read_api_key(env_name: &str, scope: &str) -> Result<String, AppError> {
 pub struct TelegramConfig {
     pub enabled: bool,
     pub api_base: String,
+    /// Bot token written straight into this file; the env variable wins when set.
+    pub bot_token: String,
     pub bot_token_env: String,
+    /// Comma-separated admin chat ids; the env variable wins when the file leaves it empty.
+    pub admin_chat_ids: String,
     pub admin_chat_ids_env: String,
     pub poll_timeout_seconds: u64,
 }
@@ -309,7 +342,9 @@ impl Default for TelegramConfig {
         Self {
             enabled: false,
             api_base: "https://api.telegram.org".into(),
+            bot_token: String::new(),
             bot_token_env: "TELEGRAM_BOT_TOKEN".into(),
+            admin_chat_ids: String::new(),
             admin_chat_ids_env: "TELEGRAM_ADMIN_CHAT_IDS".into(),
             poll_timeout_seconds: 30,
         }
@@ -317,18 +352,27 @@ impl Default for TelegramConfig {
 }
 
 impl TelegramConfig {
+    /// The bot token from this file, or the environment variable when that is set.
     pub fn bot_token(&self) -> Option<String> {
-        env::var(&self.bot_token_env)
-            .ok()
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
+        if let Ok(from_env) = env::var(&self.bot_token_env) {
+            let trimmed = from_env.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
+            }
+        }
+        let from_file = self.bot_token.trim();
+        (!from_file.is_empty()).then(|| from_file.to_owned())
     }
 
-    /// Only these chats may read status or decide translation corrections.
+    /// Only these chats may read status or decide translation corrections. The config file wins
+    /// over the environment: one list, visible next to the rest of the deployment.
     pub fn admin_chat_ids(&self) -> Vec<i64> {
-        env::var(&self.admin_chat_ids_env)
-            .unwrap_or_default()
-            .split(',')
+        let raw = if self.admin_chat_ids.trim().is_empty() {
+            env::var(&self.admin_chat_ids_env).unwrap_or_default()
+        } else {
+            self.admin_chat_ids.clone()
+        };
+        raw.split(',')
             .filter_map(|value| value.trim().parse::<i64>().ok())
             .collect()
     }
@@ -389,6 +433,9 @@ impl Default for LimitConfig {
 pub struct BackfillConfig {
     pub calendar_api_base_url: String,
     pub request_delay_ms: u64,
+    /// Trading Economics credential for the `--backfill` CLI; the `TE_API_KEY` environment
+    /// variable wins when set.
+    pub te_api_key: String,
 }
 
 impl Default for BackfillConfig {
@@ -396,14 +443,42 @@ impl Default for BackfillConfig {
         Self {
             calendar_api_base_url: "https://api.tradingeconomics.com".into(),
             request_delay_ms: 1000,
+            te_api_key: String::new(),
         }
     }
 }
 
 impl AppConfig {
+    /// Loads the configuration from `APP_CONFIG` when set, otherwise from a `config.toml` next
+    /// to the executable, falling back to the working directory for `cargo run`.
     pub fn load() -> Result<Self, AppError> {
-        let path = env::var("APP_CONFIG").unwrap_or_else(|_| "config.toml".to_owned());
-        Self::from_path(path)
+        Self::from_path(Self::resolve_path()?)
+    }
+
+    /// The configuration file that was loaded, so logs and the startup notice can name it.
+    pub fn resolve_path() -> Result<std::path::PathBuf, AppError> {
+        if let Ok(explicit) = env::var("APP_CONFIG")
+            && !explicit.trim().is_empty()
+        {
+            return Ok(std::path::PathBuf::from(explicit.trim()));
+        }
+        if let Ok(exe) = env::current_exe()
+            && let Some(dir) = exe.parent()
+        {
+            let beside_binary = dir.join("config.toml");
+            if beside_binary.is_file() {
+                return Ok(beside_binary);
+            }
+        }
+        Ok(std::path::PathBuf::from("config.toml"))
+    }
+
+    /// Directory of the loaded file; relative companions such as `rules.toml` resolve against it.
+    pub fn dir(&self, path: &Path) -> std::path::PathBuf {
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
     }
 
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, AppError> {
@@ -411,5 +486,130 @@ impl AppConfig {
         let config: Self = toml::from_str(&contents)?;
         config.server.validate_tls().map_err(AppError::Config)?;
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::TokenStore;
+
+    /// The one-file deployment story: everything including credentials lives in the file, and
+    /// the executable's own directory is a valid default location.
+    #[test]
+    fn a_single_config_file_carries_the_credentials() {
+        let dir = std::env::temp_dir().join(format!("macro-config-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[server]
+host = "0.0.0.0"
+port = 8443
+tls_cert = "/etc/tls/fullchain.pem"
+tls_key = "/etc/tls/privkey.pem"
+log_level = "market_event_analyzer=debug"
+
+[database]
+url = "sqlite://data/market.db"
+
+[calendar]
+sync_days = 7
+minimum_importance = 3
+
+[network]
+proxy_url = ""
+
+[auth]
+enabled = true
+tokens = "pixel:abc123,emulator:def456"
+
+[translation]
+enabled = true
+base_url = "https://relay.example.com/v1"
+model = "deepseek-flash"
+api_key = "relay-translation-key"
+
+[ai]
+enabled = true
+base_url = "https://relay.example.com/v1"
+model = "deepseek-flash"
+api_key = "relay-ai-key"
+
+[telegram]
+enabled = true
+bot_token = "123456:ABC"
+admin_chat_ids = "111,222"
+
+[alerts]
+
+[market]
+yahoo_base_url = "https://x"
+binance_base_url = "https://x"
+symbols = ["gold"]
+
+[scheduler]
+calendar_sync_seconds = 43200
+watch_scan_seconds = 15
+watch_before_minutes = 5
+release_timeout_minutes = 30
+market_poll_seconds = 15
+market_collect_after_minutes = 60
+"#,
+        )
+        .unwrap();
+
+        let config = AppConfig::from_path(&path).unwrap();
+        assert_eq!(config.server.log_level, "market_event_analyzer=debug");
+        // The rules file is looked up next to the configuration file.
+        assert_eq!(config.dir(&path), dir);
+
+        // Credentials resolve from the file, and an environment override wins.
+        assert_eq!(
+            TokenStore::from_config(&config.auth)
+                .unwrap()
+                .authenticate(Some("Bearer abc123")),
+            Some("pixel".to_owned())
+        );
+        assert_eq!(
+            config.translation.api_key().unwrap(),
+            "relay-translation-key"
+        );
+        assert_eq!(config.ai.api_key().unwrap(), "relay-ai-key");
+        assert_eq!(config.telegram.bot_token().as_deref(), Some("123456:ABC"));
+        assert_eq!(config.telegram.admin_chat_ids(), vec![111, 222]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The environment variable stays a working override for operators who prefer it.
+    #[test]
+    fn environment_still_overrides_the_file() {
+        // Safety: single-threaded test touching one variable.
+        let config = AiConfig {
+            enabled: true,
+            api_key: "from-file".into(),
+            ..AiConfig::default()
+        };
+        assert_eq!(config.api_key().unwrap(), "from-file");
+
+        let name = "MACRO_TEST_OVERRIDE_KEY";
+        unsafe { std::env::set_var(name, "from-env") };
+        let config = AiConfig {
+            enabled: true,
+            api_key: "from-file".into(),
+            api_key_env: name.into(),
+            ..AiConfig::default()
+        };
+        assert_eq!(config.api_key().unwrap(), "from-env");
+        unsafe { std::env::remove_var(name) };
+    }
+
+    #[test]
+    fn a_missing_credential_names_both_places() {
+        let config = TranslationConfig::default();
+        let error = config.api_key().unwrap_err().to_string();
+        assert!(error.contains("translation.api_key"), "{error}");
+        assert!(error.contains("OPENAI_API_KEY"), "{error}");
     }
 }

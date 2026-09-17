@@ -21,7 +21,7 @@ Android (direct | backend)
      出网代理 / 直连
 ```
 
-## 启动
+## 启动：一个配置文件，一个环境变量
 
 需要 Rust 1.85+（edition 2024）：
 
@@ -30,22 +30,50 @@ cd backend
 cargo run
 ```
 
-默认监听 `127.0.0.1:8080`，首次启动创建 `data/market.db` 并执行迁移。配置入口是
-`config.toml`（可用 `APP_CONFIG` 指向别的文件），规则在 `rules.toml`。对外只需在 `[server]`
-里填一对证书路径即可直出 HTTPS，见下文 [TLS](#tls后端直出不需要反向代理)。
+配置全部在 **一个 TOML 文件** 里，包括令牌、中转站密钥和 Telegram 凭据。查找顺序：
 
-最小可用环境变量：
+1. `APP_CONFIG` 环境变量指向的文件（唯一需要记的环境变量，通常不用设）；
+2. 可执行文件同目录的 `config.toml`（systemd 部署就是 `/opt/market-analyzer/config.toml`）；
+3. 当前工作目录的 `config.toml`（`cargo run` 的开发场景）。
 
-```bash
-export API_TOKENS="alice:$(openssl rand -hex 24)"     # 客户端令牌，name:token 逗号分隔
-export OPENAI_API_KEY="sk-xxx"                         # 翻译与 AI 分析（可留空则自动关闭）
-export TELEGRAM_BOT_TOKEN="123456:ABC..."              # 管理员告警
-export TELEGRAM_ADMIN_CHAT_IDS="123456789"
-cargo run
+首次启动创建 `data/market.db` 并执行迁移；日志里会打印实际加载的配置路径。对外只需在
+`[server]` 里填一对证书路径即可直出 HTTPS，见下文 [TLS](#tls后端直出不需要反向代理)。
+
+部署相关的键（其余默认值见 `config.toml` 注释）：
+
+```toml
+[server]
+host = "0.0.0.0"
+port = 443
+log_level = ""                       # 留空用 info；RUST_LOG 环境变量仍然优先
+
+[auth]
+enabled = true
+tokens = "pixel:9f2c…,emulator:5a1d…"   # 客户端令牌，一台设备一个名字，便于审计区分
+
+[translation]
+api_key = "sk-relay-…"               # 中转站密钥直接写在这里
+
+[ai]
+api_key = "sk-relay-…"
+
+[telegram]
+bot_token = "123456:ABC…"
+admin_chat_ids = "123456789"
+
+[backfill]
+te_api_key = ""                      # 仅 --backfill 需要
 ```
 
-缺少 `API_TOKENS` 时 `[auth]` 会自动关闭（接口公开）并在日志与部署脚本中告警；
-缺少 Telegram 配置时告警只写日志，服务照常运行。
+规则：
+
+- **环境变量仍然优先**（`API_TOKENS` / `OPENAI_API_KEY` / `AI_API_KEY` / `TELEGRAM_BOT_TOKEN` /
+  `TELEGRAM_ADMIN_CHAT_IDS` / `TE_API_KEY`），老部署无需改动，也适合临时覆盖；
+- 配置文件里没有对应密钥时，启用中的子系统会拒绝启动并指出缺哪个键；
+- 文件里是明文密钥，部署脚本会把它设为 `0640 root:market`，请勿提交到仓库。
+
+缺少令牌/密钥时的行为：`[auth]` 自动关闭并在日志与部署脚本中告警；Telegram 未配置时告警
+只写日志；翻译与 AI 未配置密钥则拒绝启动该子系统（服务本身仍能起来）。
 
 ## 出网代理
 
@@ -77,7 +105,7 @@ request_timeout_seconds = 20
 
 ### 令牌怎么发放、吊销
 
-令牌不在线上申请，由管理员自己生成并写进服务器环境；App 里填的就是这个字符串。
+令牌不在线上申请，由管理员自己生成并写进配置文件（或环境变量）；App 里填的就是这个字符串。
 
 1. 生成一段随机值（不要用可猜的词）：
 
@@ -90,17 +118,17 @@ request_timeout_seconds = 20
    -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
    ```
 
-2. 以 `名字:令牌` 写入 `API_TOKENS`，一台设备一个名字，审计时才能分清是谁用的：
+2. 以 `名字:令牌` 写进部署时的 `API_TOKENS`，或直接改服务器上的配置文件：
 
    ```bash
    sudo API_TOKENS="pixel:9f2c…,emulator:5a1d…" \
         ./deploy.sh deploy --tls-cert … --tls-key … --proxy …
    ```
 
-   已部署过的机器也可以直接改 env 文件后重启：
+   已部署过的机器直接改配置文件后重启（脚本升级时会保留已填的值）：
 
    ```bash
-   sudo nano /etc/market-analyzer/market-event-analyzer.env   # API_TOKENS=…
+   sudo nano /opt/market-analyzer/config.toml   # [auth] tokens = "pixel:…,emulator:…"
    sudo systemctl restart market-event-analyzer
    ```
 
@@ -180,21 +208,17 @@ WebSocket 消息：
 ```toml
 [translation]
 base_url = "https://relay-a.example.com/v1"
-model = "deepseek-v4-flash"
-api_key_env = "OPENAI_API_KEY"      # 便宜快的模型跑事件名翻译
+model = "deepseek-flash"
+api_key = "sk-relay-a-..."          # 中转站密钥直接写文件；也可用 api_key_env 走环境变量
 
 [ai]
 base_url = "https://api.openai.com/v1"
 model = "gpt-5-mini"
-api_key_env = "AI_API_KEY"          # 分析用另一个厂商/模型
+api_key = "sk-openai-..."           # 分析用另一个厂商/模型
 ```
 
-对应两个环境变量（写在 `ENV_FILE`，权限 0640）：
-
-```bash
-OPENAI_API_KEY=sk-relay-a-...
-AI_API_KEY=sk-openai-...
-```
+环境变量 `OPENAI_API_KEY` / `AI_API_KEY`（由 `api_key_env` 指定变量名）仍然可用，且**优先于**
+配置文件里的值 —— 老部署无需改动。
 
 ### base_url 怎么写
 
@@ -499,18 +523,22 @@ sudo API_TOKENS="alice:$(openssl rand -hex 24)" \
                         --tls-cert /tmp/fullchain.pem --tls-key /tmp/privkey.pem
 ```
 
-`deploy.sh` 负责构建、安装、升级、备份、健康检查与卸载；密钥只写入
-`/etc/market-analyzer/market-event-analyzer.env`（`0640 root:market`），不回显。
-常用子命令：`status`、`logs`、`backfill [START END]`、`uninstall [--purge]`。
+`deploy.sh` 负责构建、安装、升级、备份、健康检查与卸载；密钥全部写进
+`/opt/market-analyzer/config.toml`（`0640 root:market`），升级时会保留已配置的值，不会被空
+参数覆盖。也可以完全不用命令行参数：部署后直接编辑该配置文件再重启。常用子命令：
+`status`、`logs`、`check-ai`、`backfill [START END]`、`uninstall [--purge]`。
 
 ### Docker
 
 ```bash
 cd backend
 docker build -t market-event-analyzer .
+# 二进制默认读同目录的 config.toml（镜像里是 /app/config.toml），挂载覆盖即可：
 docker run --rm -p 127.0.0.1:8080:8080 \
-  -e API_TOKENS="alice:xxx" -e OPENAI_API_KEY="sk-xxx" \
+  -v $PWD/config.toml:/app/config.toml \
   -v ./data:/app/data market-event-analyzer
+# 也可以用 APP_CONFIG 指到挂载进来的其他路径：
+#   -e APP_CONFIG=/run/secrets/config.toml
 ```
 
 ### GitHub Actions
