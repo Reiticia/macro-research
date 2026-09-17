@@ -88,31 +88,65 @@ impl AlertService {
         status: &str,
         message: String,
     ) -> Result<(), AppError> {
-        let _ = sqlx::query(
+        let _ = self.audit(severity, key, status, &message).await;
+        if severity != Severity::Critical && self.quiet_now(Utc::now()) {
+            tracing::debug!(key, "alert suppressed by quiet hours");
+            return Ok(());
+        }
+        self.send_to_admins(severity, key, &message).await
+    }
+
+    /// Sends regardless of quiet hours.
+    ///
+    /// Used for the startup notice: a restart is rare enough to be worth hearing about at night,
+    /// and the very first boot must prove the bot token and chat id actually work.
+    pub async fn notify_unsuppressed(
+        &self,
+        severity: Severity,
+        key: &str,
+        status: &str,
+        message: String,
+    ) -> Result<(), AppError> {
+        let _ = self.audit(severity, key, status, &message).await;
+        self.send_to_admins(severity, key, &message).await
+    }
+
+    async fn audit(
+        &self,
+        severity: Severity,
+        key: &str,
+        status: &str,
+        message: &str,
+    ) -> Result<(), AppError> {
+        sqlx::query(
             r#"INSERT INTO alert_event (key, status, severity, message, created_at)
                VALUES (?, ?, ?, ?, ?)"#,
         )
         .bind(key)
         .bind(status)
         .bind(severity.as_str())
-        .bind(&message)
+        .bind(message)
         .bind(Utc::now().to_rfc3339())
         .execute(&self.pool)
-        .await;
+        .await?;
+        Ok(())
+    }
 
+    async fn send_to_admins(
+        &self,
+        severity: Severity,
+        key: &str,
+        message: &str,
+    ) -> Result<(), AppError> {
         let Some(telegram) = &self.telegram else {
             tracing::info!(key, %message, "alert (no Telegram bot configured)");
             return Ok(());
         };
-        if severity != Severity::Critical && self.quiet_now(Utc::now()) {
-            tracing::debug!(key, "alert suppressed by quiet hours");
-            return Ok(());
-        }
         let text = format!(
             "{} <b>{}</b>\n{}\n<i>{}</i>",
             severity.icon(),
             crate::alert::telegram::escape(key),
-            crate::alert::telegram::escape(&message),
+            crate::alert::telegram::escape(message),
             Utc::now().format("%Y-%m-%d %H:%M UTC"),
         );
         for chat_id in &self.chat_ids {
@@ -183,5 +217,83 @@ mod tests {
         assert!(!service.quiet_now(at(4)));
         assert!(parse_clock("24:00").is_none());
         assert!(parse_quiet_hours("").is_none());
+    }
+
+    /// The startup notice must arrive even inside quiet hours, while regular alerts stay
+    /// silenced — otherwise the first boot of the day looks like a broken bot.
+    #[tokio::test]
+    async fn startup_notice_bypasses_quiet_hours_but_regular_alerts_do_not() {
+        use crate::alert::telegram::TelegramClient;
+        use axum::{Json, Router, routing::post};
+        use std::sync::Arc as StdArc;
+        use tokio::sync::Mutex;
+
+        let captured = StdArc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let router_state = StdArc::clone(&captured);
+        let task = tokio::spawn(async move {
+            let capture = move |Json(body): Json<serde_json::Value>| {
+                let captured = StdArc::clone(&router_state);
+                async move {
+                    captured.lock().await.push(body);
+                    Json(serde_json::json!({"ok": true, "result": {"message_id": 1}}))
+                }
+            };
+            axum::serve(
+                listener,
+                Router::new().route("/botbottoken/sendMessage", post(capture)),
+            )
+            .await
+            .unwrap();
+        });
+
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let config = AlertConfig {
+            // Quiet around the clock, so anything that arrives is an explicit bypass.
+            quiet_hours: "00:00-23:59".into(),
+            quiet_hours_timezone: "UTC".into(),
+            ..AlertConfig::default()
+        };
+        let service = AlertService::new(
+            Some(Arc::new(TelegramClient::new(
+                reqwest::Client::new(),
+                base.clone(),
+                "bottoken",
+            ))),
+            vec![42],
+            pool,
+            config,
+        );
+
+        service
+            .notify(Severity::Info, "source.quiet", "healthy", "muted".into())
+            .await
+            .unwrap();
+        assert_eq!(captured.lock().await.len(), 0);
+
+        // Sanity check: a direct send must reach the mock, so a failure below is in the service,
+        // not in the fixture.
+        let direct = TelegramClient::new(reqwest::Client::new(), base.clone(), "bottoken");
+        direct.send_message(42, "direct probe", None).await.unwrap();
+        assert_eq!(captured.lock().await.len(), 1);
+
+        service
+            .notify_unsuppressed(
+                Severity::Info,
+                "service.startup",
+                "healthy",
+                "up".to_owned(),
+            )
+            .await
+            .unwrap();
+        let sent = captured.lock().await;
+        // One direct probe plus the startup notice.
+        assert_eq!(sent.len(), 2);
+        let text = sent[1]["text"].as_str().unwrap();
+        assert!(text.contains("service.startup"), "{text}");
+        assert!(text.contains("up"), "{text}");
+        task.abort();
     }
 }

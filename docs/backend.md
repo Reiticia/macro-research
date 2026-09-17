@@ -378,8 +378,9 @@ quiet_hours = ""                 # 例 "23:00-07:00"，默认关闭
 quiet_hours_timezone = "Asia/Shanghai"
 ```
 
-告警键：`calendar.primary`、`calendar.fallback`、`calendar.all_sources`、
-`calendar.data_missing`、`market.cnbc`、`market.yahoo`、`market.biquote`、`market.binance`。
+告警键：`service.startup`、`calendar.primary`、`calendar.fallback`、`calendar.all_sources`、
+`calendar.data_missing`、`market.cnbc`、`market.yahoo`、`market.biquote`、`market.binance`、
+`analysis.ai`、`translation.relay`。
 
 触发规则：
 
@@ -392,6 +393,11 @@ quiet_hours_timezone = "Asia/Shanghai"
 
 静默时段只抑制非 critical 通知；所有发送尝试写入 `alert_event` 审计表，因此“机器人不出声”
 与“数据源真的没问题”可以区分。Telegram 用 long polling（`offset` 落库），无需公网回调。
+
+**启动通知**：服务每次启动都会给管理员发一条，包含监听地址与协议（http/https）、数据库路径、
+鉴权/翻译/AI 的启用状态与所用模型、出网代理，以及最近一次模型调用时间。它**不受静默时段
+抑制**（夜间重启也值得关注，且第一次启动必须证明 bot 配置可用）；崩溃循环（systemd 自动拉起）
+时会每个重启各发一条，这也是预期行为——那是真出了问题。
 
 ## 过去三个月：历史补采（可选）
 

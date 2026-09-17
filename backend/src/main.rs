@@ -10,7 +10,7 @@ use market_event_analyzer::{
     AppState,
     ai_analysis::{self, AiAnalysisService},
     alert::{
-        AlertService, HealthRegistry, TelegramClient,
+        AlertService, HealthRegistry, Severity, TelegramClient,
         bot::{BotState, bot_loop},
     },
     analysis::{AnalysisService, RuleEngine},
@@ -353,6 +353,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.scheduler.clone(),
     ));
     if alerts.enabled() {
+        // Startup notice: tells the admin the service is live (and at which address the app
+        // should point), and proves the bot token and chat id work. Sent as a task so a slow
+        // Telegram round trip cannot delay the listener, and retried once because the outbound
+        // proxy may still be coming up at boot.
+        let notice = startup_notice(&config, llm_usage.as_ref()).await;
+        let startup_alerts = alerts.clone();
+        tokio::spawn(async move {
+            for attempt in 1..=2 {
+                if startup_alerts
+                    .notify_unsuppressed(
+                        Severity::Info,
+                        "service.startup",
+                        "healthy",
+                        notice.clone(),
+                    )
+                    .await
+                    .is_ok()
+                {
+                    break;
+                }
+                if attempt == 1 {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                }
+            }
+        });
         tokio::spawn(scheduler::data_missing_loop(
             state.clone(),
             alerts.clone(),
@@ -472,6 +497,55 @@ async fn check_ai_relays(
     println!("\nbase_url 可填 https://relay/v1 或完整的 .../v1/chat/completions");
     println!("两个模块可以用不同的中转站与不同的 Key (api_key_env)。");
     Ok(())
+}
+
+async fn startup_notice(config: &AppConfig, llm_usage: Option<&Arc<LlmUsageRepository>>) -> String {
+    let scheme = if config.server.tls_enabled() {
+        "https"
+    } else {
+        "http"
+    };
+    let mut lines = vec![
+        format!(
+            "服务已启动，监听 {}:{}（{}）",
+            config.server.host, config.server.port, scheme
+        ),
+        format!("数据库 {}", config.database.url),
+    ];
+    lines.push(format!(
+        "鉴权：{} · 翻译：{} · AI 分析：{}",
+        if config.auth.enabled {
+            "已启用"
+        } else {
+            "已关闭"
+        },
+        if config.translation.enabled {
+            format!("已启用（{}）", config.translation.model)
+        } else {
+            "已关闭".to_owned()
+        },
+        if config.ai.enabled {
+            format!("已启用（{}）", config.ai.model)
+        } else {
+            "已关闭".to_owned()
+        },
+    ));
+    if !config.network.proxy_url.trim().is_empty() {
+        lines.push(format!(
+            "出网代理 {}（{}）",
+            config.network.proxy_url.trim(),
+            config.network.proxied.join(", ")
+        ));
+    }
+    if let Some(audit) = llm_usage
+        && let Ok(Some(recorded)) = audit.last_recorded_at().await
+    {
+        lines.push(format!(
+            "最近一次模型调用 {}",
+            recorded.format("%Y-%m-%d %H:%M UTC")
+        ));
+    }
+    lines.join("\n")
 }
 
 fn ensure_database_directory(url: &str) -> std::io::Result<()> {
