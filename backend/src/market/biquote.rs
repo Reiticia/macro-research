@@ -27,6 +27,8 @@ impl BiquoteProvider {
         match symbol {
             MarketSymbol::Gold => Ok("XAUUSD"),
             MarketSymbol::Silver => Ok("XAGUSD"),
+            MarketSymbol::Sp500 => Ok("US500"),
+            MarketSymbol::Nasdaq100 => Ok("USTEC"),
             MarketSymbol::Dxy => Ok("DXY"),
             MarketSymbol::EurUsd => Ok("EURUSD"),
             MarketSymbol::GbpUsd => Ok("GBPUSD"),

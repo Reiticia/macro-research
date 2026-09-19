@@ -77,6 +77,8 @@ impl MarketSymbol {
             self,
             Self::Gold
                 | Self::Silver
+                | Self::Sp500
+                | Self::Nasdaq100
                 | Self::Dxy
                 | Self::EurUsd
                 | Self::GbpUsd
