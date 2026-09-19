@@ -84,6 +84,8 @@ impl MarketSymbol {
                 | Self::GbpUsd
                 | Self::UsdJpy
                 | Self::AudUsd
+                | Self::Wti
+                | Self::NaturalGas
         )
     }
 }

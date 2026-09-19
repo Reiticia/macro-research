@@ -207,6 +207,9 @@
     <string name="asset_us10y">US 10Y</string>
     <string name="asset_bitcoin">Bitcoin</string>
     <string name="asset_ethereum">Ethereum</string>
+    <string name="asset_wti">WTI crude oil</string>
+    <string name="asset_natural_gas">Natural gas</string>
+    <string name="category_energy">Energy</string>
     <string name="category_inflation">Inflation</string>
     <string name="category_employment">Employment</string>
     <string name="category_growth">Economic growth</string>

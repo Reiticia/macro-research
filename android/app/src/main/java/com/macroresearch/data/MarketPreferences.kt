@@ -30,7 +30,10 @@ class MarketPreferences(context: Context) {
     }
 
     companion object {
-        val SUPPORTED_MARKETS = listOf("nasdaq100", "dxy", "gold", "us10y", "bitcoin")
+        val SUPPORTED_MARKETS = listOf(
+            "nasdaq100", "sp500", "gold", "silver", "dxy", "eur_usd",
+            "us2y", "us10y", "wti", "natural_gas", "bitcoin", "ethereum",
+        )
         val DEFAULT_MARKETS = listOf("nasdaq100", "dxy", "gold")
         const val MIN_SELECTIONS = 2
         const val MAX_SELECTIONS = 4

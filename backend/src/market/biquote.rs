@@ -29,6 +29,8 @@ impl BiquoteProvider {
             MarketSymbol::Silver => Ok("XAGUSD"),
             MarketSymbol::Sp500 => Ok("US500"),
             MarketSymbol::Nasdaq100 => Ok("USTEC"),
+            MarketSymbol::Wti => Ok("USOIL"),
+            MarketSymbol::NaturalGas => Ok("XNGUSD"),
             MarketSymbol::Dxy => Ok("DXY"),
             MarketSymbol::EurUsd => Ok("EURUSD"),
             MarketSymbol::GbpUsd => Ok("GBPUSD"),

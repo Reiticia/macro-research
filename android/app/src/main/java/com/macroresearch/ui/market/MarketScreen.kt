@@ -47,6 +47,7 @@ private val marketGroups = listOf(
     R.string.precious_metals to listOf("gold", "silver"),
     R.string.dollar_fx to listOf("dxy", "eur_usd"),
     R.string.treasuries to listOf("us2y", "us10y"),
+    R.string.category_energy to listOf("wti", "natural_gas"),
     R.string.crypto to listOf("bitcoin", "ethereum"),
 )
 

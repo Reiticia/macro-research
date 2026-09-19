@@ -51,7 +51,7 @@ cnbc_chart_url = "https://ts-api.cnbc.com/harmony/app/charts"
 live_quote_refresh_seconds = 5
 live_quote_stale_seconds = 300
 # 必须落在 Android 客户端可展示的符号集合内。
-symbols = ["nasdaq100", "sp500", "gold", "silver", "dxy", "eur_usd", "us2y", "us10y", "bitcoin", "ethereum"]
+symbols = ["nasdaq100", "sp500", "gold", "silver", "dxy", "eur_usd", "us2y", "us10y", "wti", "natural_gas", "bitcoin", "ethereum"]
 
 # 客户端访问令牌。启用鉴权却没有任何令牌时，部署脚本会把它写成 false 并告警。
 [auth]

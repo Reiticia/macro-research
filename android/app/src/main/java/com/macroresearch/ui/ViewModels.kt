@@ -68,7 +68,7 @@ class HomeViewModel(private val repository: MacroRepository) : ViewModel() {
 class MarketViewModel(private val repository: MacroRepository) : ViewModel() {
     private val symbols = listOf(
         "nasdaq100", "sp500", "gold", "silver", "dxy",
-        "eur_usd", "us2y", "us10y", "bitcoin", "ethereum",
+        "eur_usd", "us2y", "us10y", "wti", "natural_gas", "bitcoin", "ethereum",
     )
     private val _state = MutableStateFlow(LoadState<MarketQuotesResponse>())
     val state = _state.asStateFlow()

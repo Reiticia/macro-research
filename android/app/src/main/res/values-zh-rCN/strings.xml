@@ -206,6 +206,9 @@
     <string name="asset_us10y">美债10年期</string>
     <string name="asset_bitcoin">比特币</string>
     <string name="asset_ethereum">以太坊</string>
+    <string name="asset_wti">原油</string>
+    <string name="asset_natural_gas">天然气</string>
+    <string name="category_energy">能源</string>
     <string name="category_inflation">通胀</string>
     <string name="category_employment">就业</string>
     <string name="category_growth">经济增长</string>

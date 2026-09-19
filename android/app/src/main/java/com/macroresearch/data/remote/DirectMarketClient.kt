@@ -525,17 +525,21 @@ class DirectMarketClient(
         private val CNBC_SYMBOLS = mapOf("us2y" to "US2Y", "us10y" to "US10Y")
         private val CNBC_TIME_FORMAT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSXX", Locale.US)
-        private val EVENT_SYMBOLS = listOf("gold", "dxy", "us2y", "us10y", "nasdaq100", "bitcoin")
+        private val EVENT_SYMBOLS = listOf(
+            "gold", "dxy", "us2y", "us10y", "wti", "natural_gas", "nasdaq100", "bitcoin",
+        )
         private val YIELD_SYMBOLS = setOf("us2y", "us10y")
         private val BINANCE_TICKERS = mapOf("bitcoin" to "BTCUSDT", "ethereum" to "ETHUSDT")
         private val BIQUOTE_TICKERS = mapOf(
             "nasdaq100" to "USTEC", "sp500" to "US500",
             "gold" to "XAUUSD", "silver" to "XAGUSD", "dxy" to "DXY", "eur_usd" to "EURUSD",
+            "wti" to "USOIL", "natural_gas" to "XNGUSD",
             "bitcoin" to "BTCUSD", "ethereum" to "ETHUSD",
         )
         private val YAHOO_TICKERS = mapOf(
             "gold" to "GC=F", "silver" to "SI=F", "sp500" to "^GSPC", "nasdaq100" to "^NDX",
             "dxy" to "DX-Y.NYB", "eur_usd" to "EURUSD=X", "us2y" to "^UST2YR", "us10y" to "^TNX",
+            "wti" to "CL=F", "natural_gas" to "NG=F",
         )
 
         private fun snapshotId(eventId: Long, symbol: String, timestamp: String): Long =
