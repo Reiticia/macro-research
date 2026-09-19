@@ -677,7 +677,7 @@ impl AiAnalysisService {
     }
 }
 
-fn row_to_analysis(row: sqlx::sqlite::SqliteRow) -> Result<AiAnalysis, AppError> {
+pub(crate) fn row_to_analysis(row: sqlx::sqlite::SqliteRow) -> Result<AiAnalysis, AppError> {
     let chain_json: String = row.try_get("chain_json")?;
     let generated_at: String = row.try_get("generated_at")?;
     let calls: i64 = row.try_get("call_count").unwrap_or(0);

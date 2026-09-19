@@ -94,6 +94,14 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
         return Ok(());
     };
     let (outcome, confirmation) = match action {
+        "ag" => (
+            crate::shared_ai::decide(&state.pool, id, true).await,
+            "已处理：有效反馈已加入重新分析队列",
+        ),
+        "ai" => (
+            crate::shared_ai::decide(&state.pool, id, false).await,
+            "已忽略反馈",
+        ),
         "c" => (
             state.corrections.approve(id).await.map(|_| ()),
             "已采纳该译名",

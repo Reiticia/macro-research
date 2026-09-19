@@ -7,12 +7,30 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AppState,
-    ai_analysis::{AiAnalysisResponse, AnalysisMethod},
+    ai_analysis::AiAnalysisResponse,
     auth::TokenId,
     error::AppError,
     model::{AnalysisReport, EconomicEvent, EventObservation},
-    quota::QuotaOutcome,
 };
+
+#[derive(Deserialize)]
+pub struct ProviderQuery {
+    provider: String,
+    provider_id: String,
+}
+
+pub async fn by_provider(
+    State(state): State<AppState>,
+    Query(query): Query<ProviderQuery>,
+) -> Result<Json<EconomicEvent>, AppError> {
+    Ok(Json(
+        state
+            .events
+            .find_provider_event(&query.provider, &query.provider_id)
+            .await?
+            .ok_or(AppError::NotFound)?,
+    ))
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,24 +141,14 @@ pub async fn history(
 pub struct AiQuery {
     language: Option<String>,
     method: Option<u8>,
-    timezone: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AiRequest {
-    language: Option<String>,
-    method: Option<u8>,
-    timezone: Option<String>,
-    #[serde(default)]
-    regenerate: bool,
-}
-
-fn ai_service(
-    state: &AppState,
-) -> Result<&std::sync::Arc<crate::ai_analysis::AiAnalysisService>, AppError> {
-    state.ai_analysis_service.as_ref().ok_or_else(|| {
-        AppError::AnalysisUnavailable("AI analysis is not configured on this server".into())
-    })
+pub struct FeedbackRequest {
+    language: String,
+    method: u8,
+    revision: i64,
+    message: String,
 }
 
 fn language_or_default(value: Option<&str>) -> String {
@@ -153,66 +161,43 @@ pub async fn ai_analysis(
     Path(id): Path<i64>,
     Query(query): Query<AiQuery>,
 ) -> Result<Json<AiAnalysisResponse>, AppError> {
-    let service = ai_service(&state)?;
     let language = language_or_default(query.language.as_deref());
-    let method = AnalysisMethod::from_u8(query.method.unwrap_or(state.config.ai.default_method));
-    let timezone = query.timezone.unwrap_or_else(|| "UTC".to_owned());
-    service
-        .cached(id, &language, method, &timezone)
-        .await?
-        .map(AiAnalysisResponse::cached)
-        .map(Json)
-        .ok_or(AppError::NotFound)
+    let method = query.method.unwrap_or(state.config.ai.default_method);
+    if !(1..=3).contains(&method) {
+        return Err(AppError::InvalidRequest("method must be 1..3".into()));
+    }
+    let row = sqlx::query(
+        "SELECT * FROM ai_analysis WHERE event_id=? AND language=? AND method=? AND timezone='UTC'",
+    )
+    .bind(id)
+    .bind(crate::shared_ai::language(&language))
+    .bind(method)
+    .fetch_optional(state.events.pool())
+    .await?
+    .ok_or(AppError::NotFound)?;
+    Ok(Json(AiAnalysisResponse::cached(
+        crate::ai_analysis::row_to_analysis(row)?,
+    )))
 }
 
-/// Generates (or regenerates) the briefing on the server's model key.
-///
-/// Rate limiting never costs the caller the content it already had: when the daily budget is
-/// spent, the previous analysis is returned with `rateLimited: true` instead of a 429. Only a
-/// caller with nothing cached receives the quota error.
-pub async fn generate_ai_analysis(
+/// Readers can report a frozen result, but cannot trigger model calls.
+pub async fn analysis_feedback(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Extension(token): Extension<TokenId>,
-    Json(body): Json<AiRequest>,
-) -> Result<Json<AiAnalysisResponse>, AppError> {
-    let service = ai_service(&state)?;
-    let language = language_or_default(body.language.as_deref());
-    let method = AnalysisMethod::from_u8(body.method.unwrap_or(state.config.ai.default_method));
-    let timezone = body.timezone.unwrap_or_else(|| "UTC".to_owned());
-
-    match state
-        .quota
-        .try_consume(&token.0, "ai_analysis", state.quota.ai_analysis_limit())
-        .await?
-    {
-        QuotaOutcome::Allowed => {
-            let _slot = state.quota.acquire_ai_slot().await?;
-            Ok(Json(
-                service
-                    .generate(id, &language, method, &timezone, body.regenerate, &token.0)
-                    .await?,
-            ))
-        }
-        QuotaOutcome::Exhausted {
-            retry_after_seconds,
-        } => match service.cached(id, &language, method, &timezone).await? {
-            Some(cached) => {
-                tracing::info!(
-                    token = %token.0,
-                    event_id = id,
-                    "AI quota exhausted; serving the cached analysis"
-                );
-                Ok(Json(AiAnalysisResponse::throttled(
-                    cached,
-                    retry_after_seconds,
-                )))
-            }
-            None => Err(AppError::QuotaExceeded {
-                retry_after_seconds,
-            }),
-        },
-    }
+    Json(body): Json<FeedbackRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let feedback = crate::shared_ai::submit_feedback(
+        state.events.pool(),
+        id,
+        body.method,
+        &body.language,
+        body.revision,
+        &token.0,
+        &body.message,
+    )
+    .await?;
+    Ok(Json(serde_json::json!({"id": feedback})))
 }
 
 #[allow(dead_code)]

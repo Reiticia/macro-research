@@ -375,6 +375,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    tokio::spawn(market_event_analyzer::shared_ai::run(
+        state.clone(),
+        alerts.clone(),
+    ));
+    tokio::spawn(scheduler::startup_calendar_sync(calendar_service.clone()));
     tokio::spawn(scheduler::calendar_sync_loop(
         calendar_service,
         config.calendar.clone(),

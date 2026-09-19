@@ -14,6 +14,7 @@ pub mod openai_compat;
 pub mod quota;
 pub mod repository;
 pub mod scheduler;
+pub mod shared_ai;
 pub mod translation;
 pub mod translation_correction;
 

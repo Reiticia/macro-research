@@ -101,11 +101,10 @@ request_timeout_seconds = 20
 - `[auth] enabled = true`，令牌来自配置文件的 `auth.tokens`（`name:token,name:token`），
   常量时间比较；`GET /health` 与 `GET /api/v1/meta` 免鉴权，其余全部要求
   `Authorization: Bearer <token>`。
-- 令牌是配额与审计身份：`POST /events/{id}/ai-analysis` 按令牌每日计数
-  （`[limits] ai_analysis_per_token_per_day`，默认 60）。超限时优先返回上一次分析结果
-  （响应标 `rateLimited`），仅当该调用者没有任何缓存结果时才返回 `429` + `Retry-After`；
-  进程内还有 `ai_concurrency` 个信号量限制同时打给模型的请求数。详见
-  [限流](#限流超限时回退到上一次结果) 与 [审计](#模型调用审计按类别分类)。
+- 令牌是配额与审计身份：共享 AI 分析由服务端定时任务生成，不消耗客户端配额；客户端自带
+  Key 的分析直接请求模型，同样不经过服务端。`[limits]` 中的每日预算字段仅保留兼容；
+  进程内的 `ai_concurrency` 信号量仍限制同时打给模型的请求数。
+- 错误统一为 `{"error":{"code","message"}}`，客户端按 `code` 本地化。
 - 错误统一为 `{"error":{"code","message"}}`，客户端按 `code` 本地化。
 
 ### 令牌怎么发放、吊销
@@ -162,9 +161,11 @@ request_timeout_seconds = 20
 | POST | `/api/v1/events/{id}/refresh` | 绕过同步间隔按事件当日重取公布值 |
 | GET | `/api/v1/events/{id}/analysis` | 规则报告 |
 | GET | `/api/v1/events/{id}/market` | `{snapshots, reactions}` |
+| GET | `/api/v1/events/by-provider?provider&provider_id` | 按上游身份查事件（直连客户端映射共享结果用） |
 | GET | `/api/v1/market/quotes?symbols=` | 批量当前行情与不可用列表 |
-| GET | `/api/v1/events/{id}/ai-analysis?language&method&timezone` | 命中缓存 `200`，未生成 `404` |
-| POST | `/api/v1/events/{id}/ai-analysis` | `{language, method, timezone, regenerate}`，限流时回退上次结果 |
+| GET | `/api/v1/events/{id}/ai-analysis?language&method` | 共享分析，未生成 `404`；结果冻结，不随请求变化 |
+| POST | `/api/v1/events/{id}/analysis-feedback` | `{language, method, revision, message}`；同一结果只记一条 |
+| POST | `/api/v1/translations/names` | 批量读取已缓存的事件名译名（最多 100 个，无需个人 Key） |
 | GET | `/api/v1/usage?days=7&recent=20` | 模型调用审计：按类别汇总的 token 消耗与最近记录 |
 | POST | `/api/v1/translations/corrections` | 提交译名勘正（进入管理员审核） |
 | GET | `/api/v1/translations/corrections?eventName=` | 最近一条勘正状态 |
@@ -289,34 +290,37 @@ cargo run -- --check-ai            # 开发机上，读当前目录 config.toml
 
 客户端直连模式也支持中转站：设置页填 endpoint、Key 与模型即可，模型名可从 `/models` 拉取（拉不到就手填）。
 
-## AI 简报（服务端生成并缓存）
+## 共享 AI 分析：服务端生成，结果冻结
 
-`POST /api/v1/events/{id}/ai-analysis` 由服务端调用 `[ai]` 配置的 OpenAI 兼容接口。
-缓存键是 `(event_id, language, method, timezone)` —— **三种方法各自一行，永不互相覆盖**；
-`regenerate=true` 只会替换同一种方法的那一行并把 `revision` 递增，另外两种方法原样保留。
-客户端的 Room 缓存同样按 `(event, method)` 分键（迁移 v5），切方法立即可见各自的结果。
+服务端在事件公布后的行情采集窗口结束（默认公布后 60 分钟）自动调用 `[ai]` 配置的
+OpenAI 兼容接口，用**三种方法各生成一份**简报并写入数据库（`shared_ai_job` 持久化队列，
+失败 5 分钟后重试）。缓存键是 `(event_id, language, method)`，语言固定 en / zh-CN / zh-TW。
+
+- 结果对客户端**只读**：`GET /api/v1/events/{id}/ai-analysis` 永远返回已生成的行，
+  不再提供客户端触发的重新生成（原 POST 接口已移除）；
+- 读者对结果有异议时 `POST /api/v1/events/{id}/analysis-feedback` 提交反馈，同一结果
+  （同一 revision）只记一条；
+- 反馈通过 Telegram 推送给管理员，消息带「重新分析 / 忽略」按钮；只有管理员点击
+  「重新分析」才会把 `target_revision + 1` 的任务入队并递增该行的 `revision`，
+  忽略则标记后不再提醒；
+- 任务逐条重试并记录失败原因；某条失败不影响其他事件与其他方法。
 
 响应体（`AiAnalysis` 字段之上附加）：
 
 | 字段 | 含义 |
 |---|---|
-| `fromCache` | 本次请求没有触发模型调用 |
-| `rateLimited` | 请求被限流，返回的是上一次结果 |
-| `retryAfterSeconds` | 距离可再次生成的秒数 |
-| `usage` | `{promptTokens, completionTokens, totalTokens, calls}`（中转站未上报时缺省） |
+| `fromCache` | 恒为 `true`：共享结果永远来自数据库，接口不触发模型调用 |
+| `rateLimited` | 恒为 `false`（保留字段，兼容客户端解析） |
+| `usage` | 生成时的模型消耗（中转站未上报时缺省） |
 
-## 限流：超限时回退到上一次结果
+客户端自带 Key 时走另一条路：设备直接请求用户配置的模型接口，payload 与结果都不经过
+服务端，本地 Room 缓存按 `(event, method)` 分键（迁移 v5），切方法立即可见各自的结果。
 
-两层限制，都不会让用户拿到空白：
+## 管理员才能重新生成
 
-1. **同一 (事件， 方法) 的冷却窗口** —— `[limits] ai_regenerate_cooldown_seconds`（默认 600 秒）。
-   窗口内点「重新分析」直接返回已缓存结果并标注 `rateLimited`。
-2. **每令牌每日预算** —— `[limits] ai_analysis_per_token_per_day`（默认 60）。
-   超限时先查缓存：有 → 返回上次结果 + `rateLimited` + `Retry-After`；
-   完全没有 → 才返回 `429`（`error.code = quota_exceeded`）。
-
-客户端会在本地应用同一冷却规则（后端模式下网络请求也一样被服务端拦住），并在分析页
-明确提示「已达限流，显示上一次分析结果」。
+共享结果没有用户侧限流：读永远免费，写只有管理员。`[limits] ai_regenerate_cooldown_seconds`
+（默认 600 秒）用于约束管理员批准后的重新生成频率：窗口内的重试会拿到上一次结果，
+任务保持待重试状态直到冷却结束。`ai_concurrency` 限制同时打给模型的任务数。
 
 ## 模型调用审计（按类别分类）
 
@@ -371,6 +375,9 @@ reasoning 混排、schema 回显、截断、`snake_case`、`verdict` 归一化�
 ## 翻译与勘正审核
 
 事件名翻译沿用 `event_name_translation` 缓存 + 启动补翻，返回的事件带 `eventZhCn/eventZhTw`。
+客户端不需要个人 Key 就能拿到译名：后端模式下译名随事件返回；直连模式配置了后端时，
+客户端会通过 `POST /api/v1/translations/names` 批量拉取已缓存的译名（最多 100 个/批），
+同样不消耗服务端或客户端的模型额度。
 
 人工勘正由管理员把关：
 
@@ -422,6 +429,12 @@ quiet_hours_timezone = "Asia/Shanghai"
 鉴权/翻译/AI 的启用状态与所用模型、出网代理，以及最近一次模型调用时间。它**不受静默时段
 抑制**（夜间重启也值得关注，且第一次启动必须证明 bot 配置可用）；崩溃循环（systemd 自动拉起）
 时会每个重启各发一条，这也是预期行为——那是真出了问题。
+
+## 启动时刷新最近 7 天
+
+每次正常启动都会在后台按天刷新最近 7 个 UTC 日期（含今天），更新事件数值、观测记录与缺失译名。已有译名使用共享缓存，不重复调用模型，也不覆盖人工勘正；翻译需启用并配置 `[translation]`，否则仍保存原文事件。
+
+该任务不阻塞 HTTP 服务启动，与原有未来日历同步独立运行；单日抓取失败会记录日志并继续下一天。主源失败时仍使用周历回退，但周历不保证覆盖过去 7 天，降级会记录警告。没有抓到的日期不会清空已有数据。启动刷新不是过去三个月的完整历史补采。
 
 ## 过去三个月：历史补采（可选）
 

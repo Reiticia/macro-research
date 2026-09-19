@@ -23,14 +23,17 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/events/upcoming", get(calendar::upcoming))
         .route("/api/v1/calendar", get(calendar::calendar))
         .route("/api/v1/events/history", get(event::history))
+        .route("/api/v1/events/by-provider", get(event::by_provider))
+        .route("/api/v1/translations/names", post(translation::names))
         .route("/api/v1/history/backfill", get(backfill_status))
         .route("/api/v1/events/{id}", get(event::detail))
         .route("/api/v1/events/{id}/refresh", post(event::refresh))
         .route("/api/v1/events/{id}/analysis", get(event::analysis))
         .route("/api/v1/events/{id}/market", get(market::market))
+        .route("/api/v1/events/{id}/ai-analysis", get(event::ai_analysis))
         .route(
-            "/api/v1/events/{id}/ai-analysis",
-            get(event::ai_analysis).post(event::generate_ai_analysis),
+            "/api/v1/events/{id}/analysis-feedback",
+            post(event::analysis_feedback),
         )
         .route("/api/v1/market/quotes", get(market::quotes))
         .route(

@@ -61,6 +61,68 @@ fn event(provider_id: &str) -> EconomicEvent {
 }
 
 #[tokio::test]
+async fn startup_calendar_persists_recent_events_and_translations() {
+    use market_event_analyzer::calendar::{CalendarProvider, CalendarService};
+    use market_event_analyzer::scheduler::startup_calendar_sync;
+
+    struct DailyProvider;
+    #[async_trait]
+    impl CalendarProvider for DailyProvider {
+        async fn fetch_events(
+            &self,
+            start: chrono::DateTime<Utc>,
+            _end: chrono::DateTime<Utc>,
+        ) -> Result<Vec<EconomicEvent>, AppError> {
+            let mut row = event(&start.date_naive().to_string());
+            row.event_time = start;
+            row.actual = Some(3.into());
+            row.status = EventStatus::Historical;
+            Ok(vec![row])
+        }
+    }
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let repository = EventRepository::new(pool);
+    let translator = Arc::new(CountingTranslator {
+        calls: AtomicUsize::new(0),
+    });
+    let service = Arc::new(
+        CalendarService::new(
+            Arc::new(DailyProvider),
+            Arc::new(DailyProvider),
+            repository.clone(),
+        )
+        .with_translation(Arc::new(TranslationService::new(
+            repository.clone(),
+            translator.clone(),
+            20,
+        ))),
+    );
+    startup_calendar_sync(service.clone()).await;
+    startup_calendar_sync(service).await;
+    let rows = repository
+        .events_in_range(
+            Utc::now() - Duration::days(8),
+            Utc::now() + Duration::days(1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 7);
+    assert_eq!(translator.calls.load(Ordering::SeqCst), 1);
+    for row in rows {
+        assert_eq!(row.actual, Some(3.into()));
+        assert_eq!(row.event_zh_cn.as_deref(), Some("消费者价格指数同比"));
+        assert_eq!(row.event_zh_tw.as_deref(), Some("消費者價格指數同比"));
+        assert_eq!(repository.observations(row.id).await.unwrap().len(), 2);
+    }
+}
+
+#[tokio::test]
 async fn persisted_translation_is_reused_for_the_same_event_name() {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)

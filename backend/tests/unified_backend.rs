@@ -389,7 +389,7 @@ async fn source_failures_escalate_only_after_the_threshold() {
 }
 
 #[tokio::test]
-async fn ai_analysis_reports_unavailable_when_the_server_has_no_model_key() {
+async fn missing_shared_ai_returns_not_found_even_without_a_model_key() {
     let app = app().await;
     let response = api::router(app.state.clone())
         .oneshot(request(
@@ -399,5 +399,102 @@ async fn ai_analysis_reports_unavailable_when_the_server_has_no_model_key() {
         ))
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn shared_ai_is_readable_and_feedback_is_recorded_once_per_revision() {
+    let app = app().await;
+    sqlx::query(
+        "INSERT INTO ai_analysis (event_id, language, method, timezone, revision, chain_json, data_analysis, market_outlook, model, generated_at) \
+         VALUES (1, 'en', 2, 'UTC', 1, '[]', 'data', 'outlook', 'test-model', '2026-09-19T00:00:00+00:00')",
+    )
+    .execute(app.state.events.pool())
+    .await
+    .unwrap();
+    let router = api::router(app.state.clone());
+
+    let cached = router
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/events/1/ai-analysis?language=en&method=2",
+            Some("secret-token"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cached.status(), StatusCode::OK);
+
+    let body = serde_json::json!({"language":"en","method":2,"revision":1,"message":"outlook ignores the dollar move"});
+    let first = router
+        .clone()
+        .oneshot(json_request(
+            "/api/v1/events/1/analysis-feedback",
+            "secret-token",
+            body.clone(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let second = router
+        .oneshot(json_request(
+            "/api/v1/events/1/analysis-feedback",
+            "secret-token",
+            body,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM analysis_feedback")
+        .fetch_all(app.state.events.pool())
+        .await
+        .unwrap();
+    assert_eq!(ids.len(), 1);
+
+    // The same revision against an unknown analysis is rejected.
+    let missing = api::router(app.state.clone())
+        .oneshot(json_request(
+            "/api/v1/events/1/analysis-feedback",
+            "secret-token",
+            serde_json::json!({"language":"en","method":1,"revision":9,"message":"x"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn events_are_resolvable_by_provider_identity_and_names_by_cache() {
+    let app = app().await;
+    let router = api::router(app.state.clone());
+    let response = router
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/events/by-provider?provider=trading_view&provider_id=fixture-2",
+            Some("secret-token"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let missing = router
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/events/by-provider?provider=trading_view&provider_id=other",
+            Some("secret-token"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    let response = router
+        .oneshot(json_request(
+            "/api/v1/translations/names",
+            "secret-token",
+            serde_json::json!(["Nonfarm Payrolls"]),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
 }

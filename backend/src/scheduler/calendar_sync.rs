@@ -1,8 +1,38 @@
 use std::{sync::Arc, time::Duration as StdDuration};
 
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 
 use crate::{calendar::CalendarService, config::CalendarConfig};
+
+/// Refresh the last seven UTC calendar days, including today, once per server start.
+/// Separate from the upcoming sync so historical requests cannot delay live monitoring.
+pub async fn startup_calendar_sync(service: Arc<CalendarService>) {
+    for (start, end) in recent_day_ranges(Utc::now()) {
+        match service.refresh(start, end).await {
+            Ok(fetched) => {
+                if let Some(detail) = fetched.degraded_detail {
+                    tracing::warn!(%start, %end, count = fetched.events.len(), %detail,
+                        "startup calendar refresh degraded; weekly fallback may not cover history");
+                } else {
+                    tracing::info!(%start, %end, count = fetched.events.len(),
+                        "startup calendar data and translations synchronized");
+                }
+            }
+            Err(error) => tracing::error!(%start, %end, %error,
+                "startup calendar refresh failed; continuing with next day"),
+        }
+    }
+}
+
+fn recent_day_ranges(now: DateTime<Utc>) -> Vec<(DateTime<Utc>, DateTime<Utc>)> {
+    let today = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+    (0..7)
+        .map(|index| {
+            let start = today - Duration::days(6 - index);
+            (start, start + Duration::days(1))
+        })
+        .collect()
+}
 
 pub async fn calendar_sync_loop(
     service: Arc<CalendarService>,
