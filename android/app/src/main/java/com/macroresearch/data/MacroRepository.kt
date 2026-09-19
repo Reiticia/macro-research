@@ -5,6 +5,7 @@ import com.macroresearch.data.local.AiAnalysisEntity
 import com.macroresearch.data.local.AnalysisDao
 import com.macroresearch.data.local.EventDao
 import com.macroresearch.data.local.FollowedEventEntity
+import com.macroresearch.data.local.NameCorrectionEntity
 import com.macroresearch.data.local.asEntity
 import com.macroresearch.data.local.asExternalModel
 import com.macroresearch.data.model.AiAnalysis
@@ -570,7 +571,8 @@ class MacroRepository(
 
     /**
      * Direct mode applies the correction locally; backend mode queues it for the admin, because
-     * the shared translation cache belongs to the server.
+     * the shared translation cache belongs to the server. Direct corrections are also kept in
+     * their own table so later translation syncs cannot silently revert them.
      */
     suspend fun submitTranslationCorrection(
         event: EconomicEvent,
@@ -584,7 +586,11 @@ class MacroRepository(
         }
         val outcome = source.submitCorrection(event, simplified, traditional)
         if (outcome is CorrectionOutcome.AppliedLocally) {
+            // Remember the correction separately so later translation syncs cannot revert it:
+            // without this memory every server/AI pull silently restored the old name.
+            dao.correctName(NameCorrectionEntity(event.event, simplified, traditional))
             dao.updateTranslation(event.event, simplified, traditional)
+            _translationsUpdated.tryEmit(Unit)
         }
         return outcome
     }
@@ -604,7 +610,9 @@ class MacroRepository(
             )
             val result = translated[event.event]
                 ?: error("AI did not return a translation for this event")
+            dao.correctName(NameCorrectionEntity(event.event, result.first, result.second))
             dao.updateTranslation(event.event, result.first, result.second)
+            _translationsUpdated.tryEmit(Unit)
             _translationError.value = null
             result
         }
@@ -675,7 +683,10 @@ class MacroRepository(
             // user's own key on a dataset that already carries Chinese names.
             if (source.mode == DataSourceMode.BACKEND) return@withLock merged
             if (dataSourceSettings.value.configured) {
-                val names = merged.map { it.event }.distinct()
+                // Manual corrections are device-authoritative: never fetch (and overwrite)
+                // names the user fixed, otherwise every refresh reverted their correction.
+                val corrected = dao.corrections().map { it.event }.toSet()
+                val names = merged.map { it.event }.filter { it !in corrected }.distinct()
                 val translations = names.chunked(100).flatMap { batch ->
                     backendSource.translations(batch).entries.map { it.key to it.value }
                 }.toMap()
@@ -731,14 +742,26 @@ class MacroRepository(
             }
         }
 
-    /** Name-keyed translations already stored locally; also used to refresh rendered lists. */
+    /** Name-keyed translations already stored locally; also used to refresh rendered lists.
+     * In direct mode manual corrections win over anything synced afterwards. */
     suspend fun cachedTranslations(names: Collection<String>): Map<String, Pair<String, String>> {
         val distinct = names.map(String::trim).filter(String::isNotEmpty).distinct()
         if (distinct.isEmpty()) return emptyMap()
-        return distinct.chunked(500)
+        val cached = distinct.chunked(500)
             .flatMap { dao.translations(it) }
             .associate { it.event to (it.eventZhCn to it.eventZhTw) }
+        val corrections = activeCorrections()
+        if (corrections.isEmpty()) return cached
+        return cached + corrections.filterKeys(distinct::contains)
     }
+
+    /** Corrections are device-authoritative in direct mode; the backend owns its own cache. */
+    private suspend fun activeCorrections(): Map<String, Pair<String, String>> =
+        if (source.mode == DataSourceMode.BACKEND) {
+            emptyMap()
+        } else {
+            dao.corrections().associate { it.event to (it.eventZhCn to it.eventZhTw) }
+        }
 
     private suspend fun mergeCachedTranslations(events: List<EconomicEvent>): List<EconomicEvent> {
         if (events.isEmpty()) return events

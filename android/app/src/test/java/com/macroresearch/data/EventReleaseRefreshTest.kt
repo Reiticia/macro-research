@@ -4,6 +4,7 @@ import com.macroresearch.data.local.CachedEventEntity
 import com.macroresearch.data.local.CachedTranslation
 import com.macroresearch.data.local.EventDao
 import com.macroresearch.data.local.FollowedEventEntity
+import com.macroresearch.data.local.NameCorrectionEntity
 import com.macroresearch.data.remote.EconomicCalendarClient
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -125,6 +126,7 @@ class EventReleaseRefreshTest {
 
     private class FakeEventDao : EventDao {
         val rows = linkedMapOf<Long, CachedEventEntity>()
+        val corrections = linkedMapOf<String, NameCorrectionEntity>()
 
         override fun observeUpcoming(from: String): Flow<List<CachedEventEntity>> = flowOf(emptyList())
         override fun observeEvent(id: Long): Flow<CachedEventEntity?> = flowOf(rows[id])
@@ -150,6 +152,8 @@ class EventReleaseRefreshTest {
 
         override suspend fun clearFollows() = Unit
         override fun observeFollowed(eventId: Long): Flow<Boolean> = flowOf(false)
+        override suspend fun correctName(correction: NameCorrectionEntity) { corrections[correction.event] = correction }
+        override suspend fun corrections(): List<NameCorrectionEntity> = corrections.values.toList()
         override suspend fun isFollowed(eventId: Long) = false
         override suspend fun follow(event: FollowedEventEntity) = Unit
         override suspend fun unfollow(eventId: Long) = Unit

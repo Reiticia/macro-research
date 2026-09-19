@@ -104,4 +104,11 @@ interface EventDao {
 
     @Query("DELETE FROM followed_event WHERE eventId = :eventId")
     suspend fun unfollow(eventId: Long)
+
+    /** Manual correction memory; survives refreshes and mode switches by design. */
+    @Upsert
+    suspend fun correctName(correction: NameCorrectionEntity)
+
+    @Query("SELECT * FROM name_correction")
+    suspend fun corrections(): List<NameCorrectionEntity>
 }

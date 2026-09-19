@@ -6,8 +6,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CachedEventEntity::class, FollowedEventEntity::class, AiAnalysisEntity::class],
-    version = 5,
+    entities = [CachedEventEntity::class, FollowedEventEntity::class, AiAnalysisEntity::class, NameCorrectionEntity::class],
+    version = 6,
     exportSchema = true,
 )
 abstract class MacroDatabase : RoomDatabase() {
@@ -84,6 +84,20 @@ abstract class MacroDatabase : RoomDatabase() {
                 )
                 db.execSQL("DROP TABLE ai_analysis")
                 db.execSQL("ALTER TABLE ai_analysis_new RENAME TO ai_analysis")
+            }
+        }
+        // v6 keeps manual translation corrections in their own table so synced translations
+        // (server pull or AI) can never silently revert a name the user fixed.
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `name_correction` (" +
+                        "`event` TEXT NOT NULL, " +
+                        "`eventZhCn` TEXT NOT NULL, " +
+                        "`eventZhTw` TEXT NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`event`))",
+                )
             }
         }
     }
