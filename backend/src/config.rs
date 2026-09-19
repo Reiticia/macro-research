@@ -220,6 +220,9 @@ pub struct TranslationConfig {
     /// Free-form JSON merged into every request body; `messages` is protected.
     pub extra_body: BTreeMap<String, serde_json::Value>,
     pub batch_size: usize,
+    /// Rounds of "translate, review, retry the rejected ones" per batch. A name that keeps
+    /// failing review is left untranslated and retried by the next sync.
+    pub max_rounds: usize,
     pub backfill_on_startup: bool,
 }
 
@@ -233,6 +236,7 @@ impl Default for TranslationConfig {
             extra_headers: BTreeMap::new(),
             extra_body: BTreeMap::new(),
             batch_size: 20,
+            max_rounds: 3,
             backfill_on_startup: true,
         }
     }
@@ -338,7 +342,7 @@ impl TelegramConfig {
         (!value.is_empty()).then(|| value.to_owned())
     }
 
-    /// Only these chats may read status or decide translation corrections.
+    /// Only these chats may read status, usage and the analysis-feedback buttons.
     pub fn admin_chat_ids(&self) -> Vec<i64> {
         self.admin_chat_ids
             .split(',')

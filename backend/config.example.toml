@@ -78,6 +78,9 @@ base_url = "https://relay.example.com/v1"
 model = "deepseek-flash"
 api_key = ""
 batch_size = 20
+# 每批的“翻译 → AI 校验 → 不通过带反馈重译”轮数。校验始终开启；
+# 超过轮数仍未通过的名称不写缓存，下次同步会重新尝试。
+max_rounds = 3
 backfill_on_startup = true
 # 一般不需要，但翻译批次同样可以带思考/采样参数：
 # extra_body = { temperature = 0.2 }

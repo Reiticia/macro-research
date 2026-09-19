@@ -71,6 +71,7 @@ import com.macroresearch.ui.theme.AssetUp
 import com.macroresearch.ui.theme.Dovish
 import com.macroresearch.ui.theme.Hawkish
 import com.macroresearch.ui.viewModelFactory
+import kotlinx.coroutines.delay
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -89,7 +90,17 @@ fun AnalysisScreen(id: Long, repository: MacroRepository, onBack: () -> Unit) {
     val method by repository.analysisMethod.collectAsStateWithLifecycle()
     val dataSource by repository.dataSourceSettings.collectAsStateWithLifecycle()
     LaunchedEffect(id, languageTag, method, settings.configured, dataSource) {
-        vm.loadAi(languageTag)
+        if (settings.configured) {
+            vm.loadAi(languageTag)
+        } else if (dataSource.baseUrl.isNotBlank()) {
+            // A cache miss prioritizes the backend's complete nine-row bundle. Poll the read-only
+            // endpoint until this language/method row is ready so the card updates by itself.
+            do {
+                vm.loadAi(languageTag)
+                if (vm.ai.value.analysis != null) break
+                delay(15_000)
+            } while (true)
+        }
     }
     Scaffold(
         topBar = { TopAppBar(title = { Text(state.event?.localizedName(LocalConfiguration.current.locales[0]) ?: stringResource(R.string.analysis), fontWeight = FontWeight.Bold) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back)) } }) },
@@ -104,6 +115,7 @@ fun AnalysisScreen(id: Long, repository: MacroRepository, onBack: () -> Unit) {
                 market = state.market,
                 ai = ai,
                 aiConfigured = settings.configured,
+                sharedFeedbackEnabled = dataSource.configured,
                 onGenerateAi = { vm.generateAiAnalysis(languageTag) },
                 onFeedback = { vm.feedback(languageTag, it) },
                 onRefreshShared = { vm.refreshSharedAi(languageTag) },
@@ -133,6 +145,7 @@ private fun AnalysisContent(
     market: MarketResponse?,
     ai: AiAnalysisState,
     aiConfigured: Boolean,
+    sharedFeedbackEnabled: Boolean,
     onGenerateAi: () -> Unit,
     onFeedback: (String) -> Unit,
     onRefreshShared: () -> Unit,
@@ -148,7 +161,17 @@ private fun AnalysisContent(
         } else {
             item { ReactionTimeline(event, market) }
         }
-        item { AiAnalysisCard(event, ai, aiConfigured, onGenerateAi, onFeedback, onRefreshShared) }
+        item {
+            AiAnalysisCard(
+                event,
+                ai,
+                aiConfigured,
+                sharedFeedbackEnabled,
+                onGenerateAi,
+                onFeedback,
+                onRefreshShared,
+            )
+        }
         item {
             Text(analysisSummaryLabel(report.summary), Modifier.padding(bottom = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
@@ -160,6 +183,7 @@ private fun AiAnalysisCard(
     event: EconomicEvent,
     ai: AiAnalysisState,
     configured: Boolean,
+    sharedFeedbackEnabled: Boolean,
     onGenerate: () -> Unit,
     onFeedback: (String) -> Unit,
     onRefreshShared: () -> Unit,
@@ -228,17 +252,19 @@ private fun AiAnalysisCard(
             }
             if (!configured && ai.analysis != null && !ai.loading) {
                 AiHint(stringResource(R.string.ai_shared_note))
-                if (ai.feedbackSent) {
-                    AiHint(stringResource(R.string.ai_feedback_sent))
-                } else {
-                    OutlinedTextField(
-                        value = feedbackText,
-                        onValueChange = { if (it.length <= 2000) feedbackText = it },
-                        label = { Text(stringResource(R.string.ai_feedback)) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    TextButton(onClick = { onFeedback(feedbackText) }, enabled = feedbackText.isNotBlank()) {
-                        Text(stringResource(R.string.ai_feedback))
+                if (sharedFeedbackEnabled) {
+                    if (ai.feedbackSent) {
+                        AiHint(stringResource(R.string.ai_feedback_sent))
+                    } else {
+                        OutlinedTextField(
+                            value = feedbackText,
+                            onValueChange = { if (it.length <= 2000) feedbackText = it },
+                            label = { Text(stringResource(R.string.ai_feedback)) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        TextButton(onClick = { onFeedback(feedbackText) }, enabled = feedbackText.isNotBlank()) {
+                            Text(stringResource(R.string.ai_feedback))
+                        }
                     }
                 }
             }

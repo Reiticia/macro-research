@@ -3,7 +3,6 @@ package com.macroresearch.data.remote
 import com.google.gson.Gson
 import com.macroresearch.data.AnalysisMethod
 import com.macroresearch.data.BackendDataSource
-import com.macroresearch.data.CorrectionOutcome
 import com.macroresearch.data.model.EconomicEvent
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -67,6 +66,49 @@ class BackendClientTest {
         assertEquals("3.2", event.actual)
         // The server's extra `timeExact` field must not break decoding.
         assertEquals(3, event.importance)
+    }
+
+    @Test
+    fun translationCacheDoesNotRequireAnAccessToken() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"CPI YoY":["消费者价格指数同比","消費者價格指數同比"]}""",
+            ),
+        )
+        val publicClient = BackendClient(
+            client = OkHttpClient(),
+            gson = gson,
+            baseUrl = { server.url("/").toString().trimEnd('/') },
+            token = { null },
+        )
+
+        val translations = publicClient.translations(listOf("CPI YoY"))
+
+        assertEquals("消费者价格指数同比", translations.getValue("CPI YoY").first)
+        assertEquals(null, server.takeRequest().getHeader("authorization"))
+    }
+
+    @Test
+    fun sharedAnalysisByProviderDoesNotRequireAnAccessToken() = runBlocking {
+        server.enqueue(MockResponse().setBody(briefingJson()))
+        val publicClient = BackendClient(
+            client = OkHttpClient(),
+            gson = gson,
+            baseUrl = { server.url("/").toString().trimEnd('/') },
+            token = { null },
+        )
+        val event = gson.fromJson(eventJson(), EconomicEvent::class.java)
+
+        val analysis = publicClient.aiAnalysisByProvider(
+            event,
+            "zh-CN",
+            AnalysisMethod.EX_ANTE_THEN_COMPARE,
+        )
+
+        requireNotNull(analysis)
+        val request = server.takeRequest()
+        assertTrue(request.path.orEmpty().startsWith("/api/v1/ai-analysis/by-provider?"))
+        assertEquals(null, request.getHeader("authorization"))
     }
 
     @Test
@@ -137,7 +179,7 @@ class BackendClientTest {
     }
 
     @Test
-    fun theBackendDataSourceKeepsCountryFilteringAndCorrectionSemantics() = runBlocking {
+    fun theBackendDataSourceKeepsCountryFiltering() = runBlocking {
         server.enqueue(
             MockResponse().setBody(
                 "[${eventJson()},${eventJson(id = 8, zhCn = null).replace("United States", "China")}]",
@@ -147,28 +189,7 @@ class BackendClientTest {
         val filtered = source.calendar(LocalDate.of(2026, 9, 11), LocalDate.of(2026, 9, 11), listOf("China"))
         assertEquals(1, filtered.events.size)
         assertEquals("China", filtered.events.single().country)
-        server.takeRequest()
-
-        server.enqueue(
-            MockResponse().setBody(
-                """{"id":3,"eventName":"CPI YoY","status":"pending","zhCn":"x","zhTw":"y"}""",
-            ),
-        )
-        val outcome = source.submitCorrection(
-            EconomicEvent(
-                id = 7, provider = "trading_view", providerId = "tv-1", releaseGroupId = null,
-                country = "United States", currency = "USD", category = "inflation",
-                event = "CPI YoY", eventTime = "2026-09-11T12:30:00Z", importance = 3,
-                actual = "3.2", previous = "3.0", consensus = "3.1", forecast = "3.1", unit = "%",
-                status = "released",
-            ),
-            "x",
-            "y",
-        )
-        assertTrue(outcome is CorrectionOutcome.Queued)
-        assertEquals("pending", (outcome as CorrectionOutcome.Queued).status)
-        val body = server.takeRequest().body.readUtf8()
-        assertTrue(body, body.contains("\"eventName\":\"CPI YoY\""))
+        assertTrue(server.takeRequest().path!!.contains("/api/v1/calendar"))
     }
 
     @Test

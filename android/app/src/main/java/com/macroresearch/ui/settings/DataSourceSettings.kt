@@ -172,7 +172,7 @@ fun DataSourceSettings(repository: MacroRepository) {
                 }
                 // A failed event-name lookup must be visible where the backend is configured;
                 // otherwise readers only see English names and never learn why.
-                if (settings.configured) {
+                if (settings.baseUrl.isNotBlank()) {
                     translationError?.let {
                         Text(
                             stringResource(R.string.backend_translation_failed, it),

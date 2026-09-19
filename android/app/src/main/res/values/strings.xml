@@ -114,16 +114,6 @@
     <string name="api_key_security_note">The key is encrypted by Android Keystore, excluded from backups, and never bundled in the APK. Use a restricted personal key with a spending limit.</string>
     <string name="language">Language</string>
     <string name="language_note">Interface language applies immediately. A configured backend supplies event-name translations without a personal AI key.</string>
-    <string name="fix_translation">Fix translation</string>
-    <string name="translation_correction">Translation correction</string>
-    <string name="source_name">Source name</string>
-    <string name="simplified_chinese">Simplified Chinese</string>
-    <string name="traditional_chinese">Traditional Chinese</string>
-    <string name="ai_retranslate">Re-translate with AI</string>
-    <string name="retranslating">Re-translating…</string>
-    <string name="retranslate_failed">AI re-translation failed</string>
-    <string name="translation_requires_key">Add an API key in Settings to use AI re-translation.</string>
-    <string name="translation_correction_note">Corrections apply to every event with the same name.</string>
     <string name="data_network">Data source network</string>
     <string name="data_proxy">HTTP proxy (optional)</string>
     <string name="data_proxy_note">Used for calendar and market-data requests (Treasury yields, quotes, candles). Leave blank to use the system network. HTTPS certificate verification stays enabled; AI and translation requests never use it.</string>
@@ -156,7 +146,6 @@
     <string name="data_source_switch_title">Switch data source?</string>
     <string name="data_source_switch_body">The cached events and your follow list are cleared, because the two modes use different event identifiers. Filter settings are kept.</string>
     <string name="data_source_switch_confirm">Switch and clear cache</string>
-    <string name="translation_correction_queued">Submitted. An administrator reviews it before it applies to every device.</string>
     <string name="calendar_warning_rate_limited">Calendar source is rate-limiting this device; showing cached data. It should recover in about %1$d min.</string>
     <string name="calendar_warning_rate_limited_unknown">Calendar source is rate-limiting this device; showing cached data. Try again later.</string>
     <string name="release_data_missing">The scheduled time has passed, but no published value has been retrieved. Some events, such as speeches, have no numeric result. Fetch it again below; numerical analysis needs an actual value.</string>

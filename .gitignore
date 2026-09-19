@@ -18,3 +18,5 @@
 
 # 真实配置含密钥，不入库；模板见 backend/config.example.toml
 /backend/config.toml
+
+ANDROID_KEYSTORE_PASSWORD

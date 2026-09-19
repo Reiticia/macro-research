@@ -11,7 +11,8 @@ use market_event_analyzer::{
     model::{EconomicEvent, EventStatus},
     repository::EventRepository,
     translation::{
-        EventNameTranslation, EventNameTranslator, OpenAiEventNameTranslator, TranslationService,
+        EventNameTranslation, EventNameTranslator, OpenAiEventNameTranslator, TranslationRevision,
+        TranslationService, TranslationVerdict,
     },
 };
 use serde_json::Value;
@@ -23,7 +24,11 @@ struct CountingTranslator {
 
 #[async_trait]
 impl EventNameTranslator for CountingTranslator {
-    async fn translate(&self, names: &[String]) -> Result<Vec<EventNameTranslation>, AppError> {
+    async fn translate(
+        &self,
+        names: &[String],
+        _revisions: &[TranslationRevision],
+    ) -> Result<Vec<EventNameTranslation>, AppError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(names
             .iter()
@@ -31,6 +36,20 @@ impl EventNameTranslator for CountingTranslator {
                 source: source.clone(),
                 zh_cn: "消费者价格指数同比".into(),
                 zh_tw: "消費者價格指數同比".into(),
+            })
+            .collect())
+    }
+
+    async fn verify(
+        &self,
+        translations: &[EventNameTranslation],
+    ) -> Result<Vec<TranslationVerdict>, AppError> {
+        Ok(translations
+            .iter()
+            .map(|row| TranslationVerdict {
+                source: row.source.clone(),
+                approved: true,
+                reason: None,
             })
             .collect())
     }
@@ -212,7 +231,10 @@ async fn openai_compatible_client_sends_a_batch_and_parses_json() {
         OpenAiEventNameTranslator::new(reqwest::Client::new(), &url, "test-model", "test-key")
             .unwrap();
 
-    let translations = translator.translate(&["CPI YoY".into()]).await.unwrap();
+    let translations = translator
+        .translate(&["CPI YoY".into()], &[])
+        .await
+        .unwrap();
 
     assert_eq!(translations[0].zh_cn, "消费者价格指数同比");
     assert_eq!(translations[0].zh_tw, "消費者價格指數同比");
@@ -305,7 +327,7 @@ async fn relay_rejecting_response_format_is_retried_and_remembered() {
     .unwrap();
 
     let first = translator
-        .translate(&["Nonfarm Payrolls".into()])
+        .translate(&["Nonfarm Payrolls".into()], &[])
         .await
         .unwrap();
     assert_eq!(first[0].zh_cn, "非农就业");
@@ -318,7 +340,7 @@ async fn relay_rejecting_response_format_is_retried_and_remembered() {
     assert!(capture.body(1).await.get("response_format").is_none());
 
     let second = translator
-        .translate(&["Nonfarm Payrolls".into()])
+        .translate(&["Nonfarm Payrolls".into()], &[])
         .await
         .unwrap();
     assert_eq!(second[0].zh_tw, "非農就業");
@@ -357,7 +379,7 @@ async fn relay_error_body_is_surfaced_to_the_operator() {
     )
     .unwrap();
     let error = translator
-        .translate(&["CPI YoY".into()])
+        .translate(&["CPI YoY".into()], &[])
         .await
         .unwrap_err()
         .to_string();
@@ -378,7 +400,7 @@ async fn a_full_chat_completions_url_is_accepted_as_base_url() {
         "test-key",
     )
     .unwrap();
-    assert!(translator.translate(&["CPI YoY".into()]).await.is_ok());
+    assert!(translator.translate(&["CPI YoY".into()], &[]).await.is_ok());
     assert_eq!(capture.requests().await, 1);
     task.abort();
 }
@@ -403,7 +425,10 @@ async fn extra_headers_are_sent_and_can_replace_the_bearer_header() {
         ExtraHeaders::from_map(&map),
     )
     .unwrap();
-    translator.translate(&["CPI YoY".into()]).await.unwrap();
+    translator
+        .translate(&["CPI YoY".into()], &[])
+        .await
+        .unwrap();
     assert_eq!(
         capture.header(0, "x-title").await.as_deref(),
         Some("macro-research")
@@ -424,7 +449,10 @@ async fn extra_headers_are_sent_and_can_replace_the_bearer_header() {
         ExtraHeaders::from_map(&override_map),
     )
     .unwrap();
-    translator.translate(&["CPI YoY".into()]).await.unwrap();
+    translator
+        .translate(&["CPI YoY".into()], &[])
+        .await
+        .unwrap();
     assert_eq!(
         capture.header(1, "api-key").await.as_deref(),
         Some("azure-key")

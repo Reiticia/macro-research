@@ -9,6 +9,7 @@ use crate::{
     error::AppError,
 };
 use chrono::Utc;
+use futures_util::{StreamExt, stream};
 use sqlx::{Row, SqlitePool};
 use std::{sync::Arc, time::Duration};
 
@@ -140,75 +141,208 @@ async fn notify_feedback(state: &AppState, alerts: &AlertService) -> Result<(), 
     Ok(())
 }
 
-async fn generate_pending(state: &AppState) -> Result<(), AppError> {
-    let pool = state.events.pool();
+const SHARED_LANGUAGES: [&str; 3] = ["en", "zh-CN", "zh-TW"];
+const SHARED_METHODS: [i64; 3] = [1, 2, 3];
+
+/// Creates the complete cache bundle for one event: three languages × three methods.
+///
+/// `INSERT OR IGNORE` makes this safe to call both from the market collector and from startup
+/// recovery. A completed or retried row is never reset accidentally.
+pub async fn enqueue_event_bundle(pool: &SqlitePool, event_id: i64) -> Result<(), AppError> {
+    let mut tx = pool.begin().await?;
+    for language in SHARED_LANGUAGES {
+        for method in SHARED_METHODS {
+            sqlx::query(
+                "INSERT OR IGNORE INTO shared_ai_job(event_id,method,language) VALUES(?,?,?)",
+            )
+            .bind(event_id)
+            .bind(method)
+            .bind(language)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Moves an existing or recovered nine-row bundle ahead of the historical backlog. Reading a
+/// missing cache row may call this, but generation remains asynchronous in the bounded worker.
+pub async fn prioritize_event_bundle(pool: &SqlitePool, event_id: i64) -> Result<(), AppError> {
+    enqueue_event_bundle(pool, event_id).await?;
+    sqlx::query("UPDATE shared_ai_job SET priority=1 WHERE event_id=? AND status='pending'")
+        .bind(event_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct SharedJob {
+    event_id: i64,
+    method: i64,
+    language: String,
+    target_revision: i64,
+}
+
+/// Recovers events that crossed the collection window while the process was stopped. One
+/// set-based statement replaces thousands of per-row inserts on every 30-second worker tick.
+async fn enqueue_missing_bundles(state: &AppState) -> Result<(), AppError> {
     let cutoff = Utc::now()
         - chrono::Duration::minutes(state.config.scheduler.market_collect_after_minutes.max(0));
-    // Catch releases even if a restart or provider fallback bypassed the live watcher.
-    let events: Vec<i64> = sqlx::query_scalar(
-        "SELECT id FROM economic_event WHERE actual IS NOT NULL AND event_time<=?",
+    sqlx::query(
+        r#"WITH methods(method) AS (VALUES (1), (2), (3)),
+                  languages(language) AS (VALUES ('en'), ('zh-CN'), ('zh-TW'))
+           INSERT OR IGNORE INTO shared_ai_job(event_id, method, language)
+           SELECT event.id, methods.method, languages.language
+             FROM economic_event AS event
+             CROSS JOIN methods
+             CROSS JOIN languages
+            WHERE event.actual IS NOT NULL AND event.event_time <= ?"#,
     )
     .bind(cutoff.to_rfc3339())
+    .execute(state.events.pool())
+    .await?;
+    Ok(())
+}
+
+/// Picks one event rather than nine unrelated rows. This lets each released event converge to a
+/// complete nine-row cache, while the global AI semaphore still caps upstream concurrency.
+async fn next_event_jobs(state: &AppState) -> Result<Vec<SharedJob>, AppError> {
+    let pool = state.events.pool();
+    let now = Utc::now().to_rfc3339();
+    let event_id: Option<i64> = sqlx::query_scalar(
+        r#"SELECT job.event_id
+             FROM shared_ai_job AS job
+             JOIN economic_event AS event ON event.id = job.event_id
+            WHERE job.status = 'pending' AND job.retry_at <= ?
+            GROUP BY job.event_id
+            ORDER BY MAX(job.priority) DESC,
+                     CASE event.status WHEN 'completed' THEN 0 WHEN 'historical' THEN 2 ELSE 1 END,
+                     event.event_time DESC
+            LIMIT 1"#,
+    )
+    .bind(&now)
+    .fetch_optional(pool)
+    .await?;
+    let Some(event_id) = event_id else {
+        return Ok(Vec::new());
+    };
+    let rows = sqlx::query(
+        r#"SELECT event_id, method, language, target_revision
+             FROM shared_ai_job
+            WHERE event_id = ? AND status = 'pending' AND retry_at <= ?
+            ORDER BY language, method"#,
+    )
+    .bind(event_id)
+    .bind(now)
     .fetch_all(pool)
     .await?;
-    for event in events {
-        for lang in ["en", "zh-CN", "zh-TW"] {
-            for method in 1..=3i64 {
-                sqlx::query(
-                    "INSERT OR IGNORE INTO shared_ai_job(event_id,method,language) VALUES(?,?,?)",
-                )
-                .bind(event)
-                .bind(method)
-                .bind(lang)
-                .execute(pool)
-                .await?;
-            }
+    rows.into_iter()
+        .map(|row| {
+            Ok(SharedJob {
+                event_id: row.try_get("event_id")?,
+                method: row.try_get("method")?,
+                language: row.try_get("language")?,
+                target_revision: row.try_get("target_revision")?,
+            })
+        })
+        .collect()
+}
+
+async fn run_job(state: &AppState, job: SharedJob) -> (SharedJob, Result<(), AppError>) {
+    let result = async {
+        let _slot = state.quota.acquire_ai_slot().await?;
+        let service = state
+            .ai_analysis_service
+            .as_ref()
+            .ok_or_else(|| AppError::Config("shared AI service is not configured".into()))?;
+        let kind = AnalysisMethod::from_u8(job.method as u8);
+        if service
+            .cached(job.event_id, &job.language, kind, "UTC")
+            .await?
+            .is_some_and(|value| value.revision >= job.target_revision)
+        {
+            return Ok(());
+        }
+        let response = service
+            .generate(
+                job.event_id,
+                &job.language,
+                kind,
+                "UTC",
+                job.target_revision > 1,
+                "server-scheduler",
+            )
+            .await?;
+        if response.analysis.revision < job.target_revision {
+            return Err(AppError::Provider("regeneration cooling down".into()));
+        }
+        Ok(())
+    }
+    .await;
+    (job, result)
+}
+
+async fn finish_job(
+    state: &AppState,
+    job: &SharedJob,
+    result: Result<(), AppError>,
+) -> Result<(), AppError> {
+    let pool = state.events.pool();
+    match result {
+        Ok(()) => {
+            sqlx::query("UPDATE shared_ai_job SET status='completed',last_error=NULL WHERE event_id=? AND method=? AND language=? AND target_revision=?")
+                .bind(job.event_id).bind(job.method).bind(&job.language).bind(job.target_revision)
+                .execute(pool).await?;
+            sqlx::query("UPDATE analysis_feedback SET status='completed' WHERE status='queued' AND revision<? AND analysis_id IN (SELECT id FROM ai_analysis WHERE event_id=? AND method=? AND language=? AND timezone='UTC')")
+                .bind(job.target_revision).bind(job.event_id).bind(job.method).bind(&job.language)
+                .execute(pool).await?;
+        }
+        Err(error) => {
+            tracing::warn!(event = job.event_id, method = job.method, language = %job.language, %error, "shared AI generation failed");
+            sqlx::query("UPDATE shared_ai_job SET last_error=?,retry_at=? WHERE event_id=? AND method=? AND language=? AND target_revision=?")
+                .bind(error.to_string())
+                .bind((Utc::now()+chrono::Duration::minutes(5)).to_rfc3339())
+                .bind(job.event_id).bind(job.method).bind(&job.language).bind(job.target_revision)
+                .execute(pool).await?;
         }
     }
-    let jobs = sqlx::query("SELECT event_id,method,language,target_revision FROM shared_ai_job WHERE status='pending' AND retry_at<=? ORDER BY event_id DESC,method,language LIMIT 9").bind(Utc::now().to_rfc3339()).fetch_all(pool).await?;
-    let service = state.ai_analysis_service.as_ref().unwrap();
-    for job in jobs {
-        let event: i64 = job.try_get("event_id")?;
-        let method: i64 = job.try_get("method")?;
-        let lang: String = job.try_get("language")?;
-        let target: i64 = job.try_get("target_revision")?;
-        let result: Result<(), AppError> = async {
-            let _slot = state.quota.acquire_ai_slot().await?;
-            let kind = AnalysisMethod::from_u8(method as u8);
-            if service
-                .cached(event, &lang, kind, "UTC")
-                .await?
-                .is_some_and(|v| v.revision >= target)
-            {
-                return Ok(());
-            }
-            match state.analyses.get(event).await {
-                Ok(_) => {}
-                Err(AppError::NotFound) => {
-                    state.analysis_service.analyze(event).await?;
-                }
-                Err(error) => return Err(error),
-            }
-            let response = service
-                .generate(event, &lang, kind, "UTC", target > 1, "server-scheduler")
-                .await?;
-            // A cooldown response must not mark an administrator request as completed.
-            if response.analysis.revision < target {
-                return Err(AppError::Provider("regeneration cooling down".into()));
-            }
-            Ok(())
+    Ok(())
+}
+
+async fn generate_pending(state: &AppState) -> Result<(), AppError> {
+    enqueue_missing_bundles(state).await?;
+    let jobs = next_event_jobs(state).await?;
+    if jobs.is_empty() {
+        return Ok(());
+    }
+
+    // Build the deterministic rule report once before the nine model jobs start. Without this,
+    // a recovered event could make all nine jobs race to create the same prerequisite row.
+    let event_id = jobs[0].event_id;
+    match state.analyses.get(event_id).await {
+        Ok(_) => {}
+        Err(AppError::NotFound) => {
+            state.analysis_service.analyze(event_id).await?;
         }
+        Err(error) => return Err(error),
+    }
+
+    let results = stream::iter(jobs.into_iter().map(|job| run_job(state, job)))
+        .buffer_unordered(9)
+        .collect::<Vec<_>>()
         .await;
-        match result {
-            Ok(()) => {
-                sqlx::query("UPDATE shared_ai_job SET status='completed',last_error=NULL WHERE event_id=? AND method=? AND language=? AND target_revision=?").bind(event).bind(method).bind(&lang).bind(target).execute(pool).await?;
-                sqlx::query("UPDATE analysis_feedback SET status='completed' WHERE status='queued' AND revision<? AND analysis_id IN (SELECT id FROM ai_analysis WHERE event_id=? AND method=? AND language=? AND timezone='UTC')").bind(target).bind(event).bind(method).bind(&lang).execute(pool).await?;
-            }
-            Err(error) => {
-                tracing::warn!(event,method,%lang,%error,"shared AI generation failed");
-                sqlx::query("UPDATE shared_ai_job SET last_error=?,retry_at=? WHERE event_id=? AND method=? AND language=? AND target_revision=?").bind(error.to_string()).bind((Utc::now()+chrono::Duration::minutes(5)).to_rfc3339()).bind(event).bind(method).bind(&lang).bind(target).execute(pool).await?;
-            }
-        }
+    let total = results.len();
+    let succeeded = results.iter().filter(|(_, result)| result.is_ok()).count();
+    for (job, result) in results {
+        finish_job(state, &job, result).await?;
     }
+    tracing::info!(
+        event_id,
+        succeeded,
+        total,
+        "shared AI cache bundle processed"
+    );
     Ok(())
 }

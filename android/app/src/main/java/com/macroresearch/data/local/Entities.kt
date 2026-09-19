@@ -33,21 +33,6 @@ data class FollowedEventEntity(
     val followedAt: Long = System.currentTimeMillis(),
 )
 
-/**
- * Manual translation corrections keyed by event name.
- *
- * Direct mode is device-authoritative: synced translations must never overwrite a name the
- * user corrected here, so corrections live outside `cached_event` and survive refreshes,
- * retention cleanups and data-source mode switches.
- */
-@Entity(tableName = "name_correction")
-data class NameCorrectionEntity(
-    @PrimaryKey val event: String,
-    val eventZhCn: String,
-    val eventZhTw: String,
-    val updatedAt: Long = System.currentTimeMillis(),
-)
-
 /** Cached AI analysis; [chainJson] holds the serialized transmission chain. */
 /** Cached AI analysis. The three methods are stored side by side, never overwriting each other. */
 @Entity(tableName = "ai_analysis", primaryKeys = ["eventId", "method"])

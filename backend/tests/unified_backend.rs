@@ -21,10 +21,8 @@ use market_event_analyzer::{
     model::{Candle, EconomicEvent, EventStatus, Interval, LiveQuote, MarketSymbol, Quote},
     quota::QuotaService,
     repository::{AnalysisRepository, EventRepository, MarketRepository},
-    translation_correction::TranslationCorrectionService,
 };
 use rust_decimal::Decimal;
-use serde_json::json;
 use sqlx::sqlite::SqlitePoolOptions;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
@@ -173,11 +171,6 @@ async fn app() -> TestApp {
         analyses.clone(),
         RuleEngine::from_path("rules.toml").unwrap(),
     ));
-    let corrections = Arc::new(TranslationCorrectionService::new(
-        pool.clone(),
-        events.clone(),
-        Some(alerts),
-    ));
     let quota = Arc::new(QuotaService::new(pool.clone(), config.limits.clone()));
     let auth = AuthState {
         store: Arc::new(TokenStore::from_config(&config.auth).unwrap()),
@@ -193,7 +186,6 @@ async fn app() -> TestApp {
         market_service,
         analysis_service,
         ai_analysis_service: None::<Arc<AiAnalysisService>>,
-        corrections,
         health,
         llm_usage: None,
         auth,
@@ -268,93 +260,6 @@ async fn history_accepts_a_country_list() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-#[tokio::test]
-async fn translation_corrections_require_an_admin_decision() {
-    let app = app().await;
-    app.events.save_events(&[fixture_event(-3)]).await.unwrap();
-    let router = api::router(app.state.clone());
-
-    let submitted = router
-        .oneshot(json_request(
-            "/api/v1/translations/corrections",
-            "secret-token",
-            json!({
-                "eventName": "Core CPI m/m",
-                "zhCn": "核心CPI月率",
-                "zhTw": "核心CPI月率"
-            }),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(submitted.status(), StatusCode::OK);
-
-    // Nothing is applied before the admin decides.
-    let rows = app
-        .events
-        .history_page_multi(vec![], None, 10, 0, None, None)
-        .await
-        .unwrap();
-    assert!(rows.iter().all(|event| event.event_zh_cn.is_none()));
-
-    let pending = app.state.corrections.pending().await.unwrap();
-    assert_eq!(pending.len(), 1);
-    app.state.corrections.approve(pending[0].id).await.unwrap();
-
-    let rows = app
-        .events
-        .history_page_multi(vec![], None, 10, 0, None, None)
-        .await
-        .unwrap();
-    assert_eq!(rows[0].event_zh_cn.as_deref(), Some("核心CPI月率"));
-}
-
-#[tokio::test]
-async fn muted_event_names_stop_accepting_corrections() {
-    let app = app().await;
-    let first = app
-        .state
-        .corrections
-        .submit("Nonfarm Payrolls", "非农", "非農", Some("alice".into()))
-        .await
-        .unwrap();
-    app.state.corrections.mute(first.id).await.unwrap();
-    let second = app
-        .state
-        .corrections
-        .submit(
-            "Nonfarm Payrolls",
-            "新增非农",
-            "新增非農",
-            Some("bob".into()),
-        )
-        .await
-        .unwrap();
-    assert_eq!(second.status, "muted");
-    assert_eq!(second.id, 0);
-    // The muted request left the pending queue; nothing new was queued.
-    assert!(app.state.corrections.pending().await.unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn duplicate_corrections_within_a_day_reuse_the_existing_request() {
-    let app = app().await;
-    let first = app
-        .state
-        .corrections
-        .submit("Retail Sales m/m", "零售销售", "零售銷售", None)
-        .await
-        .unwrap();
-    let second = app
-        .state
-        .corrections
-        .submit("Retail Sales m/m", "零售销售", "零售銷售", None)
-        .await
-        .unwrap();
-    assert_eq!(first.id, second.id);
-    assert_eq!(app.state.corrections.pending().await.unwrap().len(), 1);
-}
-
-#[tokio::test]
 async fn source_failures_escalate_only_after_the_threshold() {
     let app = app().await;
     let health = app.state.health.clone();
@@ -425,6 +330,19 @@ async fn shared_ai_is_readable_and_feedback_is_recorded_once_per_revision() {
         .unwrap();
     assert_eq!(cached.status(), StatusCode::OK);
 
+    // Direct-mode clients have a device-local id, so they read the same frozen row by provider
+    // identity. This cache lookup is public and never triggers model work.
+    let public_cached = router
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/ai-analysis/by-provider?provider=trading_view&provider_id=fixture-2&language=en&method=2",
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(public_cached.status(), StatusCode::OK);
+
     let body = serde_json::json!({"language":"en","method":2,"revision":1,"message":"outlook ignores the dollar move"});
     let first = router
         .clone()
@@ -488,12 +406,19 @@ async fn events_are_resolvable_by_provider_identity_and_names_by_cache() {
         .unwrap();
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 
+    // Translation-cache reads are public: they neither mutate data nor trigger model work, so a
+    // direct-mode client can localize names without receiving a full backend access token.
     let response = router
-        .oneshot(json_request(
-            "/api/v1/translations/names",
-            "secret-token",
-            serde_json::json!(["Nonfarm Payrolls"]),
-        ))
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/translations/names")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!(["Nonfarm Payrolls"]).to_string(),
+                ))
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);

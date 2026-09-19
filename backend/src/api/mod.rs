@@ -24,7 +24,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/calendar", get(calendar::calendar))
         .route("/api/v1/events/history", get(event::history))
         .route("/api/v1/events/by-provider", get(event::by_provider))
-        .route("/api/v1/translations/names", post(translation::names))
         .route("/api/v1/history/backfill", get(backfill_status))
         .route("/api/v1/events/{id}", get(event::detail))
         .route("/api/v1/events/{id}/refresh", post(event::refresh))
@@ -36,10 +35,6 @@ pub fn router(state: AppState) -> Router {
             post(event::analysis_feedback),
         )
         .route("/api/v1/market/quotes", get(market::quotes))
-        .route(
-            "/api/v1/translations/corrections",
-            post(translation::submit).get(translation::latest),
-        )
         .route("/api/v1/ws", get(websocket::websocket))
         .route_layer(middleware::from_fn_with_state(
             state.auth.clone(),
@@ -49,6 +44,14 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/meta", get(meta))
+        // Existing event-name translations contain no private or quota-bearing data. Keeping
+        // this lookup public lets direct-mode readers localize names without a full data-source
+        // token; the bounded request cannot trigger model work or mutate the cache.
+        .route("/api/v1/translations/names", post(translation::names))
+        .route(
+            "/api/v1/ai-analysis/by-provider",
+            get(event::ai_analysis_by_provider),
+        )
         .merge(protected)
         // No browser clients: sending permissive CORS headers would only widen the surface.
         .layer(TraceLayer::new_for_http())

@@ -54,16 +54,6 @@ data class BackendSourceHealth(
 
 data class BackendStatus(val sources: List<BackendSourceHealth>)
 
-/** Outcome of a translation-correction submission. */
-data class CorrectionRecord(
-    val id: Long,
-    val eventName: String,
-    val status: String,
-    val zhCn: String,
-    val zhTw: String,
-    val decidedAt: String?,
-)
-
 /**
  * REST client for the self-hosted backend.
  *
@@ -145,7 +135,13 @@ class BackendClient(
     }
 
     suspend fun translations(names: List<String>): Map<String, Pair<String, String>> = withContext(Dispatchers.IO) {
-        postJson("/api/v1/translations/names", gson.toJsonTree(names)).asJsonObject.entrySet()
+        // This read-only cache endpoint is intentionally public: direct-mode clients only need
+        // the backend address to reuse existing translations and never trigger model work.
+        postJson(
+            "/api/v1/translations/names",
+            gson.toJsonTree(names),
+            authenticated = false,
+        ).asJsonObject.entrySet()
             .associate { (name, value) -> name to (value.asJsonArray[0].asString to value.asJsonArray[1].asString) }
     }
 
@@ -172,6 +168,26 @@ class BackendClient(
         getJson("/api/v1/market/quotes") { url ->
             if (symbols.isNotEmpty()) url.addQueryParameter("symbols", symbols.joinToString(","))
         }.let { gson.fromJson(it, MarketQuotesResponse::class.java) }
+    }
+
+    /** Public cached briefing lookup for a direct-mode event with a device-local id. */
+    suspend fun aiAnalysisByProvider(
+        event: EconomicEvent,
+        languageTag: String,
+        method: AnalysisMethod,
+    ): AiAnalysis? = withContext(Dispatchers.IO) {
+        val root = try {
+            getJson("/api/v1/ai-analysis/by-provider", authenticated = false) { url ->
+                url.addQueryParameter("provider", event.provider)
+                url.addQueryParameter("provider_id", event.providerId)
+                url.addQueryParameter("language", languageTag)
+                url.addQueryParameter("method", method.wireValue.toString())
+            }
+        } catch (missing: BackendException) {
+            if (missing.statusCode == 404) return@withContext null
+            throw missing
+        }
+        gson.fromJson(root, AiAnalysis::class.java)
     }
 
     /** Cached server-side briefing, or null when nothing has been generated yet. */
@@ -207,25 +223,6 @@ class BackendClient(
         Unit
     }
 
-    suspend fun submitCorrection(
-        eventName: String,
-        zhCn: String,
-        zhTw: String,
-    ): CorrectionRecord = withContext(Dispatchers.IO) {
-        val body = JsonObject().apply {
-            addProperty("eventName", eventName)
-            addProperty("zhCn", zhCn)
-            addProperty("zhTw", zhTw)
-        }
-        gson.fromJson(postJson("/api/v1/translations/corrections", body), CorrectionRecord::class.java)
-    }
-
-    suspend fun latestCorrection(eventName: String): CorrectionRecord? = withContext(Dispatchers.IO) {
-        val root = getJson("/api/v1/translations/corrections") { url ->
-            url.addQueryParameter("eventName", eventName)
-        }
-        if (root.isJsonNull) null else gson.fromJson(root, CorrectionRecord::class.java)
-    }
     /** `https://host` / `http://host` into the WebSocket scheme of the same endpoint. */
     fun webSocketUrl(): String? {
         val base = baseUrl().trim().trimEnd('/')
@@ -249,8 +246,12 @@ class BackendClient(
         return execute(request)
     }
 
-    private fun postJson(path: String, body: com.google.gson.JsonElement): com.google.gson.JsonElement {
-        val request = requestBuilder(path, authenticated = true) {}.post(
+    private fun postJson(
+        path: String,
+        body: com.google.gson.JsonElement,
+        authenticated: Boolean = true,
+    ): com.google.gson.JsonElement {
+        val request = requestBuilder(path, authenticated = authenticated) {}.post(
             body.toString().toRequestBody(JSON_MEDIA_TYPE),
         ).build()
         return execute(request)

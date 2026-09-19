@@ -28,7 +28,6 @@ use market_event_analyzer::{
     repository::{AnalysisRepository, EventRepository, MarketRepository},
     scheduler,
     translation::{EventNameTranslator, OpenAiEventNameTranslator, TranslationService},
-    translation_correction::TranslationCorrectionService,
 };
 use sqlx::{
     SqlitePool,
@@ -191,6 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         translator,
                         config.translation.batch_size,
                     )
+                    .with_max_rounds(config.translation.max_rounds)
                     .with_health(health.clone()),
                 ))
             }
@@ -297,11 +297,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let corrections = Arc::new(TranslationCorrectionService::new(
-        pool.clone(),
-        events.clone(),
-        Some(alerts.clone()),
-    ));
     let quota = Arc::new(QuotaService::new(pool.clone(), config.limits.clone()));
     let token_store = match TokenStore::from_config(&config.auth) {
         Ok(store) => Arc::new(store),
@@ -358,7 +353,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         market_service: market_service.clone(),
         analysis_service,
         ai_analysis_service,
-        corrections: corrections.clone(),
         health: health.clone(),
         llm_usage: llm_usage.clone(),
         auth,
@@ -434,7 +428,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tokio::spawn(bot_loop(BotState {
                 telegram,
                 chat_ids: config.telegram.admin_chat_ids(),
-                corrections,
                 health,
                 llm_usage,
                 pool: pool.clone(),
@@ -509,7 +502,7 @@ async fn check_ai_relays(
                 ) {
                     Ok(translator) => {
                         let sample = ["Nonfarm Payrolls".to_owned(), "Core CPI m/m".to_owned()];
-                        match translator.translate(&sample).await {
+                        match translator.translate(&sample, &[]).await {
                             Ok(rows) => {
                                 for row in rows {
                                     println!("  ✅ {} → {} / {}", row.source, row.zh_cn, row.zh_tw);

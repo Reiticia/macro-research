@@ -193,6 +193,16 @@ class EventDetailViewModel(
                 _state.value = _state.value.copy(followed = followed)
             }
         }
+        viewModelScope.launch {
+            // Event-name enrichment is asynchronous. Keep the loaded detail/market state and
+            // replace only its event when Room receives the Chinese names.
+            repository.observeEvent(id).collect { event ->
+                val detail = _state.value.detail ?: return@collect
+                if (event != null && event != detail.event) {
+                    _state.value = _state.value.copy(detail = detail.copy(event = event))
+                }
+            }
+        }
     }
 
     fun refresh() = viewModelScope.launch {
@@ -261,6 +271,14 @@ class AnalysisViewModel(
 
     init {
         refresh()
+        viewModelScope.launch {
+            // Analysis may open while the title translation is still being fetched.
+            repository.observeEvent(id).collect { event ->
+                if (event != null && event != _state.value.event) {
+                    _state.value = _state.value.copy(event = event)
+                }
+            }
+        }
     }
 
     fun refreshSharedAi(language: String) = viewModelScope.launch { loadAi(language) }

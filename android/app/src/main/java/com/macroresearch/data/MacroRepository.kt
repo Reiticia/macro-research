@@ -5,7 +5,6 @@ import com.macroresearch.data.local.AiAnalysisEntity
 import com.macroresearch.data.local.AnalysisDao
 import com.macroresearch.data.local.EventDao
 import com.macroresearch.data.local.FollowedEventEntity
-import com.macroresearch.data.local.NameCorrectionEntity
 import com.macroresearch.data.local.asEntity
 import com.macroresearch.data.local.asExternalModel
 import com.macroresearch.data.model.AiAnalysis
@@ -212,8 +211,18 @@ class MacroRepository(
 
     suspend fun refreshUpcoming(days: Int = 7) = upcomingMutex.withLock {
         // Successful events are already in Room. Reopening the app inside this window should
-        // render them immediately instead of repeating the same fragile network requests.
-        if (networkPreferences.upcomingSyncFresh(UPCOMING_CACHE_MS)) return@withLock
+        // render them immediately instead of repeating the same fragile calendar request. Name
+        // enrichment still needs a retry: the previous process may have stopped after saving the
+        // rows but before its background translation lookup completed.
+        if (networkPreferences.upcomingSyncFresh(UPCOMING_CACHE_MS)) {
+            val now = Instant.now()
+            val cached = dao.cachedRange(now.toString(), now.plusSeconds(days * 86_400L).toString())
+                .map { it.asExternalModel() }
+            if (cached.isNotEmpty()) {
+                repositoryScope.launch { runCatching { enrichTranslations(cached) } }
+            }
+            return@withLock
+        }
         // Drop rows cached by calendar providers that are no longer used so the
         // upcoming list cannot show the same event twice after an app update.
         dao.deleteByProviders(LEGACY_CALENDAR_PROVIDERS)
@@ -300,9 +309,15 @@ class MacroRepository(
     suspend fun event(id: Long): EventDetailResponse {
         if (source.mode == DataSourceMode.BACKEND) {
             try {
-                source.eventDetail(id)?.let {
-                    dao.upsert(listOf(it.event.asEntity()))
-                    return it
+                source.eventDetail(id)?.let { detail ->
+                    // Keep a translation already cached on the device if this server event was
+                    // stored before the server-side backfill completed.
+                    val event = mergeCachedTranslations(listOf(detail.event)).single()
+                    dao.upsert(listOf(event.asEntity()))
+                    if (event.eventZhCn.isNullOrBlank() || event.eventZhTw.isNullOrBlank()) {
+                        repositoryScope.launch { runCatching { enrichTranslations(listOf(event)) } }
+                    }
+                    return detail.copy(event = event)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -317,6 +332,11 @@ class MacroRepository(
     private suspend fun localEvent(id: Long): EventDetailResponse {
         val event = dao.event(id)?.asExternalModel()
             ?: error("Event is not available in the local cache")
+        if (event.eventZhCn.isNullOrBlank() || event.eventZhTw.isNullOrBlank()) {
+            // Detail state is backed by observeEvent(), so this non-blocking lookup replaces the
+            // English fallback in place as soon as the shared cache answers.
+            repositoryScope.launch { runCatching { enrichTranslations(listOf(event)) } }
+        }
         val observations = if (event.actual == null) emptyList() else listOf(
             EventObservation(
                 id = stableEventId("observation|${event.id}|${event.actual}"),
@@ -379,11 +399,11 @@ class MacroRepository(
      * itself throttled does the same for a device with an empty cache.
      */
     suspend fun sharedAiAnalysis(eventId: Long, languageTag: String): AiAnalysis? {
-        check(dataSourceSettings.value.configured) { "Configure a backend to read shared analysis" }
-        val serverId = if (source.mode == DataSourceMode.BACKEND) eventId else {
-            backendSource.serverEventId(localEvent(eventId).event)
+        check(dataSourceSettings.value.baseUrl.isNotBlank()) {
+            "Configure a backend address to read shared analysis"
         }
-        return backendSource.cachedAiAnalysis(serverId, languageTag, analysisMethod.value)
+        val event = localEvent(eventId).event
+        return backendSource.cachedAiAnalysis(event, languageTag, analysisMethod.value)
     }
 
     suspend fun submitAnalysisFeedback(language: String, analysis: AiAnalysis, message: String) {
@@ -574,54 +594,6 @@ class MacroRepository(
         return page
     }
 
-    /**
-     * Direct mode applies the correction locally; backend mode queues it for the admin, because
-     * the shared translation cache belongs to the server. Direct corrections are also kept in
-     * their own table so later translation syncs cannot silently revert them.
-     */
-    suspend fun submitTranslationCorrection(
-        event: EconomicEvent,
-        zhCn: String,
-        zhTw: String,
-    ): CorrectionOutcome {
-        val simplified = zhCn.trim()
-        val traditional = zhTw.trim()
-        require(simplified.isNotEmpty() && traditional.isNotEmpty()) {
-            "Both translations are required"
-        }
-        val outcome = source.submitCorrection(event, simplified, traditional)
-        if (outcome is CorrectionOutcome.AppliedLocally) {
-            // Remember the correction separately so later translation syncs cannot revert it:
-            // without this memory every server/AI pull silently restored the old name.
-            dao.correctName(NameCorrectionEntity(event.event, simplified, traditional))
-            dao.updateTranslation(event.event, simplified, traditional)
-            _translationsUpdated.tryEmit(Unit)
-        }
-        return outcome
-    }
-
-    suspend fun retranslateEventName(event: EconomicEvent): Pair<String, String> =
-        translationMutex.withLock {
-            val settings = translationPreferences.settings.value
-            val apiKey = translationPreferences.apiKey()
-            require(settings.configured && apiKey != null) {
-                "Configure an API key in Settings first"
-            }
-            val translated = translationClient.translateVerified(
-                listOf(event.event),
-                settings,
-                apiKey,
-                retryRejected = true,
-            )
-            val result = translated[event.event]
-                ?: error("AI did not return a translation for this event")
-            dao.correctName(NameCorrectionEntity(event.event, result.first, result.second))
-            dao.updateTranslation(event.event, result.first, result.second)
-            _translationsUpdated.tryEmit(Unit)
-            _translationError.value = null
-            result
-        }
-
     suspend fun translationModels(baseUrl: String): List<String> {
         val apiKey = translationPreferences.apiKey()
             ?: error("Save an API key before fetching models")
@@ -684,16 +656,13 @@ class MacroRepository(
             // Re-read cached translations only after acquiring the lock. This prevents a
             // slower failed refresh from overwriting translations saved by another screen.
             var merged = mergeCachedTranslations(events)
-            // Manual corrections are device-authoritative: never fetch (and overwrite) a name
-            // the reader fixed, otherwise every refresh reverted their correction.
-            val corrected = dao.corrections().map { it.event }.toSet()
 
             // The server owns the shared translation cache, so ask it for every visible name.
-            // This runs in both data-source modes: a backend row can predate its translation,
-            // and a direct-mode list has no other source. Failures are reported instead of
-            // swallowed, otherwise the reader sees English with no explanation.
-            if (dataSourceSettings.value.configured) {
-                val missing = merged.missingNameTranslations(corrected)
+            // The lookup is read-only and public: direct mode needs only a backend address, not
+            // an access token. A backend row can also predate its translation. Failures are
+            // reported instead of swallowed, otherwise the reader sees English with no reason.
+            if (dataSourceSettings.value.baseUrl.isNotBlank()) {
+                val missing = merged.missingNameTranslations()
                 if (missing.isNotEmpty()) {
                     runCatching {
                         missing.chunked(TRANSLATION_SERVER_BATCH).flatMap { batch ->
@@ -724,7 +693,7 @@ class MacroRepository(
             if (!settings.configured || apiKey == null) return@withLock merged
             // The reader's key is billed per name, so a week of worldwide events is not sent
             // in one refresh; the server cache above already covers whatever it knows.
-            val missingNames = merged.missingNameTranslations(corrected)
+            val missingNames = merged.missingNameTranslations()
                 .take(TRANSLATION_PAID_NAME_LIMIT)
             if (missingNames.isEmpty()) return@withLock merged
 
@@ -767,33 +736,20 @@ class MacroRepository(
             }
         }
 
-    /** Distinct titles still lacking a translation, ignoring names the reader corrected. */
-    private fun List<EconomicEvent>.missingNameTranslations(corrected: Set<String>): List<String> =
+    /** Distinct titles still lacking a translation. */
+    private fun List<EconomicEvent>.missingNameTranslations(): List<String> =
         filter { it.eventZhCn.isNullOrBlank() || it.eventZhTw.isNullOrBlank() }
             .map(EconomicEvent::event)
-            .filter { it !in corrected }
             .distinct()
 
-    /** Name-keyed translations already stored locally; also used to refresh rendered lists.
-     * In direct mode manual corrections win over anything synced afterwards. */
+    /** Name-keyed translations already stored locally; also used to refresh rendered lists. */
     suspend fun cachedTranslations(names: Collection<String>): Map<String, Pair<String, String>> {
         val distinct = names.map(String::trim).filter(String::isNotEmpty).distinct()
         if (distinct.isEmpty()) return emptyMap()
-        val cached = distinct.chunked(500)
+        return distinct.chunked(500)
             .flatMap { dao.translations(it) }
             .associate { it.event to (it.eventZhCn to it.eventZhTw) }
-        val corrections = activeCorrections()
-        if (corrections.isEmpty()) return cached
-        return cached + corrections.filterKeys(distinct::contains)
     }
-
-    /** Corrections are device-authoritative in direct mode; the backend owns its own cache. */
-    private suspend fun activeCorrections(): Map<String, Pair<String, String>> =
-        if (source.mode == DataSourceMode.BACKEND) {
-            emptyMap()
-        } else {
-            dao.corrections().associate { it.event to (it.eventZhCn to it.eventZhTw) }
-        }
 
     private suspend fun mergeCachedTranslations(events: List<EconomicEvent>): List<EconomicEvent> {
         if (events.isEmpty()) return events

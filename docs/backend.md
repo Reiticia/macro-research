@@ -148,6 +148,8 @@ request_timeout_seconds = 20
 |---|---|---|
 | GET | `/health` | 存活检查 |
 | GET | `/api/v1/meta` | `{version, apiVersion:1, capabilities, aiEnabled, serverTime}` |
+| POST | `/api/v1/translations/names` | 批量读取已缓存的事件名译名（最多 100 个；只读、不触发模型） |
+| GET | `/api/v1/ai-analysis/by-provider?provider&provider_id&language&method` | 直连客户端按上游身份读取已缓存共享分析（只读、不触发模型） |
 
 需要 Bearer：
 
@@ -165,7 +167,6 @@ request_timeout_seconds = 20
 | GET | `/api/v1/market/quotes?symbols=` | 批量当前行情与不可用列表 |
 | GET | `/api/v1/events/{id}/ai-analysis?language&method` | 共享分析，未生成 `404`；结果冻结，不随请求变化 |
 | POST | `/api/v1/events/{id}/analysis-feedback` | `{language, method, revision, message}`；同一结果只记一条 |
-| POST | `/api/v1/translations/names` | 批量读取已缓存的事件名译名（最多 100 个，无需个人 Key） |
 | GET | `/api/v1/usage?days=7&recent=20` | 模型调用审计：按类别汇总的 token 消耗与最近记录 |
 | POST | `/api/v1/translations/corrections` | 提交译名勘正（进入管理员审核） |
 | GET | `/api/v1/translations/corrections?eventName=` | 最近一条勘正状态 |
@@ -293,11 +294,16 @@ cargo run -- --check-ai            # 开发机上，读当前目录 config.toml
 ## 共享 AI 分析：服务端生成，结果冻结
 
 服务端在事件公布后的行情采集窗口结束（默认公布后 60 分钟）自动调用 `[ai]` 配置的
-OpenAI 兼容接口，用**三种方法各生成一份**简报并写入数据库（`shared_ai_job` 持久化队列，
-失败 5 分钟后重试）。缓存键是 `(event_id, language, method)`，语言固定 en / zh-CN / zh-TW。
+OpenAI 兼容接口，按 **3 种语言 × 3 种方法**生成并写入数据库，即每个事件固定缓存 **9 条**
+简报（`shared_ai_job` 持久化队列，失败 5 分钟后重试）。缓存键是
+`(event_id, language, method)`，语言固定 en / zh-CN / zh-TW。规则分析完成时会立即、幂等地写入
+完整九任务；进程重启后用一条集合查询补齐遗漏任务。Worker 每次选中一个事件并发完成整组任务，
+避免大量历史任务交错后让某个事件长期只有部分缓存。客户端读取一条尚未生成的历史分析时，
+只会提高该事件已有九任务的队列优先级，不会在 HTTP 请求内直接调用模型。
 
-- 结果对客户端**只读**：`GET /api/v1/events/{id}/ai-analysis` 永远返回已生成的行，
-  不再提供客户端触发的重新生成（原 POST 接口已移除）；
+- 结果对客户端**只读**：后端模式使用 `GET /api/v1/events/{id}/ai-analysis`；直连模式使用
+  免鉴权的 `GET /api/v1/ai-analysis/by-provider`。二者都只返回已生成的行，不触发模型调用，
+  也不再提供客户端触发的重新生成（原 POST 接口已移除）；
 - 读者对结果有异议时 `POST /api/v1/events/{id}/analysis-feedback` 提交反馈，同一结果
   （同一 revision）只记一条；
 - 反馈通过 Telegram 推送给管理员，消息带「重新分析 / 忽略」按钮；只有管理员点击
@@ -376,7 +382,7 @@ reasoning 混排、schema 回显、截断、`snake_case`、`verdict` 归一化�
 
 事件名翻译沿用 `event_name_translation` 缓存 + 启动补翻，返回的事件带 `eventZhCn/eventZhTw`。
 客户端不需要个人 Key 就能拿到译名：后端模式下译名随事件返回；直连模式配置了后端时，
-客户端会通过 `POST /api/v1/translations/names` 批量拉取已缓存的译名（最多 100 个/批，
+客户端会通过免鉴权的 `POST /api/v1/translations/names` 批量拉取已缓存的译名（最多 100 个/批，
 两种模式都会请求，并覆盖列表内全部可见事件），同样不消耗服务端或客户端的模型额度。
 该请求失败时客户端会在设置页显示原因，不会静默显示英文——未配置后端或后端不可达时
 事件名保持英文原文。

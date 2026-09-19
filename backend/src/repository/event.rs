@@ -210,42 +210,6 @@ impl EventRepository {
             .collect()
     }
 
-    /// Overwrites the shared translation for one event name and refreshes every event using it.
-    /// Admin-approved corrections must win over an existing machine translation.
-    pub async fn apply_translation(
-        &self,
-        source: &str,
-        zh_cn: &str,
-        zh_tw: &str,
-    ) -> Result<(), AppError> {
-        let now = Utc::now().to_rfc3339();
-        let mut transaction = self.pool.begin().await?;
-        sqlx::query(
-            r#"INSERT INTO event_name_translation (source_text, zh_cn, zh_tw, updated_at)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(source_text) DO UPDATE SET
-                 zh_cn = excluded.zh_cn, zh_tw = excluded.zh_tw, updated_at = excluded.updated_at"#,
-        )
-        .bind(source)
-        .bind(zh_cn)
-        .bind(zh_tw)
-        .bind(&now)
-        .execute(&mut *transaction)
-        .await?;
-        sqlx::query(
-            r#"UPDATE economic_event SET event_zh_cn = ?, event_zh_tw = ?, updated_at = ?
-               WHERE event = ?"#,
-        )
-        .bind(zh_cn)
-        .bind(zh_tw)
-        .bind(&now)
-        .bind(source)
-        .execute(&mut *transaction)
-        .await?;
-        transaction.commit().await?;
-        Ok(())
-    }
-
     /// Every stored event inside the range, used to hydrate weekly rows from earlier syncs.
     pub async fn events_in_range(
         &self,

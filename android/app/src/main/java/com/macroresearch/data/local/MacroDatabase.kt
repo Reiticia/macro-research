@@ -6,8 +6,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CachedEventEntity::class, FollowedEventEntity::class, AiAnalysisEntity::class, NameCorrectionEntity::class],
-    version = 6,
+    entities = [CachedEventEntity::class, FollowedEventEntity::class, AiAnalysisEntity::class],
+    version = 7,
     exportSchema = true,
 )
 abstract class MacroDatabase : RoomDatabase() {
@@ -98,6 +98,13 @@ abstract class MacroDatabase : RoomDatabase() {
                         "`updatedAt` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`event`))",
                 )
+            }
+        }
+        // v7 removes the manual-correction feature: the server proofreads every translation and
+        // retries the rejected ones, so a reader cannot correct names any more.
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `name_correction`")
             }
         }
     }

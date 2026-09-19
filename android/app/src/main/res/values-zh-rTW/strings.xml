@@ -113,16 +113,6 @@
     <string name="api_key_security_note">金鑰由 Android Keystore 加密、不會備份，也不會封裝進 APK。請使用已設定權限及消費限額的個人金鑰。</string>
     <string name="language">語言</string>
     <string name="language_note">介面語言切換後立即生效。設定後端後即可取得事件名稱翻譯，無需個人 AI 金鑰。</string>
-    <string name="fix_translation">翻譯勘誤</string>
-    <string name="translation_correction">翻譯勘誤</string>
-    <string name="source_name">原文名稱</string>
-    <string name="simplified_chinese">簡體中文</string>
-    <string name="traditional_chinese">繁體中文</string>
-    <string name="ai_retranslate">AI 重新翻譯</string>
-    <string name="retranslating">正在重新翻譯…</string>
-    <string name="retranslate_failed">AI 重新翻譯失敗</string>
-    <string name="translation_requires_key">請先在設定中設定 API 金鑰，才能使用 AI 重新翻譯。</string>
-    <string name="translation_correction_note">更正會套用到所有同名事件。</string>
     <string name="data_network">資料來源網路</string>
     <string name="data_proxy">HTTP 代理（選填）</string>
     <string name="data_proxy_note">用於日曆與行情請求（美債殖利率、報價、K 線）。留空使用系統網路。仍驗證 HTTPS 憑證；AI 與翻譯請求不會經過此代理。</string>
@@ -155,7 +145,6 @@
     <string name="data_source_switch_title">切換資料來源？</string>
     <string name="data_source_switch_body">切換會清空本機事件快取與追蹤清單，因為兩種模式使用不同的事件識別碼。篩選設定會保留。</string>
     <string name="data_source_switch_confirm">切換並清空快取</string>
-    <string name="translation_correction_queued">已提交。管理員審核通過後會對所有裝置生效。</string>
     <string name="calendar_warning_rate_limited">日曆資料來源正在限流本裝置，正在顯示快取資料。約 %1$d 分鐘後自動恢復。</string>
     <string name="calendar_warning_rate_limited_unknown">日曆資料來源正在限流本裝置，正在顯示快取資料。請稍後再試。</string>
     <string name="release_data_missing">預定時間已過，但尚未取得公布值。演講等事件可能本身沒有數值。可在下方重新取得；取得實際值後才能進行數值分析。</string>

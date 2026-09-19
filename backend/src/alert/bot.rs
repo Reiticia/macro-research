@@ -4,22 +4,17 @@ use serde_json::Value;
 use sqlx::SqlitePool;
 
 use crate::{
-    alert::{
-        state::HealthRegistry,
-        telegram::{InlineButton, TelegramClient},
-    },
+    alert::{state::HealthRegistry, telegram::TelegramClient},
     llm_usage::LlmUsageRepository,
-    translation_correction::TranslationCorrectionService,
 };
 
 /// Telegram long-polling loop: the admin console for the server.
 ///
-/// It answers `/status`, `/pending` and `/help`, and it resolves the inline buttons attached
-/// to translation-correction requests. Only whitelisted chat ids are answered.
+/// It answers `/status`, `/usage` and `/help`, and it resolves the inline buttons attached to
+/// shared-analysis feedback. Only whitelisted chat ids are answered.
 pub struct BotState {
     pub telegram: Arc<TelegramClient>,
     pub chat_ids: Vec<i64>,
-    pub corrections: Arc<TranslationCorrectionService>,
     pub health: Arc<HealthRegistry>,
     /// Model-call audit log, backing the `/usage` command.
     pub llm_usage: Option<Arc<LlmUsageRepository>>,
@@ -102,18 +97,6 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
             crate::shared_ai::decide(&state.pool, id, false).await,
             "已忽略反馈",
         ),
-        "c" => (
-            state.corrections.approve(id).await.map(|_| ()),
-            "已采纳该译名",
-        ),
-        "r" => (
-            state.corrections.reject(id).await.map(|_| ()),
-            "已拒绝该译名",
-        ),
-        "m" => (
-            state.corrections.mute(id).await.map(|_| ()),
-            "已屏蔽该词条，后续不再推送",
-        ),
         _ => return Ok(()),
     };
     let text = match outcome {
@@ -155,11 +138,9 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
     let command = command.split('@').next().unwrap_or(command);
     let reply = match command {
         "/status" => status_text(state).await?,
-        "/pending" => pending_text(state).await?,
         "/usage" => usage_text(state).await?,
         "/help" | "/start" => {
-            "可用命令：\n/status 数据源健康\n/pending 待审译名勘正\n/usage 近 24 小时模型用量\n/help 帮助"
-                .to_owned()
+            "可用命令：\n/status 数据源健康\n/usage 近 24 小时模型用量\n/help 帮助".to_owned()
         }
         _ => return Ok(()),
     };
@@ -188,24 +169,6 @@ async fn status_text(state: &BotState) -> Result<String, crate::error::AppError>
             "{icon} <code>{}</code> {}{error}",
             crate::alert::telegram::escape(&health.key),
             health.status
-        ));
-    }
-    Ok(lines.join("\n"))
-}
-
-async fn pending_text(state: &BotState) -> Result<String, crate::error::AppError> {
-    let pending = state.corrections.pending().await?;
-    if pending.is_empty() {
-        return Ok("没有待审的译名勘正。".to_owned());
-    }
-    let mut lines = vec!["<b>待审译名勘正</b>".to_owned()];
-    for correction in pending {
-        lines.push(format!(
-            "#{} <code>{}</code>\n简中：{} 繁中：{}",
-            correction.id,
-            crate::alert::telegram::escape(&correction.event_name),
-            crate::alert::telegram::escape(&correction.zh_cn),
-            crate::alert::telegram::escape(&correction.zh_tw),
         ));
     }
     Ok(lines.join("\n"))
@@ -269,22 +232,4 @@ async fn write_offset(pool: &SqlitePool, offset: i64) -> Result<(), crate::error
         .execute(pool)
         .await?;
     Ok(())
-}
-
-/// Convenience for tests and callers building the inline keyboard shape.
-pub fn correction_buttons(id: i64) -> Vec<Vec<InlineButton>> {
-    vec![vec![
-        InlineButton {
-            text: "✅ 采纳".into(),
-            callback_data: format!("c:{id}"),
-        },
-        InlineButton {
-            text: "❌ 拒绝".into(),
-            callback_data: format!("r:{id}"),
-        },
-        InlineButton {
-            text: "🔇 屏蔽该词条".into(),
-            callback_data: format!("m:{id}"),
-        },
-    ]]
 }

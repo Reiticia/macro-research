@@ -88,6 +88,7 @@ class MacroApplication : Application() {
                 MacroDatabase.MIGRATION_3_4,
                 MacroDatabase.MIGRATION_4_5,
                 MacroDatabase.MIGRATION_5_6,
+                MacroDatabase.MIGRATION_6_7,
             )
             .build()
         if (BuildConfig.DEBUG) {

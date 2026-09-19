@@ -144,6 +144,14 @@ pub struct AiQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ProviderAiQuery {
+    provider: String,
+    provider_id: String,
+    language: Option<String>,
+    method: Option<u8>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct FeedbackRequest {
     language: String,
     method: u8,
@@ -155,14 +163,14 @@ fn language_or_default(value: Option<&str>) -> String {
     value.unwrap_or("en").to_owned()
 }
 
-/// Returns the cached briefing, or 404 when nothing has been generated for this shape yet.
-pub async fn ai_analysis(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-    Query(query): Query<AiQuery>,
+async fn cached_ai_analysis(
+    state: &AppState,
+    id: i64,
+    language: Option<&str>,
+    method: Option<u8>,
 ) -> Result<Json<AiAnalysisResponse>, AppError> {
-    let language = language_or_default(query.language.as_deref());
-    let method = query.method.unwrap_or(state.config.ai.default_method);
+    let language = language_or_default(language);
+    let method = method.unwrap_or(state.config.ai.default_method);
     if !(1..=3).contains(&method) {
         return Err(AppError::InvalidRequest("method must be 1..3".into()));
     }
@@ -178,6 +186,42 @@ pub async fn ai_analysis(
     Ok(Json(AiAnalysisResponse::cached(
         crate::ai_analysis::row_to_analysis(row)?,
     )))
+}
+
+/// Returns the cached briefing, or 404 when nothing has been generated for this shape yet.
+pub async fn ai_analysis(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Query(query): Query<AiQuery>,
+) -> Result<Json<AiAnalysisResponse>, AppError> {
+    cached_ai_analysis(&state, id, query.language.as_deref(), query.method).await
+}
+
+/// Public cache lookup for direct-mode clients whose local event id differs from the backend id.
+/// A miss only prioritizes the event's durable bundle; this request never calls the model.
+pub async fn ai_analysis_by_provider(
+    State(state): State<AppState>,
+    Query(query): Query<ProviderAiQuery>,
+) -> Result<Json<AiAnalysisResponse>, AppError> {
+    let event = state
+        .events
+        .find_provider_event(&query.provider, &query.provider_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    match cached_ai_analysis(&state, event.id, query.language.as_deref(), query.method).await {
+        Ok(response) => Ok(response),
+        Err(AppError::NotFound) => {
+            // Move a released event's complete bundle ahead of unrelated historical recovery
+            // work. Future/unreleased events must never be analyzed from incomplete numbers.
+            let collection_end = event.event_time
+                + Duration::minutes(state.config.scheduler.market_collect_after_minutes.max(0));
+            if event.actual.is_some() && collection_end <= Utc::now() {
+                crate::shared_ai::prioritize_event_bundle(state.events.pool(), event.id).await?;
+            }
+            Err(AppError::NotFound)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Readers can report a frozen result, but cannot trigger model calls.

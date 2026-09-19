@@ -16,15 +16,6 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-/** Result of a translation-correction request. */
-sealed interface CorrectionOutcome {
-    /** Direct mode: the correction is already applied on this device. */
-    data object AppliedLocally : CorrectionOutcome
-
-    /** Backend mode: the admin still has to approve it. */
-    data class Queued(val status: String) : CorrectionOutcome
-}
-
 /** Everything the server needs to brief one released event. */
 data class AiAnalysisRequest(
     val event: EconomicEvent,
@@ -71,7 +62,11 @@ interface DataSource {
 
     suspend fun aiAnalysis(request: AiAnalysisRequest): AiAnalysis
 
-    suspend fun cachedAiAnalysis(id: Long, language: String, method: AnalysisMethod): AiAnalysis? = null
+    suspend fun cachedAiAnalysis(
+        event: EconomicEvent,
+        language: String,
+        method: AnalysisMethod,
+    ): AiAnalysis? = null
 
     suspend fun serverEventId(event: EconomicEvent): Long = event.id
 
@@ -84,12 +79,6 @@ interface DataSource {
     suspend fun eventMarket(event: EconomicEvent): MarketResponse
 
     suspend fun quotes(symbols: List<String>): MarketQuotesResponse
-
-    suspend fun submitCorrection(
-        event: EconomicEvent,
-        zhCn: String,
-        zhTw: String,
-    ): CorrectionOutcome
 
     /** Validates the backend address and token; only backend mode implements this. */
     suspend fun meta(): com.macroresearch.data.remote.BackendMeta
@@ -167,12 +156,6 @@ class DirectDataSource(
     override suspend fun quotes(symbols: List<String>): MarketQuotesResponse =
         marketClient.quotes(symbols)
 
-    override suspend fun submitCorrection(
-        event: EconomicEvent,
-        zhCn: String,
-        zhTw: String,
-    ): CorrectionOutcome = CorrectionOutcome.AppliedLocally
-
     override suspend fun meta(): com.macroresearch.data.remote.BackendMeta =
         error("Direct mode has no backend endpoint")
 }
@@ -225,8 +208,11 @@ class BackendDataSource(
 
     override suspend fun translations(names: List<String>): Map<String, Pair<String, String>> = client.translations(names)
 
-    override suspend fun cachedAiAnalysis(id: Long, language: String, method: AnalysisMethod): AiAnalysis? =
-        client.aiAnalysis(id, language, method, timezone = "UTC")
+    override suspend fun cachedAiAnalysis(
+        event: EconomicEvent,
+        language: String,
+        method: AnalysisMethod,
+    ): AiAnalysis? = client.aiAnalysisByProvider(event, language, method)
 
     override suspend fun feedback(id: Long, language: String, method: Int, revision: Int, message: String) {
         client.submitAnalysisFeedback(id, language, method, revision, message)
@@ -236,15 +222,6 @@ class BackendDataSource(
 
     override suspend fun quotes(symbols: List<String>): MarketQuotesResponse =
         client.marketQuotes(symbols)
-
-    override suspend fun submitCorrection(
-        event: EconomicEvent,
-        zhCn: String,
-        zhTw: String,
-    ): CorrectionOutcome {
-        val record = client.submitCorrection(event.event, zhCn, zhTw)
-        return CorrectionOutcome.Queued(record.status)
-    }
 
     override suspend fun meta(): com.macroresearch.data.remote.BackendMeta = client.meta()
 }

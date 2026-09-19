@@ -16,7 +16,6 @@ pub mod repository;
 pub mod scheduler;
 pub mod shared_ai;
 pub mod translation;
-pub mod translation_correction;
 
 use std::sync::Arc;
 
@@ -29,7 +28,6 @@ use tokio::sync::broadcast;
 use crate::{
     ai_analysis::AiAnalysisService, alert::HealthRegistry, auth::AuthState, config::AppConfig,
     llm_usage::LlmUsageRepository, model::AppEvent, quota::QuotaService,
-    translation_correction::TranslationCorrectionService,
 };
 
 #[derive(Clone)]
@@ -42,7 +40,6 @@ pub struct AppState {
     pub market_service: Arc<MarketService>,
     pub analysis_service: Arc<AnalysisService>,
     pub ai_analysis_service: Option<Arc<AiAnalysisService>>,
-    pub corrections: Arc<TranslationCorrectionService>,
     pub health: Arc<HealthRegistry>,
     /// Model-call audit log; absent only when auditing is switched off.
     pub llm_usage: Option<Arc<LlmUsageRepository>>,

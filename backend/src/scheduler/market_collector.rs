@@ -57,6 +57,9 @@ async fn collect_once(
                         .events
                         .set_status(event.id, EventStatus::Completed)
                         .await?;
+                    // Persist the full shared-analysis bundle immediately after the deterministic
+                    // report is ready: 3 languages × 3 methods = 9 durable jobs.
+                    crate::shared_ai::enqueue_event_bundle(state.events.pool(), event.id).await?;
                     let _ = state
                         .event_bus
                         .send(AppEvent::AnalysisCompleted { event_id: event.id });

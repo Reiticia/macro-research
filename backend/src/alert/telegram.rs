@@ -85,7 +85,7 @@ impl TelegramClient {
             .and_then(Value::as_i64))
     }
 
-    /// Replaces the buttons of an already-sent message, so a decided correction cannot be
+    /// Replaces the buttons of an already-sent message, so a decided request cannot be
     /// applied twice and the admin sees the outcome inline.
     pub async fn close_keyboard(
         &self,
