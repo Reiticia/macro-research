@@ -1,15 +1,20 @@
 use axum::{
     extract::{
-        State, WebSocketUpgrade,
+        Extension, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
     response::Response,
 };
 use tokio::sync::broadcast;
 
-use crate::{AppState, model::AppEvent};
+use crate::{AppState, auth::TokenId, model::AppEvent};
 
-pub async fn websocket(State(state): State<AppState>, upgrade: WebSocketUpgrade) -> Response {
+pub async fn websocket(
+    State(state): State<AppState>,
+    Extension(token): Extension<TokenId>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    tracing::info!(client = %token.0, "client authenticated and connected to backend");
     let receiver = state.event_bus.subscribe();
     upgrade.on_upgrade(move |socket| stream(socket, receiver))
 }
