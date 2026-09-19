@@ -55,6 +55,24 @@ class CnbcYieldTest {
     }
 
     @Test
+    fun treasuryCsvProvidesAStaleDailyFallbackAndChange() {
+        val quote = client.parseTreasuryQuote(
+            "us2y",
+            """Date,"2 Yr","10 Yr"
+09/18/2026,4.76,5.01
+09/17/2026,4.67,4.94
+""",
+            "2 Yr",
+        )
+        assertEquals("us2y", quote.symbol)
+        assertEquals("treasury", quote.provider)
+        assertEquals(4.76, quote.price, 1e-9)
+        assertEquals((4.76 - 4.67) / 4.67 * 100.0, quote.changePercent!!, 1e-9)
+        assertTrue(quote.stale)
+        assertEquals("closed", quote.marketState)
+    }
+
+    @Test
     fun oneMinuteBarsFeedTheBasisPointReactionWindows() {
         val eventTime = Instant.now().minusSeconds(7_200).truncatedTo(ChronoUnit.SECONDS)
         val bars = client.parseCnbcCandles("us10y", chart(barsAround(eventTime)), eventTime.plusSeconds(3_600))

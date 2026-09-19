@@ -19,9 +19,12 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.time.Duration
-import java.time.OffsetDateTime
-import java.time.format.DateTimeFormatter
 import java.time.Instant
+import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.Year
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
@@ -126,10 +129,13 @@ class DirectMarketClient(
     }
 
     private suspend fun publicMarketQuote(symbol: String): LiveMarketQuote {
-        // Treasury yields have no BiQuote ticker, and Yahoo is unreachable or rate limited on
-        // many networks, so CNBC supplies them first.
+        // Treasury yields have no BiQuote ticker. Use CNBC for real-time data, Yahoo as a
+        // secondary source, and the official Treasury CSV as a daily fallback when the device
+        // cannot reach either market feed. The daily fallback is explicitly marked stale.
         if (symbol in CNBC_SYMBOLS) {
             runCatching { return cnbcQuote(symbol) }
+            runCatching { return yahooQuote(symbol) }
+            return treasuryQuote(symbol)
         }
         if (symbol in BIQUOTE_TICKERS) {
             runCatching { return biquoteQuote(symbol) }
@@ -176,6 +182,49 @@ class DirectMarketClient(
             low = number("low"),
             marketState = quote.stringOrNull("curmktstatus")?.lowercase(Locale.ROOT),
             stale = false,
+        )
+    }
+
+    private suspend fun treasuryQuote(symbol: String): LiveMarketQuote = withContext(Dispatchers.IO) {
+        val column = TREASURY_COLUMNS[symbol] ?: error("Unsupported Treasury symbol: $symbol")
+        val year = Year.now(ZoneOffset.UTC).value
+        val url = "$TREASURY_BASE/$year/all".toHttpUrl().newBuilder()
+            .addQueryParameter("type", "daily_treasury_yield_curve")
+            .addQueryParameter("field_tdr_date_value", year.toString())
+            .addQueryParameter("page", "")
+            .addQueryParameter("_format", "csv")
+            .build()
+        parseTreasuryQuote(symbol, getJsonRaw(url.toString(), accept = "text/csv"), column)
+    }
+
+    internal fun parseTreasuryQuote(symbol: String, body: String, column: String): LiveMarketQuote {
+        val lines = body.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
+        val headerIndex = lines.indexOfFirst { it.startsWith("Date,") || it.startsWith("\"Date\"") }
+        require(headerIndex >= 0) { "Treasury CSV has no header" }
+        val headers = lines[headerIndex].split(',').map { it.trim().trim('"') }
+        val dateIndex = headers.indexOf("Date")
+        val valueIndex = headers.indexOf(column)
+        require(dateIndex >= 0 && valueIndex >= 0) { "Treasury CSV has no $column column" }
+        val dateFormat = DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.US)
+        data class Row(val date: LocalDate, val value: Double)
+        val rows = lines.drop(headerIndex + 1).mapNotNull { line ->
+            val fields = line.split(',')
+            val date = fields.getOrNull(dateIndex)?.let { runCatching { LocalDate.parse(it, dateFormat) }.getOrNull() }
+            val value = fields.getOrNull(valueIndex)?.toDoubleOrNull()
+            if (date == null || value == null) null else Row(date, value)
+        }.sortedByDescending { it.date }
+        val current = rows.firstOrNull() ?: error("Treasury CSV has no usable $column rows")
+        val previous = rows.drop(1).firstOrNull()?.value
+        return LiveMarketQuote(
+            symbol = symbol,
+            timestamp = current.date.atStartOfDay(ZoneOffset.UTC).toInstant().toString(),
+            price = current.value,
+            provider = "treasury",
+            changePercent = previous?.takeIf { it != 0.0 }?.let { (current.value - it) / it * 100.0 },
+            high = null,
+            low = null,
+            marketState = "closed",
+            stale = true,
         )
     }
 
@@ -392,8 +441,9 @@ class DirectMarketClient(
         url: String,
         viaProxy: Boolean = false,
         referer: String? = null,
+        accept: String = "application/json",
     ): String {
-        val request = Request.Builder().url(url).header("Accept", "application/json").apply {
+        val request = Request.Builder().url(url).header("Accept", accept).apply {
             referer?.let { header("Referer", it) }
         }.build()
         val http = if (viaProxy) proxy()?.let { client.newBuilder().proxy(it).build() } ?: client else client
@@ -467,6 +517,8 @@ class DirectMarketClient(
         private const val QUOTE_REFRESH_NANOS = 5_000_000_000L
         private const val QUOTE_STALE_NANOS = 300_000_000_000L
         private const val CNBC_REFERER = "https://www.cnbc.com/"
+        private const val TREASURY_BASE = "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv"
+        private val TREASURY_COLUMNS = mapOf("us2y" to "2 Yr", "us10y" to "10 Yr")
         private const val CNBC_QUOTE_BASE = "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol"
         private const val CNBC_CHART_BASE = "https://ts-api.cnbc.com/harmony/app/charts"
         /** Treasury yields: CNBC symbols, quoted in percent just like Yahoo's ^TNX/^UST2YR. */
