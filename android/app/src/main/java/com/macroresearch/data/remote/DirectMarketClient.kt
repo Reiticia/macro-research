@@ -12,7 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -24,6 +23,7 @@ import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 import java.time.Instant
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 
 class DirectMarketClient(
@@ -33,26 +33,46 @@ class DirectMarketClient(
     private val cnbcQuoteBase: String = CNBC_QUOTE_BASE,
     private val cnbcChartBase: String = CNBC_CHART_BASE,
 ) {
-    private val yahooGate = Mutex()
-    private var nextYahooRequestAt = 0L
+    private val quoteCache = ConcurrentHashMap<String, CachedQuote>()
+    private val quoteLocks = ConcurrentHashMap<String, Mutex>()
 
+    /**
+     * Direct mode keeps the same five-second in-process quote cache as the server. Unlike the
+     * server, a single device can refresh all expired symbols concurrently without staggering.
+     */
     suspend fun quotes(symbols: List<String>): MarketQuotesResponse = coroutineScope {
-        val requested = symbols.distinct()
-        val crypto = requested.filter { it == "bitcoin" || it == "ethereum" }
-            .map { symbol ->
-                async {
-                    symbol to runCatching { binanceQuote(symbol) }
-                        .recoverCatching { biquoteQuote(symbol) }
-                }
-            }
-        val publicMarkets = requested.filterNot { it == "bitcoin" || it == "ethereum" }
-            .map { symbol -> async { symbol to runCatching { publicMarketQuote(symbol) } } }
-        val results = (crypto + publicMarkets).awaitAll()
+        val results = symbols.distinct().map { symbol ->
+            async { symbol to runCatching { cachedQuote(symbol) } }
+        }.awaitAll()
         MarketQuotesResponse(
             quotes = results.mapNotNull { it.second.getOrNull() },
             unavailable = results.filter { it.second.isFailure }.map { it.first },
         )
     }
+
+    private suspend fun cachedQuote(symbol: String): LiveMarketQuote =
+        quoteLocks.computeIfAbsent(symbol) { Mutex() }.withLock {
+            val now = System.nanoTime()
+            quoteCache[symbol]?.takeIf { now - it.fetchedAtNanos <= QUOTE_REFRESH_NANOS }
+                ?.let { return@withLock it.quote }
+            runCatching { fetchQuote(symbol) }
+                .onSuccess { quoteCache[symbol] = CachedQuote(it, System.nanoTime()) }
+                .getOrElse { error ->
+                    val fallbackNow = System.nanoTime()
+                    quoteCache[symbol]
+                        ?.takeIf { fallbackNow - it.fetchedAtNanos <= QUOTE_STALE_NANOS }
+                        ?.quote
+                        ?.copy(stale = true)
+                        ?: throw error
+                }
+        }
+
+    private suspend fun fetchQuote(symbol: String): LiveMarketQuote =
+        if (symbol == "bitcoin" || symbol == "ethereum") {
+            runCatching { binanceQuote(symbol) }.getOrElse { biquoteQuote(symbol) }
+        } else {
+            publicMarketQuote(symbol)
+        }
 
     suspend fun eventMarket(
         event: EconomicEvent,
@@ -124,6 +144,7 @@ class DirectMarketClient(
             getJsonRaw(
                 "$cnbcQuoteBase?symbols=$ticker&requestMethod=itv&noform=1&partnerId=2&fund=1&exthrs=1&output=json&events=1",
                 viaProxy = true,
+                referer = CNBC_REFERER,
             ),
         )
     }
@@ -140,20 +161,19 @@ class DirectMarketClient(
         val quote = root.getAsJsonObject("FormattedQuoteResult")
             ?.getAsJsonArray("FormattedQuote")?.firstOrNull()?.asJsonObject
             ?: error("CNBC returned no quote for $symbol")
-        val price = quote.stringOrNull("last")?.removeSuffix("%")?.toDoubleOrNull()
-            ?: error("CNBC returned no price for $symbol")
+        fun number(name: String) = quote.stringOrNull(name)?.removeSuffix("%")?.toDoubleOrNull()
+        val price = number("last") ?: error("CNBC returned no price for $symbol")
         // CNBC's own change_pct is inconsistent with its change field, so derive the move from
         // the last close of the previous session, exactly like the other providers.
-        val previous = quote.stringOrNull("previous_day_closing")?.removeSuffix("%")?.toDoubleOrNull()
-            ?: quote.stringOrNull("open")?.removeSuffix("%")?.toDoubleOrNull()
+        val previous = number("previous_day_closing") ?: number("open")
         return LiveMarketQuote(
             symbol = symbol,
             timestamp = quote.stringOrNull("last_time")?.let(::parseCnbcInstant) ?: Instant.now().toString(),
             price = price,
             provider = "cnbc",
             changePercent = previous?.takeIf { it != 0.0 }?.let { (price - it) / it * 100.0 },
-            high = null,
-            low = null,
+            high = number("high"),
+            low = number("low"),
             marketState = quote.stringOrNull("curmktstatus")?.lowercase(Locale.ROOT),
             stale = false,
         )
@@ -240,7 +260,7 @@ class DirectMarketClient(
         val ticker = CNBC_SYMBOLS[symbol] ?: error("Unsupported CNBC symbol: $symbol")
         parseCnbcCandles(
             symbol,
-            getJsonRaw(cnbcChartUrl(ticker), viaProxy = true),
+            getJsonRaw(cnbcChartUrl(ticker), viaProxy = true, referer = CNBC_REFERER),
             end,
         )
     }
@@ -352,31 +372,30 @@ class DirectMarketClient(
             }
         }
 
-    private suspend fun yahooChart(symbol: String, parameters: Map<String, String>): JsonObject =
-        yahooGate.withLock {
-            val wait = nextYahooRequestAt - System.currentTimeMillis()
-            if (wait > 0) delay(wait)
-            try {
-                val ticker = YAHOO_TICKERS[symbol] ?: error("Unsupported Yahoo symbol: $symbol")
-                val builder = YAHOO_BASE.toHttpUrl().newBuilder().addPathSegment(ticker)
-                parameters.forEach(builder::addQueryParameter)
-                val root = withContext(Dispatchers.IO) {
-                    JsonParser.parseString(getJsonRaw(builder.build().toString(), viaProxy = true)).asJsonObject
-                }
-                val chart = root.getAsJsonObject("chart")
-                chart.getAsJsonArray("result")?.firstOrNull()?.asJsonObject
-                    ?: error("Yahoo returned no data for $symbol")
-            } finally {
-                nextYahooRequestAt = System.currentTimeMillis() + YAHOO_REQUEST_INTERVAL_MS
-            }
+    private suspend fun yahooChart(symbol: String, parameters: Map<String, String>): JsonObject {
+        val ticker = YAHOO_TICKERS[symbol] ?: error("Unsupported Yahoo symbol: $symbol")
+        val builder = YAHOO_BASE.toHttpUrl().newBuilder().addPathSegment(ticker)
+        parameters.forEach(builder::addQueryParameter)
+        val root = withContext(Dispatchers.IO) {
+            JsonParser.parseString(getJsonRaw(builder.build().toString(), viaProxy = true)).asJsonObject
         }
+        val chart = root.getAsJsonObject("chart")
+        return chart.getAsJsonArray("result")?.firstOrNull()?.asJsonObject
+            ?: error("Yahoo returned no data for $symbol")
+    }
 
     private fun getJson(url: String): JsonObject =
         JsonParser.parseString(getJsonRaw(url)).asJsonObject
 
     /** [viaProxy] routes the call through the user's proxy when one is configured. */
-    private fun getJsonRaw(url: String, viaProxy: Boolean = false): String {
-        val request = Request.Builder().url(url).header("Accept", "application/json").build()
+    private fun getJsonRaw(
+        url: String,
+        viaProxy: Boolean = false,
+        referer: String? = null,
+    ): String {
+        val request = Request.Builder().url(url).header("Accept", "application/json").apply {
+            referer?.let { header("Referer", it) }
+        }.build()
         val http = if (viaProxy) proxy()?.let { client.newBuilder().proxy(it).build() } ?: client else client
         http.newCall(request).execute().use { response ->
             check(response.isSuccessful) { "Market provider returned HTTP ${response.code}" }
@@ -426,6 +445,11 @@ class DirectMarketClient(
         )
     }
 
+    private data class CachedQuote(
+        val quote: LiveMarketQuote,
+        val fetchedAtNanos: Long,
+    )
+
     internal data class Candle(
         val symbol: String,
         val timestamp: Instant,
@@ -440,7 +464,9 @@ class DirectMarketClient(
         private const val YAHOO_BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
         private const val BINANCE_BASE = "https://data-api.binance.vision/api/v3"
         private const val BIQUOTE_BASE = "https://biquote.io"
-        private const val YAHOO_REQUEST_INTERVAL_MS = 750L
+        private const val QUOTE_REFRESH_NANOS = 5_000_000_000L
+        private const val QUOTE_STALE_NANOS = 300_000_000_000L
+        private const val CNBC_REFERER = "https://www.cnbc.com/"
         private const val CNBC_QUOTE_BASE = "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol"
         private const val CNBC_CHART_BASE = "https://ts-api.cnbc.com/harmony/app/charts"
         /** Treasury yields: CNBC symbols, quoted in percent just like Yahoo's ^TNX/^UST2YR. */

@@ -86,8 +86,8 @@ fun HomeScreen(repository: MacroRepository, padding: PaddingValues, onEvent: (Lo
     }
     LaunchedEffect(selectedMarkets) {
         while (true) {
-            vm.loadLiveMarket(selectedMarkets)
-            delay(30_000)
+            vm.loadLiveMarketAndWait(selectedMarkets)
+            delay(5_000)
         }
     }
 

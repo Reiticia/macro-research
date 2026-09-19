@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
+use reqwest::header::{ACCEPT, REFERER};
 use serde_json::Value;
 
 use crate::{
@@ -52,7 +53,9 @@ impl CnbcProvider {
                 ("output", "json".to_owned()),
                 ("events", "1".to_owned()),
             ])
-            .header("accept", "application/json")
+            // CNBC's Akamai policy rejects API-looking requests without a page origin.
+            .header(ACCEPT, "application/json")
+            .header(REFERER, "https://www.cnbc.com/")
             .send()
             .await?
             .error_for_status()?;
@@ -70,7 +73,9 @@ impl CnbcProvider {
                 ("requestMethod", "itv".to_owned()),
                 ("events", "1".to_owned()),
             ])
-            .header("accept", "application/json")
+            // The chart endpoint is protected by the same Akamai rule as quotes.
+            .header(ACCEPT, "application/json")
+            .header(REFERER, "https://www.cnbc.com/")
             .send()
             .await?
             .error_for_status()?;
@@ -122,23 +127,17 @@ pub fn parse_quote(symbol: MarketSymbol, body: &str) -> Result<LiveQuote, AppErr
         .and_then(Value::as_array)
         .and_then(|rows| rows.first())
         .ok_or_else(|| AppError::Provider(format!("CNBC returned no quote for {symbol}")))?;
-    let price = quote
-        .get("last")
-        .and_then(scalar_text)
-        .and_then(|value| value.trim_end_matches('%').parse::<f64>().ok())
+    let number = |name: &str| {
+        quote
+            .get(name)
+            .and_then(scalar_text)
+            .and_then(|value| value.trim_end_matches('%').parse::<f64>().ok())
+    };
+    let price = number("last")
         .ok_or_else(|| AppError::Provider(format!("CNBC returned no price for {symbol}")))?;
     // CNBC's own change_pct disagrees with its change field, so derive the move from the
     // previous session close, exactly like the other providers.
-    let previous = quote
-        .get("previous_day_closing")
-        .and_then(scalar_text)
-        .and_then(|value| value.trim_end_matches('%').parse::<f64>().ok())
-        .or_else(|| {
-            quote
-                .get("open")
-                .and_then(scalar_text)
-                .and_then(|value| value.trim_end_matches('%').parse::<f64>().ok())
-        });
+    let previous = number("previous_day_closing").or_else(|| number("open"));
     Ok(LiveQuote {
         symbol,
         timestamp: quote
@@ -151,8 +150,8 @@ pub fn parse_quote(symbol: MarketSymbol, body: &str) -> Result<LiveQuote, AppErr
         change_percent: previous
             .filter(|value| *value != 0.0)
             .map(|previous| (price - previous) / previous * 100.0),
-        high: None,
-        low: None,
+        high: number("high"),
+        low: number("low"),
         market_state: quote
             .get("curmktstatus")
             .and_then(scalar_text)
@@ -239,10 +238,13 @@ mod tests {
     fn parses_a_treasury_quote() {
         let body = r#"{"FormattedQuoteResult":{"FormattedQuote":[{
             "last":"4.123%","previous_day_closing":"4.050%","open":"4.060%",
+            "high":"4.130%","low":"4.010%",
             "last_time":"2026-09-11T11:17:11.000-0400","curmktstatus":"OPEN"}]}}"#;
         let quote = parse_quote(MarketSymbol::Us10y, body).unwrap();
         assert!((quote.price - 4.123).abs() < 1e-9);
         assert!((quote.change_percent.unwrap() - 1.8024691358024691).abs() < 1e-6);
+        assert_eq!(quote.high, Some(4.13));
+        assert_eq!(quote.low, Some(4.01));
         assert_eq!(quote.market_state.as_deref(), Some("open"));
         assert_eq!(quote.timestamp.to_rfc3339(), "2026-09-11T15:17:11+00:00");
     }

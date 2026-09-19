@@ -18,7 +18,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::{
+    sync::{Mutex, RwLock},
+    time::{Instant as TokioInstant, MissedTickBehavior},
+};
 
 use crate::{
     alert::HealthRegistry,
@@ -43,7 +46,7 @@ pub struct MarketService {
     health: Option<Arc<HealthRegistry>>,
     live_quote_cache: RwLock<HashMap<MarketSymbol, CachedLiveQuote>>,
     live_quote_locks: HashMap<MarketSymbol, Arc<Mutex<()>>>,
-    live_quote_ttl: Duration,
+    live_quote_refresh_interval: Duration,
     live_quote_stale_ttl: Duration,
 }
 
@@ -73,7 +76,7 @@ impl MarketService {
                 .into_iter()
                 .map(|symbol| (symbol, Arc::new(Mutex::new(()))))
                 .collect(),
-            live_quote_ttl: Duration::from_secs(30),
+            live_quote_refresh_interval: Duration::from_secs(5),
             live_quote_stale_ttl: Duration::from_secs(300),
         };
         service.rebuild();
@@ -147,10 +150,47 @@ impl MarketService {
         self.providers = providers;
     }
 
-    pub fn with_live_quote_cache(mut self, ttl: Duration, stale_ttl: Duration) -> Self {
-        self.live_quote_ttl = ttl;
-        self.live_quote_stale_ttl = stale_ttl.max(ttl);
+    pub fn with_live_quote_refresh(
+        mut self,
+        refresh_interval: Duration,
+        stale_ttl: Duration,
+    ) -> Self {
+        self.live_quote_refresh_interval = refresh_interval.max(Duration::from_secs(1));
+        self.live_quote_stale_ttl = stale_ttl.max(self.live_quote_refresh_interval);
         self
+    }
+
+    /// Starts one refresh loop per configured symbol. Initial ticks are spread evenly across a
+    /// refresh cycle so a large symbol set does not hit every upstream at the same instant.
+    /// HTTP handlers only read this cache and therefore cannot amplify upstream traffic.
+    pub fn start_live_quote_refresh(self: Arc<Self>) {
+        let mut seen = std::collections::HashSet::new();
+        let symbols: Vec<_> = self
+            .symbols
+            .iter()
+            .copied()
+            .filter(|symbol| seen.insert(*symbol))
+            .collect();
+        if symbols.is_empty() {
+            tracing::warn!("live quote refresh disabled because no market symbols are configured");
+            return;
+        }
+        let refresh_interval = self.live_quote_refresh_interval.max(Duration::from_secs(1));
+        let spacing = refresh_interval.div_f64(symbols.len() as f64);
+        for (index, symbol) in symbols.into_iter().enumerate() {
+            let service = self.clone();
+            tokio::spawn(async move {
+                let first_tick = TokioInstant::now() + spacing.mul_f64(index as f64);
+                let mut timer = tokio::time::interval_at(first_tick, refresh_interval);
+                timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+                loop {
+                    timer.tick().await;
+                    if let Err(error) = service.refresh_live_quote(symbol, true).await {
+                        tracing::debug!(%symbol, %error, "live quote refresh failed; retaining cached value");
+                    }
+                }
+            });
+        }
     }
 
     pub async fn historical_candles(
@@ -176,40 +216,13 @@ impl MarketService {
     }
 
     pub async fn live_quote(&self, symbol: MarketSymbol) -> Result<LiveQuote, AppError> {
-        if let Some(quote) = self.cached_live_quote(symbol, self.live_quote_ttl).await {
+        if let Some(quote) = self.fresh_cached_live_quote(symbol).await {
             return Ok(quote);
         }
-        let lock = self
-            .live_quote_locks
-            .get(&symbol)
-            .ok_or_else(|| AppError::Provider(format!("no quote lock for {symbol}")))?
-            .clone();
-        let _guard = lock.lock().await;
-        if let Some(quote) = self.cached_live_quote(symbol, self.live_quote_ttl).await {
-            return Ok(quote);
-        }
-        let result = self
-            .providers
-            .get(&symbol)
-            .ok_or_else(|| AppError::Provider(format!("no provider for {symbol}")))?
-            .live_quote(symbol)
-            .await;
-        match result {
-            Ok(quote) => {
-                self.live_quote_cache.write().await.insert(
-                    symbol,
-                    CachedLiveQuote {
-                        quote: quote.clone(),
-                        fetched_at: Instant::now(),
-                    },
-                );
-                Ok(quote)
-            }
+        match self.refresh_live_quote(symbol, false).await {
+            Ok(quote) => Ok(quote),
             Err(error) => {
-                if let Some(mut quote) = self
-                    .cached_live_quote(symbol, self.live_quote_stale_ttl)
-                    .await
-                {
+                if let Some(mut quote) = self.cached_live_quote(symbol).await {
                     quote.stale = true;
                     tracing::debug!(symbol = %symbol, error = %error, "serving stale market quote");
                     Ok(quote)
@@ -220,17 +233,60 @@ impl MarketService {
         }
     }
 
-    async fn cached_live_quote(
-        &self,
-        symbol: MarketSymbol,
-        maximum_age: Duration,
-    ) -> Option<LiveQuote> {
+    /// Returns the program cache only. This is used by the REST endpoint so client polling never
+    /// turns into a synchronized burst of upstream requests.
+    pub async fn cached_live_quote(&self, symbol: MarketSymbol) -> Option<LiveQuote> {
         self.live_quote_cache
             .read()
             .await
             .get(&symbol)
-            .filter(|cached| cached.fetched_at.elapsed() <= maximum_age)
+            .filter(|cached| cached.fetched_at.elapsed() <= self.live_quote_stale_ttl)
+            .map(|cached| {
+                let mut quote = cached.quote.clone();
+                if cached.fetched_at.elapsed() > self.live_quote_refresh_interval {
+                    quote.stale = true;
+                }
+                quote
+            })
+    }
+
+    async fn fresh_cached_live_quote(&self, symbol: MarketSymbol) -> Option<LiveQuote> {
+        self.live_quote_cache
+            .read()
+            .await
+            .get(&symbol)
+            .filter(|cached| cached.fetched_at.elapsed() <= self.live_quote_refresh_interval)
             .map(|cached| cached.quote.clone())
+    }
+
+    async fn refresh_live_quote(
+        &self,
+        symbol: MarketSymbol,
+        force: bool,
+    ) -> Result<LiveQuote, AppError> {
+        let lock = self
+            .live_quote_locks
+            .get(&symbol)
+            .ok_or_else(|| AppError::Provider(format!("no quote lock for {symbol}")))?
+            .clone();
+        let _guard = lock.lock().await;
+        if !force && let Some(quote) = self.fresh_cached_live_quote(symbol).await {
+            return Ok(quote);
+        }
+        let quote = self
+            .providers
+            .get(&symbol)
+            .ok_or_else(|| AppError::Provider(format!("no provider for {symbol}")))?
+            .live_quote(symbol)
+            .await?;
+        self.live_quote_cache.write().await.insert(
+            symbol,
+            CachedLiveQuote {
+                quote: quote.clone(),
+                fetched_at: Instant::now(),
+            },
+        );
+        Ok(quote)
     }
 
     pub async fn collect_for_event(&self, event_id: i64) -> Result<usize, AppError> {
@@ -303,7 +359,7 @@ mod tests {
             MarketRepository::new(pool),
             vec![MarketSymbol::Bitcoin],
         )
-        .with_live_quote_cache(ttl, stale_ttl)
+        .with_live_quote_refresh(ttl, stale_ttl)
     }
 
     #[tokio::test]
@@ -333,7 +389,12 @@ mod tests {
             calls: AtomicUsize::new(0),
             fail: AtomicBool::new(false),
         });
-        let service = service(provider.clone(), Duration::ZERO, Duration::from_secs(300)).await;
+        let service = service(
+            provider.clone(),
+            Duration::from_secs(1),
+            Duration::from_secs(300),
+        )
+        .await;
         assert!(
             !service
                 .live_quote(MarketSymbol::Bitcoin)
@@ -341,6 +402,13 @@ mod tests {
                 .unwrap()
                 .stale
         );
+        service
+            .live_quote_cache
+            .write()
+            .await
+            .get_mut(&MarketSymbol::Bitcoin)
+            .unwrap()
+            .fetched_at = Instant::now() - Duration::from_secs(2);
         provider.fail.store(true, Ordering::SeqCst);
         let stale = service.live_quote(MarketSymbol::Bitcoin).await.unwrap();
         assert!(stale.stale);

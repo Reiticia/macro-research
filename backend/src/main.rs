@@ -254,8 +254,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &config.market.cnbc_quote_url,
             &config.market.cnbc_chart_url,
         )))
-        .with_live_quote_cache(
-            Duration::from_secs(config.market.live_quote_cache_seconds),
+        .with_live_quote_refresh(
+            Duration::from_secs(config.market.live_quote_refresh_seconds),
             Duration::from_secs(config.market.live_quote_stale_seconds),
         ),
     );
@@ -373,6 +373,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Populate and maintain the in-process price/change cache independently of HTTP traffic.
+    // Per-symbol loops are staggered by MarketService to avoid synchronized upstream bursts.
+    market_service.clone().start_live_quote_refresh();
     tokio::spawn(market_event_analyzer::shared_ai::run(
         state.clone(),
         alerts.clone(),

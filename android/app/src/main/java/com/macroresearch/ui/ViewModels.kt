@@ -58,6 +58,11 @@ class HomeViewModel(private val repository: MacroRepository) : ViewModel() {
                 .onSuccess { _liveMarket.value = it }
         }
     }
+
+    suspend fun loadLiveMarketAndWait(symbols: List<String>) {
+        loadLiveMarket(symbols)
+        liveMarketRequest?.join()
+    }
 }
 
 class MarketViewModel(private val repository: MacroRepository) : ViewModel() {
@@ -88,6 +93,11 @@ class MarketViewModel(private val repository: MacroRepository) : ViewModel() {
                     )
                 }
         }
+    }
+
+    suspend fun refreshAndWait() {
+        refresh()
+        request?.join()
     }
 }
 

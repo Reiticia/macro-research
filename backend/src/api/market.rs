@@ -39,18 +39,15 @@ pub async fn quotes(
     let service = state.market_service.clone();
     let results = join_all(symbols.into_iter().map(|symbol| {
         let service = service.clone();
-        async move { (symbol, service.live_quote(symbol).await) }
+        async move { (symbol, service.cached_live_quote(symbol).await) }
     }))
     .await;
     let mut quotes = Vec::new();
     let mut unavailable = Vec::new();
     for (symbol, result) in results {
         match result {
-            Ok(quote) => quotes.push(quote),
-            Err(error) => {
-                tracing::debug!(symbol = %symbol, error = %error, "live market quote unavailable");
-                unavailable.push(symbol);
-            }
+            Some(quote) => quotes.push(quote),
+            None => unavailable.push(symbol),
         }
     }
     Ok(Json(QuotesResponse {

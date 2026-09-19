@@ -59,8 +59,8 @@ fun MarketScreen(repository: MacroRepository, padding: PaddingValues) {
 
     LaunchedEffect(vm) {
         while (true) {
-            delay(30_000)
-            vm.refresh()
+            vm.refreshAndWait()
+            delay(5_000)
         }
     }
 

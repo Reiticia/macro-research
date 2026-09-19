@@ -119,8 +119,8 @@ pub struct MarketConfig {
     pub cnbc_quote_url: String,
     #[serde(default = "default_cnbc_chart_url")]
     pub cnbc_chart_url: String,
-    #[serde(default = "default_live_quote_cache_seconds")]
-    pub live_quote_cache_seconds: u64,
+    #[serde(default = "default_live_quote_refresh_seconds")]
+    pub live_quote_refresh_seconds: u64,
     #[serde(default = "default_live_quote_stale_seconds")]
     pub live_quote_stale_seconds: u64,
     pub symbols: Vec<String>,
@@ -138,8 +138,8 @@ fn default_cnbc_chart_url() -> String {
     "https://ts-api.cnbc.com/harmony/app/charts".into()
 }
 
-fn default_live_quote_cache_seconds() -> u64 {
-    30
+fn default_live_quote_refresh_seconds() -> u64 {
+    5
 }
 
 fn default_live_quote_stale_seconds() -> u64 {
@@ -541,6 +541,7 @@ market_collect_after_minutes = 60
 
         let config = AppConfig::from_path(&path).unwrap();
         assert_eq!(config.server.log_level, "market_event_analyzer=debug");
+        assert_eq!(config.market.live_quote_refresh_seconds, 5);
         // The rules file is looked up next to the configuration file.
         assert_eq!(config.dir(&path), dir);
 

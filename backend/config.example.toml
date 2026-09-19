@@ -47,10 +47,11 @@ binance_base_url = "https://data-api.binance.vision/api/v3"
 biquote_base_url = "https://biquote.io"
 cnbc_quote_url = "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol"
 cnbc_chart_url = "https://ts-api.cnbc.com/harmony/app/charts"
-live_quote_cache_seconds = 30
+# 进程内缓存主动刷新周期；每个标的会错峰请求，HTTP 查询只读缓存。
+live_quote_refresh_seconds = 5
 live_quote_stale_seconds = 300
 # 必须落在 Android 客户端可展示的符号集合内。
-symbols = ["nasdaq100", "dxy", "gold", "us10y", "bitcoin"]
+symbols = ["nasdaq100", "sp500", "gold", "silver", "dxy", "eur_usd", "us2y", "us10y", "bitcoin", "ethereum"]
 
 # 客户端访问令牌。启用鉴权却没有任何令牌时，部署脚本会把它写成 false 并告警。
 [auth]
