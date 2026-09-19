@@ -144,6 +144,7 @@
     <string name="backend_token_missing">請填寫管理員發放的存取權杖。</string>
     <string name="backend_test">測試連線</string>
     <string name="backend_verified">已連線</string>
+    <string name="backend_translation_failed">事件名稱譯名取得失敗：%1$s</string>
     <string name="backend_unauthorized">後端拒絕了該存取權杖。</string>
     <string name="backend_unreachable">無法連線後端。</string>
     <string name="backend_allow_cleartext">允許明文 HTTP（僅限內網或隧道位址）</string>

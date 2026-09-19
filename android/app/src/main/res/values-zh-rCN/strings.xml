@@ -144,6 +144,7 @@
     <string name="backend_token_missing">请填写管理员发放的访问令牌。</string>
     <string name="backend_test">测试连接</string>
     <string name="backend_verified">已连接</string>
+    <string name="backend_translation_failed">事件名译名获取失败：%1$s</string>
     <string name="backend_unauthorized">后端拒绝了该访问令牌。</string>
     <string name="backend_unreachable">无法连接后端。</string>
     <string name="backend_allow_cleartext">允许明文 HTTP（仅限内网或隧道地址）</string>

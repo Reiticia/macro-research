@@ -248,9 +248,11 @@ class MacroRepository(
                 }.thenBy { it.eventTime },
             )
             .take(30)
-        if (priorityEvents.isNotEmpty()) {
+        if (merged.isNotEmpty()) {
             // Home renders from Room, so translations may arrive after the list is shown.
-            repositoryScope.launch { runCatching { enrichTranslations(priorityEvents) } }
+            // The server lookup is free and covers every visible name; the reader's own key
+            // is only spent on the most relevant titles (see TRANSLATION_PAID_NAME_LIMIT).
+            repositoryScope.launch { runCatching { enrichTranslations(merged) } }
         }
         dao.deleteOlderThan(
             today.minusDays(HISTORY_RETENTION_DAYS)
@@ -289,9 +291,8 @@ class MacroRepository(
             .filter { country == null || it.country == country }
             .filter { minimumImportance == null || it.importance >= minimumImportance }
         // Translation is an enhancement and must never hold back the day's list.
-        val priorityEvents = events.filter { country != null || it.country in selectedCountries.value }
-        if (priorityEvents.isNotEmpty()) {
-            repositoryScope.launch { runCatching { enrichTranslations(priorityEvents) } }
+        if (events.isNotEmpty()) {
+            repositoryScope.launch { runCatching { enrichTranslations(events) } }
         }
         return events
     }
@@ -564,7 +565,11 @@ class MacroRepository(
             return dao.history(Instant.now().toString(), countries, category, limit, offset)
                 .map { it.asExternalModel() }
         }
-        if (page.isNotEmpty()) dao.upsert(page.map(EconomicEvent::asEntity))
+        if (page.isNotEmpty()) {
+            dao.upsert(page.map(EconomicEvent::asEntity))
+            // A server row can predate its translation; ask the shared cache for the rest.
+            repositoryScope.launch { runCatching { enrichTranslations(page) } }
+        }
         historySyncedAt = System.currentTimeMillis()
         return page
     }
@@ -678,29 +683,49 @@ class MacroRepository(
         translationMutex.withLock {
             // Re-read cached translations only after acquiring the lock. This prevents a
             // slower failed refresh from overwriting translations saved by another screen.
-            val merged = mergeCachedTranslations(events)
-            // The backend already translates on the server; the device must not spend the
-            // user's own key on a dataset that already carries Chinese names.
-            if (source.mode == DataSourceMode.BACKEND) return@withLock merged
+            var merged = mergeCachedTranslations(events)
+            // Manual corrections are device-authoritative: never fetch (and overwrite) a name
+            // the reader fixed, otherwise every refresh reverted their correction.
+            val corrected = dao.corrections().map { it.event }.toSet()
+
+            // The server owns the shared translation cache, so ask it for every visible name.
+            // This runs in both data-source modes: a backend row can predate its translation,
+            // and a direct-mode list has no other source. Failures are reported instead of
+            // swallowed, otherwise the reader sees English with no explanation.
             if (dataSourceSettings.value.configured) {
-                // Manual corrections are device-authoritative: never fetch (and overwrite)
-                // names the user fixed, otherwise every refresh reverted their correction.
-                val corrected = dao.corrections().map { it.event }.toSet()
-                val names = merged.map { it.event }.filter { it !in corrected }.distinct()
-                val translations = names.chunked(100).flatMap { batch ->
-                    backendSource.translations(batch).entries.map { it.key to it.value }
-                }.toMap()
-                translations.forEach { (name, pair) -> dao.updateTranslation(name, pair.first, pair.second) }
-                if (translations.isNotEmpty()) _translationsUpdated.tryEmit(Unit)
-                return@withLock mergeCachedTranslations(merged)
+                val missing = merged.missingNameTranslations(corrected)
+                if (missing.isNotEmpty()) {
+                    runCatching {
+                        missing.chunked(TRANSLATION_SERVER_BATCH).flatMap { batch ->
+                            backendSource.translations(batch).entries.map { it.key to it.value }
+                        }
+                    }.onSuccess { fetched ->
+                        _translationError.value = null
+                        if (fetched.isNotEmpty()) {
+                            fetched.forEach { (name, pair) ->
+                                dao.updateTranslation(name, pair.first, pair.second)
+                            }
+                            _translationsUpdated.tryEmit(Unit)
+                            merged = mergeCachedTranslations(merged)
+                        }
+                    }.onFailure { error ->
+                        Log.w(TAG, "Server event-name translations unavailable", error)
+                        _translationError.value =
+                            error.message ?: "Server translation lookup failed"
+                    }
+                }
             }
+            // In backend mode the server owns event names; the device must not spend the
+            // reader's own key on data the server is responsible for.
+            if (source.mode == DataSourceMode.BACKEND) return@withLock merged
+
             val settings = translationPreferences.settings.value
             val apiKey = translationPreferences.apiKey()
             if (!settings.configured || apiKey == null) return@withLock merged
-            val missingNames = merged
-                .filter { it.eventZhCn.isNullOrBlank() || it.eventZhTw.isNullOrBlank() }
-                .map(EconomicEvent::event)
-                .distinct()
+            // The reader's key is billed per name, so a week of worldwide events is not sent
+            // in one refresh; the server cache above already covers whatever it knows.
+            val missingNames = merged.missingNameTranslations(corrected)
+                .take(TRANSLATION_PAID_NAME_LIMIT)
             if (missingNames.isEmpty()) return@withLock merged
 
             // Batches run with bounded concurrency and fail independently: a single
@@ -741,6 +766,13 @@ class MacroRepository(
                 } ?: event
             }
         }
+
+    /** Distinct titles still lacking a translation, ignoring names the reader corrected. */
+    private fun List<EconomicEvent>.missingNameTranslations(corrected: Set<String>): List<String> =
+        filter { it.eventZhCn.isNullOrBlank() || it.eventZhTw.isNullOrBlank() }
+            .map(EconomicEvent::event)
+            .filter { it !in corrected }
+            .distinct()
 
     /** Name-keyed translations already stored locally; also used to refresh rendered lists.
      * In direct mode manual corrections win over anything synced afterwards. */
@@ -790,6 +822,12 @@ class MacroRepository(
         internal const val AI_REGENERATE_COOLDOWN_MS = 10 * 60_000L
         private const val HISTORY_RETENTION_DAYS = 730L
         private const val TRANSLATION_BATCH_SIZE = 5
+
+        /** The server caps one lookup at 100 names. */
+        private const val TRANSLATION_SERVER_BATCH = 100
+
+        /** Ceiling for names translated with the reader's own key in a single refresh. */
+        private const val TRANSLATION_PAID_NAME_LIMIT = 40
         private const val TRANSLATION_MAX_CONCURRENT_BATCHES = 4
 
         /** Providers replaced by EconomicCalendarClient; their cached rows are dropped on refresh. */

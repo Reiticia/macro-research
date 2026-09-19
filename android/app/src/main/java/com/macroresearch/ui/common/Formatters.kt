@@ -1,6 +1,5 @@
 package com.macroresearch.ui.common
 
-import com.macroresearch.data.builtinEventName
 import com.macroresearch.data.model.EconomicEvent
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -22,13 +21,7 @@ fun EconomicEvent.localizedName(locale: Locale): String = localizedEventName(
 private fun localizedEventName(source: String, zhCn: String?, zhTw: String?, locale: Locale): String {
     if (locale.language != "zh") return source
     val traditional = locale.script == "Hant" || locale.country in setOf("TW", "HK", "MO")
-    // Stored translations (server sync, AI, manual corrections) win; the built-in dictionary
-    // only fills the gap when no translation source has covered the title yet.
-    return if (traditional) {
-        zhTw ?: builtinEventName(source, true) ?: zhCn ?: builtinEventName(source, false) ?: source
-    } else {
-        zhCn ?: builtinEventName(source, false) ?: zhTw ?: builtinEventName(source, true) ?: source
-    }
+    return if (traditional) zhTw ?: zhCn ?: source else zhCn ?: zhTw ?: source
 }
 
 fun EconomicEvent.localTime(): String = runCatching {

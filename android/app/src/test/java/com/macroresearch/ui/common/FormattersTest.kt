@@ -49,22 +49,6 @@ class FormattersTest {
         assertEquals("CPI YoY", event.copy(eventZhCn = null, eventZhTw = null).localizedName(Locale.SIMPLIFIED_CHINESE))
     }
 
-    @Test
-    fun builtinDictionaryFillsNamesWithoutStoredTranslations() {
-        val nonfarm = event(actual = null, consensus = null, unit = null).copy(
-            event = "Nonfarm Payrolls",
-            category = "Nonfarm Payrolls",
-            eventZhCn = null,
-            eventZhTw = null,
-        )
-        assertEquals("非农就业人数", nonfarm.localizedName(Locale.SIMPLIFIED_CHINESE))
-        assertEquals("非農就業人數", nonfarm.localizedName(Locale.TRADITIONAL_CHINESE))
-        // Stored translations, including manual corrections, always beat the dictionary.
-        assertEquals("自定义", nonfarm.copy(eventZhCn = "自定义").localizedName(Locale.SIMPLIFIED_CHINESE))
-        // Titles outside the dictionary still fall back to the source name.
-        assertEquals("CPI YoY", event(actual = null, consensus = null, unit = null).localizedName(Locale.SIMPLIFIED_CHINESE))
-    }
-
     private fun event(actual: String?, consensus: String?, unit: String?) = EconomicEvent(
         id = 1,
         provider = "test",

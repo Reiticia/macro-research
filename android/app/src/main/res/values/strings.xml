@@ -145,6 +145,7 @@
     <string name="backend_token_missing">Enter the access token issued by the administrator.</string>
     <string name="backend_test">Test connection</string>
     <string name="backend_verified">Connected</string>
+    <string name="backend_translation_failed">Event-name translation lookup failed: %1$s</string>
     <string name="backend_unauthorized">The backend rejected the access token.</string>
     <string name="backend_unreachable">The backend could not be reached.</string>
     <string name="backend_allow_cleartext">Allow plain HTTP (private or tunneled address only)</string>

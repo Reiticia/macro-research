@@ -45,6 +45,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun DataSourceSettings(repository: MacroRepository) {
     val settings by repository.dataSourceSettings.collectAsStateWithLifecycle()
+    val translationError by repository.translationError.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var baseUrl by rememberSaveable(settings.baseUrl) { mutableStateOf(settings.baseUrl) }
     var token by rememberSaveable { mutableStateOf("") }
@@ -168,6 +169,17 @@ fun DataSourceSettings(repository: MacroRepository) {
                 }
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                // A failed event-name lookup must be visible where the backend is configured;
+                // otherwise readers only see English names and never learn why.
+                if (settings.configured) {
+                    translationError?.let {
+                        Text(
+                            stringResource(R.string.backend_translation_failed, it),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(
