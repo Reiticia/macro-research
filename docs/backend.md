@@ -374,10 +374,19 @@ reasoning 混排、schema 回显、截断、`snake_case`、`verdict` 归一化�
 
 ## 翻译与勘正审核
 
-事件名翻译沿用 `event_name_translation` 缓存 + 启动补翻，返回的事件带 `eventZhCn/eventZhTw`。
+事件名翻译分三层，优先级从高到低：
+
+1. **AI 翻译**：配置并启用 `[translation]` 后，每个同步周期自动把新事件名交给中转站模型翻译，
+   写入 `event_name_translation` 缓存，启动时还会补翻历史名称。返回的事件带 `eventZhCn/eventZhTw`。
+2. **内置词典**：每次启动把一份人工审校的常用指标中文名（`event_names.rs`，约 100 条，
+   含 TradingView 与 Forex Factory 两种标题）种子化进 `event_name_translation`，
+   只填空、永不覆盖 AI 译名或人工勘正。因此**即使不配置任何模型 Key，常用事件也有中文名**。
+3. **人工勘正**：管理员审核后回写，覆盖前两层。
+
 客户端不需要个人 Key 就能拿到译名：后端模式下译名随事件返回；直连模式配置了后端时，
 客户端会通过 `POST /api/v1/translations/names` 批量拉取已缓存的译名（最多 100 个/批），
-同样不消耗服务端或客户端的模型额度。
+同样不消耗服务端或客户端的模型额度。客户端 APK 内还内置了同一份词典，纯直连模式
+（未配置后端）下常用事件也能直接显示中文。
 
 人工勘正由管理员把关：
 

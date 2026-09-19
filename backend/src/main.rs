@@ -115,6 +115,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let events = EventRepository::new(pool.clone());
+    // Zero-configuration Chinese names: seed the curated dictionary before any scheduler
+    // runs, so saved events pick the names up and cached rows are backfilled. Existing
+    // translations and administrator corrections are never overwritten.
+    if let Err(error) = events
+        .save_event_name_translations(&market_event_analyzer::event_names::rows())
+        .await
+    {
+        tracing::warn!(%error, "builtin event-name seed failed; event names stay untranslated");
+    }
     let market = MarketRepository::new(pool.clone());
     let backfill = BackfillRepository::new(pool.clone());
     let analyses = AnalysisRepository::new(pool.clone());
@@ -200,6 +209,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
+        tracing::info!(
+            "translation relay disabled by config; the built-in dictionary still supplies common Chinese names"
+        );
         None
     };
 

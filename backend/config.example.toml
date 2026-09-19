@@ -72,6 +72,7 @@ llm_usage_retention_days = 180
 
 # 事件名翻译。任何兼容 /chat/completions 的端点都能用：官方 API 或中转站。
 # base_url 可写 https://relay.example.com/v1（推荐）或完整的 .../v1/chat/completions。
+# 不启用时，内置常用指标词典（约 100 条）仍会在启动时种子化，提供基础中文名。
 [translation]
 enabled = false
 base_url = "https://relay.example.com/v1"
