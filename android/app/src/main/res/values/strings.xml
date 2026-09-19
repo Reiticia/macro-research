@@ -94,9 +94,9 @@
     <string name="market_quote_meta">%1$s · %2$s</string>
     <string name="market_day_range">Low %1$s · High %2$s</string>
     <string name="settings_subtitle">Your research preferences</string>
-    <string name="translation_api">Translation API</string>
+    <string name="translation_api">Personal AI API (optional)</string>
     <string name="api_key_configured">Key stored securely on this device</string>
-    <string name="api_key_not_configured">Not configured · English only</string>
+    <string name="api_key_not_configured">No personal key · read shared server analysis</string>
     <string name="api_key">API key</string>
     <string name="api_key_hint">Enter your personal API key</string>
     <string name="api_key_replace_hint">Leave blank to keep the stored key</string>
@@ -113,8 +113,7 @@
     <string name="save">Save</string>
     <string name="api_key_security_note">The key is encrypted by Android Keystore, excluded from backups, and never bundled in the APK. Use a restricted personal key with a spending limit.</string>
     <string name="language">Language</string>
-    <string name="language_note">Applies immediately. New event names are translated on this device through your configured API.</string>
-    <string name="language_key_required_note">English is the default. Add an API key above to unlock Simplified and Traditional Chinese.</string>
+    <string name="language_note">Interface language applies immediately. A configured backend supplies event-name translations without a personal AI key.</string>
     <string name="fix_translation">Fix translation</string>
     <string name="translation_correction">Translation correction</string>
     <string name="source_name">Source name</string>
@@ -261,6 +260,10 @@
     <string name="coverage_missing_samples">Some exact time windows are missing, including possible market closures or insufficient time resolution. No prices were interpolated.</string>
     <string name="history_refresh">Refresh history</string>
     <string name="ai_analysis">AI market analysis</string>
+    <string name="ai_shared_pending">No shared analysis yet. Configure a backend; results are published after the post-release market collection window.</string>
+    <string name="ai_shared_note">Shared server result. Only an administrator can approve regeneration. Add a personal AI key to generate private analysis directly.</string>
+    <string name="ai_feedback">Report an analysis issue</string>
+    <string name="ai_feedback_sent">Feedback recorded for administrator review.</string>
     <string name="ai_analysis_method">AI analysis method</string>
     <string name="ai_analysis_method_note">Applies to newly generated briefings; already cached ones keep their content.</string>
     <string name="ai_method_numbers_only">Released numbers and rules only</string>

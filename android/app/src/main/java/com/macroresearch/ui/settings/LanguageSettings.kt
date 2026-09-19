@@ -25,21 +25,19 @@ import com.macroresearch.R
 import com.macroresearch.ui.common.appLocale
 
 @Composable
-fun LanguageSettings(chineseEnabled: Boolean) {
+fun LanguageSettings() {
     val selected = AppLanguage.fromLocale(appLocale())
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.language), fontWeight = FontWeight.Bold)
             Column(Modifier.selectableGroup()) {
                 AppLanguage.entries.forEach { language ->
-                    val enabled = language == AppLanguage.English || chineseEnabled
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 48.dp)
                             .selectable(
                                 selected = selected == language,
-                                enabled = enabled,
                                 role = Role.RadioButton,
                                 onClick = {
                                     if (selected != language) {
@@ -55,25 +53,16 @@ fun LanguageSettings(chineseEnabled: Boolean) {
                         RadioButton(
                             selected = selected == language,
                             onClick = null,
-                            enabled = enabled,
                         )
                         Text(
                             language.nativeName,
                             style = MaterialTheme.typography.bodyLarge,
-                            color = if (enabled) {
-                                MaterialTheme.colorScheme.onSurface
-                            } else {
-                                MaterialTheme.colorScheme.onSurface.copy(alpha = .38f)
-                            },
                         )
                     }
                 }
             }
             Text(
-                stringResource(
-                    if (chineseEnabled) R.string.language_note
-                    else R.string.language_key_required_note,
-                ),
+                stringResource(R.string.language_note),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )

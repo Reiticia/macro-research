@@ -93,9 +93,9 @@
     <string name="market_quote_meta">%1$s · %2$s</string>
     <string name="market_day_range">最低 %1$s · 最高 %2$s</string>
     <string name="settings_subtitle">个人研究偏好</string>
-    <string name="translation_api">翻译 API</string>
+    <string name="translation_api">个人 AI API（可选）</string>
     <string name="api_key_configured">密钥已安全保存在本机</string>
-    <string name="api_key_not_configured">未配置 · 仅支持英文</string>
+    <string name="api_key_not_configured">未配置个人密钥 · 读取服务端共享分析</string>
     <string name="api_key">API 密钥</string>
     <string name="api_key_hint">输入你的个人 API 密钥</string>
     <string name="api_key_replace_hint">留空则保留已存储的密钥</string>
@@ -112,8 +112,7 @@
     <string name="save">保存</string>
     <string name="api_key_security_note">密钥由 Android Keystore 加密、不会备份，也不会打包进 APK。请使用设置了权限和消费限额的个人密钥。</string>
     <string name="language">语言</string>
-    <string name="language_note">切换后立即生效；新事件名称会通过你配置的 API 在本机完成翻译。</string>
-    <string name="language_key_required_note">默认使用英文。请先在上方填写 API 密钥，才能切换简体或繁体中文。</string>
+    <string name="language_note">界面语言切换后立即生效。配置后端后即可获取事件名称翻译，无需个人 AI 密钥。</string>
     <string name="fix_translation">翻译勘误</string>
     <string name="translation_correction">翻译勘误</string>
     <string name="source_name">原文名称</string>
@@ -260,6 +259,10 @@
     <string name="coverage_missing_samples">部分观察时点缺少有效样本，可能因休市或时间精度不足；未对缺失价格进行插值。</string>
     <string name="history_refresh">刷新历史数据</string>
     <string name="ai_analysis">AI 市场分析</string>
+    <string name="ai_shared_pending">暂无共享分析。请配置后端；服务端将在公布后的行情采集窗口结束后发布分析。</string>
+    <string name="ai_shared_note">服务端共享结果，仅管理员可批准重新生成。填写个人 AI 密钥后，可直连模型生成私人分析。</string>
+    <string name="ai_feedback">反馈分析问题</string>
+    <string name="ai_feedback_sent">反馈已记录，等待管理员审核。</string>
     <string name="ai_analysis_method">AI 分析方法</string>
     <string name="ai_analysis_method_note">仅影响新生成的分析，已缓存的分析保持原内容。</string>
     <string name="ai_method_numbers_only">只用公布值与规则</string>

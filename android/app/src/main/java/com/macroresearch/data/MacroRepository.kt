@@ -298,7 +298,10 @@ class MacroRepository(
     suspend fun event(id: Long): EventDetailResponse {
         if (source.mode == DataSourceMode.BACKEND) {
             try {
-                source.eventDetail(id)?.let { return it }
+                source.eventDetail(id)?.let {
+                    dao.upsert(listOf(it.event.asEntity()))
+                    return it
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -346,7 +349,11 @@ class MacroRepository(
 
     suspend fun analysis(id: Long): AnalysisReport {
         val event = event(id).event
-        return source.ruleAnalysis(event) { market(id) }
+        return if (translationSettings.value.configured) {
+            directSource.ruleAnalysis(event) { directSource.eventMarket(event) }
+        } else {
+            source.ruleAnalysis(event) { market(id) }
+        }
     }
 
     /** The cached briefing of the method the user currently has selected. */
@@ -369,11 +376,27 @@ class MacroRepository(
      * the network, it returns the stored result marked `rateLimited`, and a backend that is
      * itself throttled does the same for a device with an empty cache.
      */
+    suspend fun sharedAiAnalysis(eventId: Long, languageTag: String): AiAnalysis? {
+        check(dataSourceSettings.value.configured) { "Configure a backend to read shared analysis" }
+        val serverId = if (source.mode == DataSourceMode.BACKEND) eventId else {
+            backendSource.serverEventId(localEvent(eventId).event)
+        }
+        return backendSource.cachedAiAnalysis(serverId, languageTag, analysisMethod.value)
+    }
+
+    suspend fun submitAnalysisFeedback(language: String, analysis: AiAnalysis, message: String) {
+        check(!translationSettings.value.configured && dataSourceSettings.value.configured) {
+            "Feedback is only available for shared server analysis"
+        }
+        backendSource.feedback(analysis.eventId, language, analysis.method, analysis.revision, message)
+    }
+
     suspend fun generateAiAnalysis(
         eventId: Long,
         languageTag: String,
         regenerate: Boolean = false,
     ): AiAnalysis {
+        check(translationSettings.value.configured) { "A personal AI key is required to generate analysis" }
         val method = analysisPreferences.method.value
         val cached = analysisDao.analysis(eventId, method.wireValue)
         if (regenerate && cached != null) {
@@ -387,12 +410,13 @@ class MacroRepository(
                 )
             }
         }
-        val event = (source.eventDetail(eventId)?.event ?: dao.event(eventId)?.asExternalModel())
+        val event = dao.event(eventId)?.asExternalModel()
             ?: error("Event is not available in the local cache")
         require(event.actual != null) { "The release has no published value yet" }
-        val report = source.ruleAnalysis(event) { market(eventId) }
+        // Personal model payloads/results never go through the backend, in either data mode.
+        val report = directSource.ruleAnalysis(event) { directSource.eventMarket(event) }
         val nextRevision = (cached?.revision ?: 0) + 1
-        val analysis = source.aiAnalysis(
+        val analysis = directSource.aiAnalysis(
             AiAnalysisRequest(
                 event = event,
                 report = report,
@@ -650,6 +674,15 @@ class MacroRepository(
             // The backend already translates on the server; the device must not spend the
             // user's own key on a dataset that already carries Chinese names.
             if (source.mode == DataSourceMode.BACKEND) return@withLock merged
+            if (dataSourceSettings.value.configured) {
+                val names = merged.map { it.event }.distinct()
+                val translations = names.chunked(100).flatMap { batch ->
+                    backendSource.translations(batch).entries.map { it.key to it.value }
+                }.toMap()
+                translations.forEach { (name, pair) -> dao.updateTranslation(name, pair.first, pair.second) }
+                if (translations.isNotEmpty()) _translationsUpdated.tryEmit(Unit)
+                return@withLock mergeCachedTranslations(merged)
+            }
             val settings = translationPreferences.settings.value
             val apiKey = translationPreferences.apiKey()
             if (!settings.configured || apiKey == null) return@withLock merged

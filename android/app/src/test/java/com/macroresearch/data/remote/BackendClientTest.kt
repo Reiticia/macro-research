@@ -195,12 +195,12 @@ class BackendClientTest {
     @Test
     fun throttledBriefingDecodesWithItsMetadata() = runBlocking {
         server.enqueue(MockResponse().setBody(briefingJson()))
-        val analysis = client().generateAiAnalysis(
+        val analysis = requireNotNull(client().aiAnalysis(
             id = 7,
             languageTag = "zh-CN",
             method = AnalysisMethod.EX_ANTE_THEN_COMPARE,
-            regenerate = true,
-        )
+        ))
+        assertEquals("GET", server.takeRequest().method)
         assertEquals(2, analysis.method)
         assertEquals(3, analysis.revision)
         assertTrue(analysis.rateLimited)

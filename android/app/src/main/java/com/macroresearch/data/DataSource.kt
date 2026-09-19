@@ -71,6 +71,16 @@ interface DataSource {
 
     suspend fun aiAnalysis(request: AiAnalysisRequest): AiAnalysis
 
+    suspend fun cachedAiAnalysis(id: Long, language: String, method: AnalysisMethod): AiAnalysis? = null
+
+    suspend fun serverEventId(event: EconomicEvent): Long = event.id
+
+    suspend fun translations(names: List<String>): Map<String, Pair<String, String>> = emptyMap()
+
+    suspend fun feedback(id: Long, language: String, method: Int, revision: Int, message: String) {
+        error("Configure a backend to submit feedback")
+    }
+
     suspend fun eventMarket(event: EconomicEvent): MarketResponse
 
     suspend fun quotes(symbols: List<String>): MarketQuotesResponse
@@ -208,12 +218,19 @@ class BackendDataSource(
     ): AnalysisReport = client.analysis(event.id)
 
     override suspend fun aiAnalysis(request: AiAnalysisRequest): AiAnalysis =
-        client.generateAiAnalysis(
-            id = request.event.id,
-            languageTag = request.languageTag,
-            method = request.method,
-            regenerate = request.regenerate,
-        )
+        error("Shared server analysis is read-only")
+
+    override suspend fun serverEventId(event: EconomicEvent): Long =
+        client.eventByProvider(event.provider, event.providerId).id
+
+    override suspend fun translations(names: List<String>): Map<String, Pair<String, String>> = client.translations(names)
+
+    override suspend fun cachedAiAnalysis(id: Long, language: String, method: AnalysisMethod): AiAnalysis? =
+        client.aiAnalysis(id, language, method, timezone = "UTC")
+
+    override suspend fun feedback(id: Long, language: String, method: Int, revision: Int, message: String) {
+        client.submitAnalysisFeedback(id, language, method, revision, message)
+    }
 
     override suspend fun eventMarket(event: EconomicEvent): MarketResponse = client.market(event.id)
 

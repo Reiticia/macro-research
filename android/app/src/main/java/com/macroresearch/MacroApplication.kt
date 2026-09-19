@@ -1,8 +1,6 @@
 package com.macroresearch
 
 import android.app.Application
-import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.os.LocaleListCompat
 import androidx.room.Room
 import com.google.gson.Gson
 import com.macroresearch.data.AnalysisPreferences
@@ -48,11 +46,6 @@ class MacroApplication : Application() {
         super.onCreate()
         val translationPreferences = TranslationPreferences(this)
         backendPreferences = BackendPreferences(this)
-        if (!translationPreferences.settings.value.configured &&
-            backendPreferences.settings.value.mode != DataSourceMode.BACKEND
-        ) {
-            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("en"))
-        }
 
         val gson = Gson()
         val logging = HttpLoggingInterceptor().apply {

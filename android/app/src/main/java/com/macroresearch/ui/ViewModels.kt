@@ -247,6 +247,7 @@ data class AiAnalysisState(
     val analysis: AiAnalysis? = null,
     val loading: Boolean = false,
     val error: String? = null,
+    val feedbackSent: Boolean = false,
 )
 
 class AnalysisViewModel(
@@ -260,11 +261,36 @@ class AnalysisViewModel(
 
     init {
         refresh()
-        viewModelScope.launch {
-            repository.observeAiAnalysis(id).collect { cached ->
-                // A generation in flight owns the state until it finishes.
-                if (!_ai.value.loading) _ai.value = _ai.value.copy(analysis = cached)
+    }
+
+    fun refreshSharedAi(language: String) = viewModelScope.launch { loadAi(language) }
+
+    suspend fun loadAi(language: String) {
+        _ai.value = AiAnalysisState(loading = true)
+        try {
+            val result = if (repository.translationSettings.value.configured) {
+                repository.aiAnalysis(id)
+            } else {
+                repository.sharedAiAnalysis(id, language)
             }
+            _ai.value = AiAnalysisState(analysis = result)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            _ai.value = AiAnalysisState(error = error.message)
+        }
+    }
+
+    fun feedback(language: String, message: String) = viewModelScope.launch {
+        val result = _ai.value.analysis ?: return@launch
+        _ai.value = _ai.value.copy(error = null)
+        try {
+            repository.submitAnalysisFeedback(language, result, message)
+            _ai.value = _ai.value.copy(feedbackSent = true)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            _ai.value = _ai.value.copy(error = error.message)
         }
     }
 

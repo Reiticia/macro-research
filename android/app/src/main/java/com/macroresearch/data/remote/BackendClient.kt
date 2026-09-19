@@ -137,6 +137,18 @@ class BackendClient(
         }.let(::events)
     }
 
+    suspend fun eventByProvider(provider: String, providerId: String): EconomicEvent = withContext(Dispatchers.IO) {
+        gson.fromJson(getJson("/api/v1/events/by-provider") {
+            it.addQueryParameter("provider", provider)
+            it.addQueryParameter("provider_id", providerId)
+        }, EconomicEvent::class.java)
+    }
+
+    suspend fun translations(names: List<String>): Map<String, Pair<String, String>> = withContext(Dispatchers.IO) {
+        postJson("/api/v1/translations/names", gson.toJsonTree(names)).asJsonObject.entrySet()
+            .associate { (name, value) -> name to (value.asJsonArray[0].asString to value.asJsonArray[1].asString) }
+    }
+
     suspend fun event(id: Long): EventDetailResponse = withContext(Dispatchers.IO) {
         gson.fromJson(getJson("/api/v1/events/$id"), EventDetailResponse::class.java)
     }
@@ -182,20 +194,17 @@ class BackendClient(
         gson.fromJson(root, AiAnalysis::class.java)
     }
 
-    suspend fun generateAiAnalysis(
-        id: Long,
-        languageTag: String,
-        method: AnalysisMethod,
-        regenerate: Boolean,
-        timezone: String = ZoneId.systemDefault().id,
-    ): AiAnalysis = withContext(Dispatchers.IO) {
+    suspend fun submitAnalysisFeedback(
+        id: Long, languageTag: String, method: Int, revision: Int, message: String,
+    ): Unit = withContext(Dispatchers.IO) {
         val body = JsonObject().apply {
             addProperty("language", languageTag)
-            addProperty("method", method.wireValue)
-            addProperty("timezone", timezone)
-            addProperty("regenerate", regenerate)
+            addProperty("method", method)
+            addProperty("revision", revision)
+            addProperty("message", message)
         }
-        gson.fromJson(postJson("/api/v1/events/$id/ai-analysis", body), AiAnalysis::class.java)
+        postJson("/api/v1/events/$id/analysis-feedback", body)
+        Unit
     }
 
     suspend fun submitCorrection(
@@ -240,7 +249,7 @@ class BackendClient(
         return execute(request)
     }
 
-    private fun postJson(path: String, body: JsonObject): com.google.gson.JsonElement {
+    private fun postJson(path: String, body: com.google.gson.JsonElement): com.google.gson.JsonElement {
         val request = requestBuilder(path, authenticated = true) {}.post(
             body.toString().toRequestBody(JSON_MEDIA_TYPE),
         ).build()
