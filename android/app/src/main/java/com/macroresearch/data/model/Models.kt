@@ -1,5 +1,7 @@
 package com.macroresearch.data.model
 
+import com.macroresearch.data.builtinEventName
+
 data class EconomicEvent(
     val id: Long,
     val provider: String,
@@ -187,11 +189,14 @@ data class SocketEvent(
     val actual: String? = null,
     val consensus: String? = null,
 ) {
-    /** Event name in the reader's language, falling back to the source name. */
-    fun localizedName(isTraditionalChinese: Boolean): String? = when {
-        isTraditionalChinese -> eventZhTw ?: event
-        eventZhCn != null -> eventZhCn
-        else -> event
+    /** Event name in the reader's language, falling back to the dictionary then the source. */
+    fun localizedName(isTraditionalChinese: Boolean): String? {
+        val source = event ?: return null
+        return if (isTraditionalChinese) {
+            eventZhTw ?: builtinEventName(source, true) ?: eventZhCn ?: source
+        } else {
+            eventZhCn ?: builtinEventName(source, false) ?: eventZhTw ?: source
+        }
     }
 }
 
