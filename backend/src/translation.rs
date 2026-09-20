@@ -74,6 +74,17 @@ pub struct OpenAiEventNameTranslator {
     json_mode: AtomicBool,
 }
 
+const RESPONSE_LOG_LIMIT: usize = 8 * 1024;
+
+fn response_preview(body: &[u8]) -> String {
+    let text = String::from_utf8_lossy(body);
+    let mut preview: String = text.chars().take(RESPONSE_LOG_LIMIT).collect();
+    if text.chars().count() > RESPONSE_LOG_LIMIT {
+        preview.push('…');
+    }
+    preview
+}
+
 impl OpenAiEventNameTranslator {
     pub fn new(
         client: Client,
@@ -239,15 +250,60 @@ impl OpenAiEventNameTranslator {
         if !self.extra_headers.overrides_authorization() {
             request = request.bearer_auth(&self.api_key);
         }
-        let response = self.extra_headers.apply(request).send().await?;
+        let mut response = self.extra_headers.apply(request).send().await?;
         let status = response.status();
-        let text = response.text().await?;
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
+        let content_encoding = response
+            .headers()
+            .get(reqwest::header::CONTENT_ENCODING)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_owned();
+        let mut bytes = Vec::new();
+        loop {
+            match response.chunk().await {
+                Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
+                Ok(None) => break,
+                Err(error) => {
+                    tracing::warn!(
+                        %status,
+                        content_type = %content_type,
+                        content_encoding = %content_encoding,
+                        body = %response_preview(&bytes),
+                        %error,
+                        "translation relay response body read failed"
+                    );
+                    return Err(error.into());
+                }
+            }
+        }
+        let text = String::from_utf8_lossy(&bytes).into_owned();
         if !status.is_success() {
+            tracing::warn!(
+                %status,
+                content_type = %content_type,
+                content_encoding = %content_encoding,
+                body = %response_preview(&bytes),
+                "translation relay returned an error response"
+            );
             return Err(AppError::Provider(error_detail(status, &text)));
         }
         serde_json::from_str(&text)
             .map(|response| (response, TokenUsage::from_body(&text)))
             .map_err(|error| {
+                tracing::warn!(
+                    %status,
+                    content_type = %content_type,
+                    content_encoding = %content_encoding,
+                    body = %response_preview(&bytes),
+                    %error,
+                    "translation relay returned invalid JSON"
+                );
                 AppError::Provider(format!(
                     "relay returned a non chat-completions body: {error}"
                 ))
