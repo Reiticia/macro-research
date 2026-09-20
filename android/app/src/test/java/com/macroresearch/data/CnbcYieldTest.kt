@@ -32,6 +32,8 @@ class CnbcYieldTest {
         // previous session close: (4.606 - 4.55) / 4.55 * 100.
         assertEquals(1.2308, quote.changePercent!!, 1e-3)
         assertEquals("2026-09-11T15:17:11Z", quote.timestamp)
+        assertEquals(4.61, quote.high!!, 1e-9)
+        assertEquals(4.54, quote.low!!, 1e-9)
         assertEquals("reg_mkt", quote.marketState)
     }
 
@@ -50,6 +52,24 @@ class CnbcYieldTest {
                 client.parseCnbcQuote("us10y", """{"FormattedQuoteResult":{"FormattedQuote":[{"last":"--"}]}}""")
             }.isFailure,
         )
+    }
+
+    @Test
+    fun treasuryCsvProvidesAStaleDailyFallbackAndChange() {
+        val quote = client.parseTreasuryQuote(
+            "us2y",
+            """Date,"2 Yr","10 Yr"
+09/18/2026,4.76,5.01
+09/17/2026,4.67,4.94
+""",
+            "2 Yr",
+        )
+        assertEquals("us2y", quote.symbol)
+        assertEquals("treasury", quote.provider)
+        assertEquals(4.76, quote.price, 1e-9)
+        assertEquals((4.76 - 4.67) / 4.67 * 100.0, quote.changePercent!!, 1e-9)
+        assertTrue(quote.stale)
+        assertEquals("closed", quote.marketState)
     }
 
     @Test
@@ -121,6 +141,23 @@ class CnbcYieldTest {
     }
 
     @Test
+    fun directQuotesUseTheFiveSecondMemoryCache() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody(QUOTE))
+            server.start()
+            val cached = DirectMarketClient(
+                OkHttpClient(),
+                cnbcQuoteBase = server.url("/quote").toString().trimEnd('/'),
+            )
+
+            assertEquals(4.606, cached.quotes(listOf("us2y")).quotes.single().price, 1e-9)
+            assertEquals(4.606, cached.quotes(listOf("us2y")).quotes.single().price, 1e-9)
+            assertEquals(1, server.requestCount)
+            assertEquals("https://www.cnbc.com/", server.takeRequest().getHeader("Referer"))
+        }
+    }
+
+    @Test
     fun treasuryRequestsGoThroughTheConfiguredProxy() = runBlocking {
         // Yahoo and CNBC are TLS-blocked on some networks, so both honour the user's proxy
         // (Yahoo shares the same helper), while the crypto/quote providers stay direct.
@@ -139,14 +176,17 @@ class CnbcYieldTest {
             assertEquals(listOf("us2y", "us10y"), quotes.map { it.symbol })
             assertEquals(listOf("cnbc", "cnbc"), quotes.map { it.provider })
             // An HTTP proxy receives the absolute request line, which proves the route is used.
-            assertTrue(proxy.takeRequest().requestLine.startsWith("GET http://cnbc.invalid/quote?symbols="))
-            assertTrue(proxy.takeRequest().requestLine.startsWith("GET http://cnbc.invalid/quote?symbols="))
+            val requests = listOf(proxy.takeRequest(), proxy.takeRequest())
+            requests.forEach { request ->
+                assertTrue(request.requestLine.startsWith("GET http://cnbc.invalid/quote?symbols="))
+                assertEquals("https://www.cnbc.com/", request.getHeader("Referer"))
+            }
         }
     }
 
     private val QUOTE = """
         {"FormattedQuoteResult":{"FormattedQuote":[{"symbol":"US2Y","last":"4.606%","change":"+0.056",
-         "change_pct":"-0.1055%","open":"4.589%","previous_day_closing":"4.55%","last_timedate":"11:17 AM EDT",
+         "change_pct":"-0.1055%","open":"4.589%","high":"4.610%","low":"4.540%","previous_day_closing":"4.55%","last_timedate":"11:17 AM EDT",
          "last_time":"2026-09-11T11:17:11.000-0400","curmktstatus":"REG_MKT"}]}}
     """.trimIndent()
 }

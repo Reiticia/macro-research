@@ -34,9 +34,11 @@ data class FollowedEventEntity(
 )
 
 /** Cached AI analysis; [chainJson] holds the serialized transmission chain. */
-@Entity(tableName = "ai_analysis")
+/** Cached AI analysis. The three methods are stored side by side, never overwriting each other. */
+@Entity(tableName = "ai_analysis", primaryKeys = ["eventId", "method"])
 data class AiAnalysisEntity(
-    @PrimaryKey val eventId: Long,
+    val eventId: Long,
+    val method: Int,
     val revision: Int,
     val chainJson: String,
     val dataAnalysis: String,
@@ -44,6 +46,15 @@ data class AiAnalysisEntity(
     val risks: String?,
     val model: String,
     val generatedAt: String,
+    /** Epoch millis of [generatedAt], kept beside it so cooldown checks never parse RFC 3339. */
+    val generatedAtEpochMs: Long,
+    val usagePromptTokens: Int,
+    val usageCompletionTokens: Int,
+    val usageTotalTokens: Int,
+    val usageCalls: Int,
+    val fromCache: Boolean,
+    val rateLimited: Boolean,
+    val retryAfterSeconds: Long?,
 )
 
 fun EconomicEvent.asEntity() = CachedEventEntity(

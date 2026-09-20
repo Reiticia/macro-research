@@ -1,6 +1,5 @@
 package com.macroresearch.ui.settings
 
-import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,10 +46,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.core.os.LocaleListCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.macroresearch.R
 import com.macroresearch.data.CountryPreferences
+import com.macroresearch.data.DataSourceMode
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.MarketPreferences
 import com.macroresearch.ui.common.assetLabel
@@ -64,7 +63,7 @@ fun SettingsScreen(repository: MacroRepository, padding: PaddingValues) {
     val countries = CountryPreferences.SUPPORTED_COUNTRIES.associateWith { it in selectedCountries }
     val selectedMarkets by repository.selectedMarkets.collectAsStateWithLifecycle()
     val markets = MarketPreferences.SUPPORTED_MARKETS.associateWith { it in selectedMarkets }
-    val translation by repository.translationSettings.collectAsStateWithLifecycle()
+    val dataSource by repository.dataSourceSettings.collectAsStateWithLifecycle()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -88,11 +87,18 @@ fun SettingsScreen(repository: MacroRepository, padding: PaddingValues) {
             contentPadding = PaddingValues(bottom = 4.dp),
             verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
         ) {
+            item { DataSourceSettings(repository) }
             item { DisplaySettingsCard() }
-            item { DataNetworkSettings(repository) }
+            if (dataSource.mode == DataSourceMode.DIRECT) {
+                item { DataNetworkSettings(repository) }
+            }
+            // Personal AI generation is available in either data-source mode.
             item { TranslationApiSettings(repository) }
             item { AnalysisMethodSettings(repository) }
-            item { LanguageSettings(translation.configured) }
+            // Interface localization is independent of event-name translation. Without a
+            // translation API, direct mode can still use a Chinese interface while event names
+            // remain in their source language.
+            item { LanguageSettings() }
             item {
                 SettingsGroup(
                     stringResource(R.string.countries_regions),
@@ -292,7 +298,6 @@ private fun TranslationApiSettings(repository: MacroRepository) {
                     TextButton(
                         onClick = {
                             repository.clearTranslationSettings()
-                            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("en"))
                             apiKey = ""
                             localError = null
                             saved = false

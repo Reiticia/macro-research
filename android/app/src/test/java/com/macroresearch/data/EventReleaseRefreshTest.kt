@@ -144,6 +144,11 @@ class EventReleaseRefreshTest {
         }
         override suspend fun deleteOlderThan(before: String) = Unit
         override suspend fun deleteByProviders(providers: List<String>) = Unit
+        override suspend fun clearEvents() {
+            rows.clear()
+        }
+
+        override suspend fun clearFollows() = Unit
         override fun observeFollowed(eventId: Long): Flow<Boolean> = flowOf(false)
         override suspend fun isFollowed(eventId: Long) = false
         override suspend fun follow(event: FollowedEventEntity) = Unit

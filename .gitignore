@@ -2,6 +2,11 @@
 /.pi
 /android/.kotlin
 
+# Rust backend
+/backend/target
+/backend/dist
+/backend/data
+
 # Android / IntelliJ
 /android/.gradle
 /android/.idea
@@ -10,3 +15,8 @@
 /android/.sdk-validation
 /android/.sdk-extract
 /android/android-command-tools.zip
+
+# 真实配置含密钥，不入库；模板见 backend/config.example.toml
+/backend/config.toml
+
+ANDROID_KEYSTORE_PASSWORD

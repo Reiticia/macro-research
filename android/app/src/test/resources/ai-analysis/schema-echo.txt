@@ -1,0 +1,4 @@
+I need to write the JSON only. Structure:
+{"chain":[{"from":"...","to":"...","direction":"up|down|flat","rationale":"..."}],"dataAnalysis":"...","marketOutlook":"...","risks":"..."}
+Final answer:
+{"chain":[{"from":"核心CPI超预期","to":"美债收益率","direction":"up","rationale":"收益率上行"}],"dataAnalysis":"核心CPI月率0.3%高于预期0.2%，读数偏鹰。","marketOutlook":"美元与短端收益率短期偏强。","risks":"若后续数据走弱，该判断失效。"}

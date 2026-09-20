@@ -1,0 +1,35 @@
+# Market Event Analyzer systemd unit.
+# This file is a template rendered by deploy.sh (@VAR@ placeholders are substituted).
+# For a manual install, replace the placeholders yourself or just use deploy.sh.
+[Unit]
+Description=Market Event Analyzer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@APP_USER@
+Group=@APP_GROUP@
+WorkingDirectory=@APP_DIR@
+Environment=RUST_LOG=market_event_analyzer=info,tower_http=info
+# 凭据不再走环境：全部读自 @APP_DIR@/config.toml（可用 [server] log_level 代替上面的 RUST_LOG）。
+ExecStart=@APP_DIR@/market-event-analyzer
+Restart=always
+RestartSec=5
+# 进程内用 tokio ctrl_c 处理优雅退出，因此显式发送 SIGINT。
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+# 基础加固：不可提权、私有 /tmp、系统目录只读、隐藏 home。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

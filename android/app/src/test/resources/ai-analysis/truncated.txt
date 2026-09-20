@@ -1,0 +1,4 @@
+The chain should be ordered from surprise to final asset reaction.
+{"chain":[{"from":"...","to":"...","direction":"up|down|flat","rationale":"..."}],"dataAnalysis":"...","marketOutlook":"...","risks":"..."}
+Let me design the chain:
+1. {"from":"核心CPI超预期(0.3% vs 0.2%)","to":"美联储降息预期","direction":"down","rationale":"市场下修降

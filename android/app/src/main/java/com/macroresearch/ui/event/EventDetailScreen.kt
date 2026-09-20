@@ -16,10 +16,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -30,10 +28,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,7 +37,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,10 +68,7 @@ import com.macroresearch.ui.theme.AssetDown
 import com.macroresearch.ui.theme.AssetUp
 import com.macroresearch.ui.theme.Upcoming
 import com.macroresearch.ui.viewModelFactory
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
 
@@ -114,28 +106,18 @@ fun EventDetailScreen(
                 Text(state.error.orEmpty(), color = MaterialTheme.colorScheme.error)
             }
             else -> {
-                var showCorrection by rememberSaveable { mutableStateOf(false) }
                 EventContent(
                     event = event,
                     market = state.market,
                     modifier = Modifier.padding(padding),
                     onAnalysis = onAnalysis,
                     onHistory = onHistory,
-                    onFixTranslation = { showCorrection = true },
                     warning = warning,
                     releaseFetching = state.releaseFetching,
                     releaseOutcome = state.releaseOutcome,
                     releaseError = state.releaseError,
                     onFetchRelease = vm::fetchRelease,
                 )
-                if (showCorrection) {
-                    TranslationCorrectionDialog(
-                        event = event,
-                        repository = repository,
-                        onChanged = vm::refresh,
-                        onDismiss = { showCorrection = false },
-                    )
-                }
             }
         }
     }
@@ -148,7 +130,6 @@ private fun EventContent(
     modifier: Modifier,
     onAnalysis: () -> Unit,
     onHistory: () -> Unit,
-    onFixTranslation: () -> Unit,
     warning: CalendarWarning?,
     releaseFetching: Boolean,
     releaseOutcome: ReleaseFetchOutcome?,
@@ -163,16 +144,6 @@ private fun EventContent(
                     Text(categoryLabel(event.category), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text("${importanceLabel(event.importance)}  ${"●".repeat(event.importance.coerceIn(0, 3))}", color = Upcoming, style = MaterialTheme.typography.labelMedium)
-            }
-        }
-        item {
-            OutlinedButton(
-                onClick = onFixTranslation,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Outlined.Edit, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.fix_translation))
             }
         }
         item { CountdownCard(event) }
@@ -267,140 +238,6 @@ private fun ReleaseRetryCard(
 }
 
 @Composable
-private fun TranslationCorrectionDialog(
-    event: EconomicEvent,
-    repository: MacroRepository,
-    onChanged: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    var zhCn by rememberSaveable(event.id) { mutableStateOf(event.eventZhCn.orEmpty()) }
-    var zhTw by rememberSaveable(event.id) { mutableStateOf(event.eventZhTw.orEmpty()) }
-    var working by rememberSaveable { mutableStateOf(false) }
-    var error by rememberSaveable { mutableStateOf<String?>(null) }
-    var operation by remember { mutableStateOf<Job?>(null) }
-    val configured = repository.translationSettings.collectAsStateWithLifecycle().value.configured
-    val retranslateFailed = stringResource(R.string.retranslate_failed)
-
-    fun cancelAndDismiss() {
-        operation?.cancel()
-        onDismiss()
-    }
-
-    AlertDialog(
-        onDismissRequest = ::cancelAndDismiss,
-        title = { Text(stringResource(R.string.translation_correction), fontWeight = FontWeight.Bold) },
-        text = {
-            Column(
-                modifier = Modifier.heightIn(max = 480.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Column {
-                    Text(
-                        stringResource(R.string.source_name),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(event.event, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                }
-                OutlinedTextField(
-                    value = zhCn,
-                    onValueChange = { zhCn = it; error = null },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.simplified_chinese)) },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = zhTw,
-                    onValueChange = { zhTw = it; error = null },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.traditional_chinese)) },
-                    singleLine = true,
-                )
-                if (configured) {
-                    OutlinedButton(
-                        onClick = {
-                            working = true
-                            error = null
-                            operation = scope.launch {
-                                try {
-                                    repository.retranslateEventName(event)
-                                    onChanged()
-                                    onDismiss()
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (failure: Exception) {
-                                    error = failure.message ?: retranslateFailed
-                                } finally {
-                                    working = false
-                                    operation = null
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !working,
-                    ) {
-                        if (working) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Outlined.Refresh, contentDescription = null)
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            stringResource(
-                                if (working) R.string.retranslating else R.string.ai_retranslate,
-                            ),
-                        )
-                    }
-                } else {
-                    Text(
-                        stringResource(R.string.translation_requires_key),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Text(
-                    stringResource(R.string.translation_correction_note),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = ::cancelAndDismiss) {
-                Text(stringResource(R.string.cancel))
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    working = true
-                    error = null
-                    operation = scope.launch {
-                        try {
-                            repository.correctTranslation(event, zhCn, zhTw)
-                            onChanged()
-                            onDismiss()
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (failure: Exception) {
-                            error = failure.message
-                        } finally {
-                            working = false
-                            operation = null
-                        }
-                    }
-                },
-                enabled = zhCn.isNotBlank() && zhTw.isNotBlank() && !working,
-            ) { Text(stringResource(R.string.save)) }
-        },
-    )
-}
-
-@Composable
 private fun CountdownCard(event: EconomicEvent) {
     var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(event.id) { while (true) { now = Instant.now(); delay(1_000) } }
@@ -452,8 +289,21 @@ private fun EventIntroduction(event: EconomicEvent) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.event_intro), fontWeight = FontWeight.Bold)
+            val introText = if (event.category.equals("calendar", ignoreCase = true)) {
+                stringResource(
+                    R.string.event_intro_nonnumeric,
+                    countryLabel(event.country),
+                    categoryLabel(event.category),
+                )
+            } else {
+                stringResource(
+                    R.string.event_intro_body,
+                    countryLabel(event.country),
+                    categoryLabel(event.category),
+                )
+            }
             Text(
-                stringResource(R.string.event_intro_body, countryLabel(event.country), categoryLabel(event.category)),
+                introText,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -463,7 +313,9 @@ private fun EventIntroduction(event: EconomicEvent) {
 
 @Composable
 private fun MarketTrackingCard(event: EconomicEvent, market: MarketResponse?) {
-    val symbols = listOf("gold", "dxy", "us2y", "us10y", "nasdaq100", "bitcoin")
+    val symbols = listOf(
+        "gold", "dxy", "us2y", "us10y", "nasdaq100", "bitcoin", "wti", "natural_gas",
+    )
     val latest = market?.snapshots.orEmpty().groupBy { it.symbol }.mapValues { it.value.maxByOrNull { row -> row.timestamp } }
     val reactions = market?.reactions.orEmpty().associateBy { it.symbol }
     Card {

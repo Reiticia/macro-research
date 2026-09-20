@@ -1,0 +1,49 @@
+[
+  {
+    "name": "plain",
+    "file": "plain.txt",
+    "ok": true,
+    "dataAnalysis": "核心CPI月率0.3%高于预期0.2%，读数偏鹰。",
+    "chainLength": 1
+  },
+  {
+    "name": "fenced",
+    "file": "fenced.txt",
+    "ok": true,
+    "dataAnalysis": "核心CPI月率0.3%高于预期0.2%，读数偏鹰。",
+    "chainLength": 1
+  },
+  {
+    "name": "prose",
+    "file": "prose.txt",
+    "ok": true,
+    "dataAnalysis": "核心CPI月率0.3%高于预期0.2%，读数偏鹰。",
+    "chainLength": 1
+  },
+  {
+    "name": "schema-echo",
+    "file": "schema-echo.txt",
+    "ok": true,
+    "dataAnalysis": "核心CPI月率0.3%高于预期0.2%，读数偏鹰。",
+    "chainLength": 1
+  },
+  {
+    "name": "snake-case",
+    "file": "snake-case.txt",
+    "ok": true,
+    "dataAnalysis": "d",
+    "chainLength": 1
+  },
+  {
+    "name": "multiline",
+    "file": "multiline.txt",
+    "ok": true,
+    "dataAnalysis": "first line\nsecond line",
+    "chainLength": 0
+  },
+  {
+    "name": "truncated",
+    "file": "truncated.txt",
+    "ok": false
+  }
+]

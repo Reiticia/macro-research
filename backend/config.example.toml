@@ -1,0 +1,132 @@
+# Macro Research 后端配置模板。
+#
+# 用法：复制成 config.toml 再填密钥（config.toml 被 .gitignore 忽略，不会被提交）：
+#   cp config.example.toml config.toml
+# 部署后 systemd 读取的是安装目录里的 config.toml（与可执行文件同目录）。
+
+[server]
+host = "127.0.0.1"
+port = 8080
+# 日志过滤级别；环境变量 RUST_LOG 仍然优先。留空用默认 info。
+# 例：market_event_analyzer=debug,tower_http=info
+log_level = ""
+# 直出 HTTPS：两项同时填写即由后端自己终结 TLS，无需 Caddy/Nginx。
+# 证书也可以是 Cloudflare Origin Certificate（长期有效，不用续期）。
+# 留空则监听明文 HTTP，仅适合内网或已经被隧道加密的场景。
+tls_cert = ""
+tls_key = ""
+
+[database]
+url = "sqlite://data/market.db"
+
+# 哪些上游必须走代理。主机本身能直连日历、行情与 Telegram 时留空即可。
+[network]
+proxy_url = ""
+proxied = ["tradingview", "forexfactory", "cnbc", "yahoo", "telegram"]
+# 中转站本身也被墙时，把 "translation" / "ai" 也加进来（默认直连）。
+request_timeout_seconds = 20
+
+[calendar]
+primary_url = "https://economic-calendar.tradingview.com/events"
+fallback_url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+base_url = "https://tradingeconomics.com/calendar"
+sync_days = 7
+minimum_importance = 3
+
+[scheduler]
+calendar_sync_seconds = 43200
+watch_scan_seconds = 15
+watch_before_minutes = 5
+release_timeout_minutes = 30
+market_poll_seconds = 15
+market_collect_after_minutes = 60
+
+[market]
+yahoo_base_url = "https://query1.finance.yahoo.com/v8/finance/chart"
+binance_base_url = "https://data-api.binance.vision/api/v3"
+biquote_base_url = "https://biquote.io"
+cnbc_quote_url = "https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol"
+cnbc_chart_url = "https://ts-api.cnbc.com/harmony/app/charts"
+# 进程内缓存主动刷新周期；每个标的会错峰请求，HTTP 查询只读缓存。
+live_quote_refresh_seconds = 5
+live_quote_stale_seconds = 300
+# 必须落在 Android 客户端可展示的符号集合内。
+symbols = ["nasdaq100", "sp500", "gold", "silver", "dxy", "eur_usd", "us2y", "us10y", "wti", "natural_gas", "bitcoin", "ethereum"]
+
+# 客户端访问令牌。启用鉴权却没有任何令牌时，部署脚本会把它写成 false 并告警。
+[auth]
+enabled = true
+# 多台设备用逗号分隔，建议按设备命名，便于审计区分：
+# tokens = "pixel:9f2c…,emulator:5a1d…"
+tokens = ""
+
+# 只有客户端能触发的接口需要预算；翻译在同步循环内部运行，不在此暴露。
+[limits]
+# 保留字段：共享分析由服务端定时任务生成，不消耗客户端配额；
+# 客户端自带 Key 的分析直接请求模型，不经过服务端。
+ai_analysis_per_token_per_day = 60
+# 同一 (事件, 方法) 两次生成之间的最小间隔；窗口内的重试直接返回上一次结果。
+ai_regenerate_cooldown_seconds = 600
+ai_concurrency = 2
+# 模型调用审计记录保留天数（0 = 关闭审计）。
+llm_usage_retention_days = 180
+
+# 事件名翻译。任何兼容 /chat/completions 的端点都能用：官方 API 或中转站。
+# base_url 可写 https://relay.example.com/v1（推荐）或完整的 .../v1/chat/completions。
+[translation]
+enabled = false
+base_url = "https://relay.example.com/v1"
+model = "deepseek-flash"
+api_key = ""
+batch_size = 20
+# 每批的“翻译 → AI 校验 → 不通过带反馈重译”轮数。校验始终开启；
+# 超过轮数仍未通过的名称不写缓存，下次同步会重新尝试。
+max_rounds = 3
+backfill_on_startup = true
+# 一般不需要，但翻译批次同样可以带思考/采样参数：
+# extra_body = { temperature = 0.2 }
+# OpenRouter 类要 X-Title / HTTP-Referer，Azure 类用 api-key 鉴权；
+# 写 Authorization 会替掉默认的 Bearer 头。
+# extra_headers = { "X-Title" = "macro-research" }
+
+# 服务端 AI 市场简报。可以与翻译用不同的中转站、模型与密钥。
+[ai]
+enabled = false
+base_url = "https://relay.example.com/v1"
+model = "deepseek-flash"
+api_key = ""
+default_method = 2
+max_tokens = 4096
+# 推理模型的输出 token 参数名：gpt-5 / o 系列要写 max_completion_tokens。
+# 留空用默认 max_tokens；中转站报错时服务端也会自动换名重试一次。
+# max_tokens_param = "max_completion_tokens"
+# 思考等级等厂商专属参数，原样并入请求体（messages 受保护，不可覆盖）。
+# extra_body = { reasoning_effort = "low" }
+# extra_body = { enable_thinking = false }
+# extra_body = { thinking = { type = "enabled", budget_tokens = 2048 } }
+# extra_headers = { "api-key" = "azure-style-key" }
+
+# 管理员告警与译名勘正审核控制台。缺凭据时服务照常运行，告警只写日志。
+[telegram]
+enabled = false
+api_base = "https://api.telegram.org"
+bot_token = ""
+# 逗号分隔的管理员 chat id；只有这些 chat 会收到消息并可做审核。
+admin_chat_ids = ""
+poll_timeout_seconds = 30
+
+[alerts]
+failure_threshold = 3
+cooldown_seconds = 3600
+data_missing_after_minutes = 30
+data_missing_cooldown_seconds = 21600
+digest_max_events = 10
+# 例 "23:00-07:00"；静默时段只抑制非 critical 告警（启动通知不受抑制）。
+quiet_hours = ""
+quiet_hours_timezone = "Asia/Shanghai"
+
+# 仅显式的 --backfill 命令需要。
+[backfill]
+calendar_api_base_url = "https://api.tradingeconomics.com"
+request_delay_ms = 1000
+te_api_key = ""

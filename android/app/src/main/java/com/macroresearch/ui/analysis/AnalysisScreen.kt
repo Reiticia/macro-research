@@ -29,6 +29,9 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -68,6 +71,7 @@ import com.macroresearch.ui.theme.AssetUp
 import com.macroresearch.ui.theme.Dovish
 import com.macroresearch.ui.theme.Hawkish
 import com.macroresearch.ui.viewModelFactory
+import kotlinx.coroutines.delay
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -83,6 +87,21 @@ fun AnalysisScreen(id: Long, repository: MacroRepository, onBack: () -> Unit) {
     val ai by vm.ai.collectAsStateWithLifecycle()
     val settings by repository.translationSettings.collectAsStateWithLifecycle()
     val languageTag = LocalConfiguration.current.locales[0].toLanguageTag()
+    val method by repository.analysisMethod.collectAsStateWithLifecycle()
+    val dataSource by repository.dataSourceSettings.collectAsStateWithLifecycle()
+    LaunchedEffect(id, languageTag, method, settings.configured, dataSource) {
+        if (settings.configured) {
+            vm.loadAi(languageTag)
+        } else if (dataSource.baseUrl.isNotBlank()) {
+            // A cache miss prioritizes the backend's complete nine-row bundle. Poll the read-only
+            // endpoint until this language/method row is ready so the card updates by itself.
+            do {
+                vm.loadAi(languageTag)
+                if (vm.ai.value.analysis != null) break
+                delay(15_000)
+            } while (true)
+        }
+    }
     Scaffold(
         topBar = { TopAppBar(title = { Text(state.event?.localizedName(LocalConfiguration.current.locales[0]) ?: stringResource(R.string.analysis), fontWeight = FontWeight.Bold) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back)) } }) },
     ) { padding ->
@@ -96,7 +115,10 @@ fun AnalysisScreen(id: Long, repository: MacroRepository, onBack: () -> Unit) {
                 market = state.market,
                 ai = ai,
                 aiConfigured = settings.configured,
+                sharedFeedbackEnabled = dataSource.configured,
                 onGenerateAi = { vm.generateAiAnalysis(languageTag) },
+                onFeedback = { vm.feedback(languageTag, it) },
+                onRefreshShared = { vm.refreshSharedAi(languageTag) },
                 modifier = Modifier.padding(padding),
             )
         }
@@ -123,7 +145,10 @@ private fun AnalysisContent(
     market: MarketResponse?,
     ai: AiAnalysisState,
     aiConfigured: Boolean,
+    sharedFeedbackEnabled: Boolean,
     onGenerateAi: () -> Unit,
+    onFeedback: (String) -> Unit,
+    onRefreshShared: () -> Unit,
     modifier: Modifier,
 ) {
     LazyColumn(modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -136,7 +161,17 @@ private fun AnalysisContent(
         } else {
             item { ReactionTimeline(event, market) }
         }
-        item { AiAnalysisCard(event, ai, aiConfigured, onGenerateAi) }
+        item {
+            AiAnalysisCard(
+                event,
+                ai,
+                aiConfigured,
+                sharedFeedbackEnabled,
+                onGenerateAi,
+                onFeedback,
+                onRefreshShared,
+            )
+        }
         item {
             Text(analysisSummaryLabel(report.summary), Modifier.padding(bottom = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
@@ -148,20 +183,27 @@ private fun AiAnalysisCard(
     event: EconomicEvent,
     ai: AiAnalysisState,
     configured: Boolean,
+    sharedFeedbackEnabled: Boolean,
     onGenerate: () -> Unit,
+    onFeedback: (String) -> Unit,
+    onRefreshShared: () -> Unit,
 ) {
+    var feedbackText by remember(ai.analysis?.revision, ai.analysis?.method) { mutableStateOf("") }
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.ai_analysis), fontWeight = FontWeight.Bold)
-                if (ai.analysis != null && !ai.loading) {
+                if (configured && ai.analysis != null && !ai.loading) {
                     TextButton(onClick = onGenerate) { Text(stringResource(R.string.ai_reanalyze)) }
+                }
+                if (!configured && ai.analysis != null && !ai.loading) {
+                    TextButton(onClick = onRefreshShared) { Text(stringResource(R.string.retry)) }
                 }
             }
             when {
                 event.actual == null -> AiHint(stringResource(R.string.ai_needs_release))
-                !configured -> AiHint(stringResource(R.string.ai_requires_key))
                 ai.loading -> LoadingHint()
+                ai.analysis == null && !configured -> AiHint(stringResource(R.string.ai_shared_pending))
                 ai.analysis == null -> {
                     AiHint(stringResource(R.string.ai_analysis_hint))
                     Button(onClick = onGenerate, modifier = Modifier.fillMaxWidth()) {
@@ -170,6 +212,16 @@ private fun AiAnalysisCard(
                 }
                 else -> {
                     val analysis = ai.analysis
+                    // The rate limit serves the previous result instead of an error, so the user
+                    // must be told that this text is not a fresh run.
+                    if (analysis.rateLimited) {
+                        AiHint(
+                            stringResource(
+                                R.string.ai_rate_limited,
+                                analysis.retryAfterSeconds ?: 0L,
+                            ),
+                        )
+                    }
                     if (analysis.chain.isNotEmpty()) {
                         Text(stringResource(R.string.ai_chain), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
                         analysis.chain.forEach { step -> ChainStepRow(step) }
@@ -182,6 +234,13 @@ private fun AiAnalysisCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    analysis.usageSummary()?.let { usage ->
+                        Text(
+                            stringResource(R.string.ai_usage, usage),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
             ai.error?.let {
@@ -191,7 +250,25 @@ private fun AiAnalysisCard(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            if (ai.error != null && ai.analysis != null) {
+            if (!configured && ai.analysis != null && !ai.loading) {
+                AiHint(stringResource(R.string.ai_shared_note))
+                if (sharedFeedbackEnabled) {
+                    if (ai.feedbackSent) {
+                        AiHint(stringResource(R.string.ai_feedback_sent))
+                    } else {
+                        OutlinedTextField(
+                            value = feedbackText,
+                            onValueChange = { if (it.length <= 2000) feedbackText = it },
+                            label = { Text(stringResource(R.string.ai_feedback)) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        TextButton(onClick = { onFeedback(feedbackText) }, enabled = feedbackText.isNotBlank()) {
+                            Text(stringResource(R.string.ai_feedback))
+                        }
+                    }
+                }
+            }
+            if (configured && ai.error != null && ai.analysis != null) {
                 TextButton(onClick = onGenerate) { Text(stringResource(R.string.retry)) }
             }
         }

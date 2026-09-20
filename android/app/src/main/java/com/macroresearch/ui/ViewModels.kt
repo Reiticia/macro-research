@@ -58,12 +58,17 @@ class HomeViewModel(private val repository: MacroRepository) : ViewModel() {
                 .onSuccess { _liveMarket.value = it }
         }
     }
+
+    suspend fun loadLiveMarketAndWait(symbols: List<String>) {
+        loadLiveMarket(symbols)
+        liveMarketRequest?.join()
+    }
 }
 
 class MarketViewModel(private val repository: MacroRepository) : ViewModel() {
     private val symbols = listOf(
         "nasdaq100", "sp500", "gold", "silver", "dxy",
-        "eur_usd", "us2y", "us10y", "bitcoin", "ethereum",
+        "eur_usd", "us2y", "us10y", "wti", "natural_gas", "bitcoin", "ethereum",
     )
     private val _state = MutableStateFlow(LoadState<MarketQuotesResponse>())
     val state = _state.asStateFlow()
@@ -88,6 +93,11 @@ class MarketViewModel(private val repository: MacroRepository) : ViewModel() {
                     )
                 }
         }
+    }
+
+    suspend fun refreshAndWait() {
+        refresh()
+        request?.join()
     }
 }
 
@@ -193,6 +203,16 @@ class EventDetailViewModel(
                 _state.value = _state.value.copy(followed = followed)
             }
         }
+        viewModelScope.launch {
+            // Event-name enrichment is asynchronous. Keep the loaded detail/market state and
+            // replace only its event when Room receives the Chinese names.
+            repository.observeEvent(id).collect { event ->
+                val detail = _state.value.detail ?: return@collect
+                if (event != null && event != detail.event) {
+                    _state.value = _state.value.copy(detail = detail.copy(event = event))
+                }
+            }
+        }
     }
 
     fun refresh() = viewModelScope.launch {
@@ -247,6 +267,7 @@ data class AiAnalysisState(
     val analysis: AiAnalysis? = null,
     val loading: Boolean = false,
     val error: String? = null,
+    val feedbackSent: Boolean = false,
 )
 
 class AnalysisViewModel(
@@ -261,10 +282,43 @@ class AnalysisViewModel(
     init {
         refresh()
         viewModelScope.launch {
-            repository.observeAiAnalysis(id).collect { cached ->
-                // A generation in flight owns the state until it finishes.
-                if (!_ai.value.loading) _ai.value = _ai.value.copy(analysis = cached)
+            // Analysis may open while the title translation is still being fetched.
+            repository.observeEvent(id).collect { event ->
+                if (event != null && event != _state.value.event) {
+                    _state.value = _state.value.copy(event = event)
+                }
             }
+        }
+    }
+
+    fun refreshSharedAi(language: String) = viewModelScope.launch { loadAi(language) }
+
+    suspend fun loadAi(language: String) {
+        _ai.value = AiAnalysisState(loading = true)
+        try {
+            val result = if (repository.translationSettings.value.configured) {
+                repository.aiAnalysis(id)
+            } else {
+                repository.sharedAiAnalysis(id, language)
+            }
+            _ai.value = AiAnalysisState(analysis = result)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            _ai.value = AiAnalysisState(error = error.message)
+        }
+    }
+
+    fun feedback(language: String, message: String) = viewModelScope.launch {
+        val result = _ai.value.analysis ?: return@launch
+        _ai.value = _ai.value.copy(error = null)
+        try {
+            repository.submitAnalysisFeedback(language, result, message)
+            _ai.value = _ai.value.copy(feedbackSent = true)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            _ai.value = _ai.value.copy(error = error.message)
         }
     }
 

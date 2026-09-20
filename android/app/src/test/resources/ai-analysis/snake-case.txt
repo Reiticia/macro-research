@@ -1,0 +1,1 @@
+{"chain":[{"from_node":"CPI surprise","to_node":"real yields","direction":"higher","rationale":"r","verdict":"holds"}],"data_analysis":"d","market_outlook":"o","risks":"k"}
