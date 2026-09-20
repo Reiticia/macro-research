@@ -1,0 +1,103 @@
+name: Backend build & release
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 仅构建 Linux x86_64 (glibc) 版本。
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend -> target
+          key: x86_64-unknown-linux-gnu
+
+      - name: 代码格式检查
+        working-directory: backend
+        run: cargo fmt --all -- --check
+
+      - name: 测试
+        working-directory: backend
+        run: cargo test --locked
+
+      - name: 构建并打包
+        working-directory: backend
+        run: |
+          bash ./scripts/build-release.sh \
+            --target x86_64-unknown-linux-gnu \
+            --out "$GITHUB_WORKSPACE/dist" \
+            --no-tests
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: market-event-analyzer-x86_64-unknown-linux-gnu
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 生成 SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -lh
+          cat ./*.tar.gz.sha256 > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          generate_release_notes: true
+          body: |
+            ## 安装
+
+            解压后即可运行；用 systemd 安装推荐配合仓库的 `backend/deploy/deploy.sh`：
+
+            ```bash
+            tar -xzf market-event-analyzer-<version>-x86_64-unknown-linux-gnu.tar.gz
+            cd market-event-analyzer-<version>-x86_64-unknown-linux-gnu
+            sudo /path/to/repo/backend/deploy/deploy.sh deploy --binary ./market-event-analyzer
+            ```
+
+            ## 产物说明
+
+            `*-x86_64-unknown-linux-gnu.tar.gz` 为在 Ubuntu 22.04 上构建的 Linux x86_64 glibc 版本，需 glibc >= 2.35。
+
+            `SHA256SUMS` 为产物校验和。
+
+            > 首次启动会自动创建 `data/market.db` 并执行迁移。
+            > `translation.enabled = true` 时需要设置 `OPENAI_API_KEY`，否则可改为 `false`。
