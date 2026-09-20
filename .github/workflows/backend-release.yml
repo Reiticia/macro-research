@@ -17,63 +17,27 @@ concurrency:
   group: backend-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# 仅构建 Linux x86_64 (glibc) 版本。
 jobs:
-  # 平时只验证 x86_64，打 tag / 手动触发时构建完整矩阵
-  setup:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-    steps:
-      - id: matrix
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REF_TYPE: ${{ github.ref_type }}
-        run: |
-          set -euo pipefail
-          full='{"include":[{"target":"x86_64-unknown-linux-gnu"},{"target":"x86_64-unknown-linux-musl"},{"target":"aarch64-unknown-linux-gnu"}]}'
-          light='{"include":[{"target":"x86_64-unknown-linux-gnu"}]}'
-          if [[ "$EVENT_NAME" == "workflow_dispatch" || ( "$EVENT_NAME" == "push" && "$REF_TYPE" == "tag" ) ]]; then
-            printf 'matrix=%s\n' "$full" >> "$GITHUB_OUTPUT"
-          else
-            printf 'matrix=%s\n' "$light" >> "$GITHUB_OUTPUT"
-          fi
-
   build:
-    needs: setup
     runs-on: ubuntu-22.04
-    # 交叉目标构建失败时不阻断整次运行，tag 仍能产出可用的 x86_64 产物
-    continue-on-error: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
-    env:
-      # aarch64 交叉编译链接器 (其它 target 下这两个变量不会被读取)
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装交叉编译工具链
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools gcc-aarch64-linux-gnu
-
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-unknown-linux-gnu
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend -> target
-          key: ${{ matrix.target }}
+          key: x86_64-unknown-linux-gnu
 
       - name: 代码格式检查
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
         working-directory: backend
         run: cargo fmt --all -- --check
 
-      - name: 测试 (仅原生目标)
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
+      - name: 测试
         working-directory: backend
         run: cargo test --locked
 
@@ -81,13 +45,13 @@ jobs:
         working-directory: backend
         run: |
           bash ./scripts/build-release.sh \
-            --target "${{ matrix.target }}" \
+            --target x86_64-unknown-linux-gnu \
             --out "$GITHUB_WORKSPACE/dist" \
             --no-tests
 
       - uses: actions/upload-artifact@v4
         with:
-          name: market-event-analyzer-${{ matrix.target }}
+          name: market-event-analyzer-x86_64-unknown-linux-gnu
           path: dist/*
           if-no-files-found: error
           retention-days: 14
@@ -124,21 +88,16 @@ jobs:
             解压后即可运行；用 systemd 安装推荐配合仓库的 `backend/deploy/deploy.sh`：
 
             ```bash
-            tar -xzf market-event-analyzer-<version>-<target>.tar.gz
-            cd market-event-analyzer-<version>-<target>
+            tar -xzf market-event-analyzer-<version>-x86_64-unknown-linux-gnu.tar.gz
+            cd market-event-analyzer-<version>-x86_64-unknown-linux-gnu
             sudo /path/to/repo/backend/deploy/deploy.sh deploy --binary ./market-event-analyzer
             ```
 
             ## 产物说明
 
-            | 文件 | 说明 |
-            |---|---|
-            | `*-x86_64-unknown-linux-gnu.tar.gz` | glibc 动态链接（在 Ubuntu 22.04 上构建，需 glibc >= 2.35） |
-            | `*-x86_64-unknown-linux-musl.tar.gz` | 静态链接，任意 x86_64 Linux 可直接运行 |
-            | `*-aarch64-unknown-linux-gnu.tar.gz` | ARM64，需 glibc >= 2.35 |
+            `*-x86_64-unknown-linux-gnu.tar.gz` 为在 Ubuntu 22.04 上构建的 Linux x86_64 glibc 版本，需 glibc >= 2.35。
 
-            若某个交叉目标构建失败，该产物不会出现，其余产物照常发布。
-            `SHA256SUMS` 为各产物的校验和。
+            `SHA256SUMS` 为产物校验和。
 
             > 首次启动会自动创建 `data/market.db` 并执行迁移。
             > `translation.enabled = true` 时需要设置 `OPENAI_API_KEY`，否则可改为 `false`。
