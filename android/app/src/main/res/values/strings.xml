@@ -49,6 +49,7 @@
     <string name="local_time">Local time</string>
     <string name="event_intro">About this event</string>
     <string name="event_intro_body">%1$s · %2$s. Compare the actual value with consensus. Interpret the macro signal in the context of the indicator; above consensus does not necessarily mean a positive market impact.</string>
+    <string name="event_intro_nonnumeric">%1$s · %2$s. This event has no standardized actual value or market consensus. Focus on its release time, content, and immediate market impact.</string>
     <string name="market_tracking">Market watch</string>
     <string name="market_selection_note">Choose 2–4 assets for the Home overview · %1$d selected</string>
     <string name="analysis_progress">Analysis progress</string>
@@ -210,6 +211,7 @@
     <string name="asset_wti">WTI crude oil</string>
     <string name="asset_natural_gas">Natural gas</string>
     <string name="category_energy">Energy</string>
+    <string name="category_calendar">Calendar event</string>
     <string name="category_inflation">Inflation</string>
     <string name="category_employment">Employment</string>
     <string name="category_growth">Economic growth</string>

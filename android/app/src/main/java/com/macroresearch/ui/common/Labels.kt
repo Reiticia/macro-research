@@ -86,6 +86,7 @@ internal fun categoryLabelResource(category: String): Int? = when (category.trim
     "government", "government budget" -> R.string.category_government
     "bonds" -> R.string.category_bonds
     "foreign exchange reserves" -> R.string.category_reserves
+    "calendar" -> R.string.category_calendar
     else -> null
 }
 

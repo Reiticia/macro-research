@@ -48,6 +48,7 @@
     <string name="local_time">本地时间</string>
     <string name="event_intro">事件简介</string>
     <string name="event_intro_body">%1$s · %2$s。重点比较实际值与市场预期；宏观方向需结合指标类型判断，不能把高于预期简单理解为利好。</string>
+    <string name="event_intro_nonnumeric">%1$s · %2$s。此事件没有标准化的实际值或市场预期，重点关注公布时间、事件内容及其对市场的即时影响。</string>
     <string name="market_tracking">市场关注</string>
     <string name="market_selection_note">选择 2–4 个首页概览标的 · 已选 %1$d 个</string>
     <string name="analysis_progress">分析进度</string>
@@ -209,6 +210,7 @@
     <string name="asset_wti">原油</string>
     <string name="asset_natural_gas">天然气</string>
     <string name="category_energy">能源</string>
+    <string name="category_calendar">日历事件</string>
     <string name="category_inflation">通胀</string>
     <string name="category_employment">就业</string>
     <string name="category_growth">经济增长</string>

@@ -289,8 +289,21 @@ private fun EventIntroduction(event: EconomicEvent) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.event_intro), fontWeight = FontWeight.Bold)
+            val introText = if (event.category.equals("calendar", ignoreCase = true)) {
+                stringResource(
+                    R.string.event_intro_nonnumeric,
+                    countryLabel(event.country),
+                    categoryLabel(event.category),
+                )
+            } else {
+                stringResource(
+                    R.string.event_intro_body,
+                    countryLabel(event.country),
+                    categoryLabel(event.category),
+                )
+            }
             Text(
-                stringResource(R.string.event_intro_body, countryLabel(event.country), categoryLabel(event.category)),
+                introText,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -300,7 +313,9 @@ private fun EventIntroduction(event: EconomicEvent) {
 
 @Composable
 private fun MarketTrackingCard(event: EconomicEvent, market: MarketResponse?) {
-    val symbols = listOf("gold", "dxy", "us2y", "us10y", "nasdaq100", "bitcoin")
+    val symbols = listOf(
+        "gold", "dxy", "us2y", "us10y", "nasdaq100", "bitcoin", "wti", "natural_gas",
+    )
     val latest = market?.snapshots.orEmpty().groupBy { it.symbol }.mapValues { it.value.maxByOrNull { row -> row.timestamp } }
     val reactions = market?.reactions.orEmpty().associateBy { it.symbol }
     Card {
