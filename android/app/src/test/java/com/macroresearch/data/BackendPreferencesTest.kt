@@ -7,7 +7,7 @@ import org.junit.Test
 
 /**
  * The backend address is a credential-bearing endpoint, so the validation rules are part of the
- * contract: no embedded credentials, no path, and no plain HTTP.
+ * contract: no embedded credentials, no path, and explicit opt-in for plain HTTP.
  */
 class BackendPreferencesTest {
     @Test
@@ -27,12 +27,12 @@ class BackendPreferencesTest {
     }
 
     @Test
-    fun rejectsPlainHttpUnlessExplicitlyAllowedForAPrivateHost() {
+    fun rejectsPlainHttpUnlessExplicitlyAllowed() {
         // Default: no cleartext at all.
         assertThrows(IllegalArgumentException::class.java) {
             BackendPreferences.normalizeBaseUrl("http://192.168.1.10:8080")
         }
-        // Opted in, but only a private/tunnel address may use it.
+        // Once explicitly enabled, both private and public endpoints are supported.
         assertEquals(
             "http://192.168.1.10:8080",
             BackendPreferences.normalizeBaseUrl("http://192.168.1.10:8080", allowsCleartext = true),
@@ -51,9 +51,14 @@ class BackendPreferencesTest {
             "http://10.0.2.2:8080",
             BackendPreferences.normalizeBaseUrl("http://10.0.2.2:8080", allowsCleartext = true),
         )
-        assertThrows(IllegalArgumentException::class.java) {
-            BackendPreferences.normalizeBaseUrl("http://macro.example.com", allowsCleartext = true)
-        }
+        assertEquals(
+            "http://203.0.113.10:5090",
+            BackendPreferences.normalizeBaseUrl("http://203.0.113.10:5090", allowsCleartext = true),
+        )
+        assertEquals(
+            "http://macro.example.com:5090",
+            BackendPreferences.normalizeBaseUrl("http://macro.example.com:5090", allowsCleartext = true),
+        )
         assertTrue(BackendPreferences.usesPlainHttp("http://192.168.1.10:8080"))
         assertTrue(!BackendPreferences.usesPlainHttp("https://macro.example.com"))
     }

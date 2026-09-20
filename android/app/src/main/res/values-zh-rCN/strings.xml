@@ -137,8 +137,8 @@
     <string name="backend_translation_failed">事件名译名获取失败：%1$s</string>
     <string name="backend_unauthorized">后端拒绝了该访问令牌。</string>
     <string name="backend_unreachable">无法连接后端。</string>
-    <string name="backend_allow_cleartext">允许明文 HTTP（仅限内网或隧道地址）</string>
-    <string name="backend_cleartext_warning">访问令牌会以明文传输。仅应在私有网络或加密隧道下使用。</string>
+    <string name="backend_allow_cleartext">允许明文 HTTP（不安全）</string>
+    <string name="backend_cleartext_warning">访问令牌会以明文传输。请仅在你信任的网络中使用。</string>
     <string name="backend_clear">清除</string>
     <string name="backend_setup_hint">填写后端地址与访问令牌，点「测试连接」确认可用后，再点「后端」完成切换。</string>
     <string name="data_source_incomplete">请先填写后端地址与访问令牌。</string>

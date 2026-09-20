@@ -138,8 +138,8 @@
     <string name="backend_translation_failed">Event-name translation lookup failed: %1$s</string>
     <string name="backend_unauthorized">The backend rejected the access token.</string>
     <string name="backend_unreachable">The backend could not be reached.</string>
-    <string name="backend_allow_cleartext">Allow plain HTTP (private or tunneled address only)</string>
-    <string name="backend_cleartext_warning">The access token will travel unencrypted. Only use this over a private network or an encrypted tunnel.</string>
+    <string name="backend_allow_cleartext">Allow plain HTTP (unsafe)</string>
+    <string name="backend_cleartext_warning">The access token will travel unencrypted. Only use this when you trust the network.</string>
     <string name="backend_clear">Clear</string>
     <string name="backend_setup_hint">Fill in the backend address and access token, tap Test connection, then tap Backend to switch.</string>
     <string name="data_source_incomplete">Fill in the backend address and access token first.</string>

@@ -27,7 +27,7 @@ data class BackendSettings(
     val tokenConfigured: Boolean = false,
     val verifiedVersion: String? = null,
     val lastVerifiedAt: Long = 0L,
-    /** Explicit opt-in for a plain-HTTP endpoint on a private/tunnel address. */
+    /** Explicit opt-in for a plain-HTTP endpoint on any address. */
     val allowCleartext: Boolean = false,
 ) {
     val configured: Boolean get() = baseUrl.isNotBlank() && tokenConfigured
@@ -111,9 +111,8 @@ class BackendPreferences(context: Context) {
         /**
          * Normalizes and validates the backend address.
          *
-         * HTTPS is the default and is always accepted. Plain HTTP is only allowed for a
-         * loopback / private / CGNAT host **and** only after the user explicitly opts in, so a
-         * mistyped public address can never silently send the token in the clear.
+         * HTTPS is the default and is always accepted. Plain HTTP is available for any host only
+         * after the user explicitly opts in, because the access token will travel unencrypted.
          */
         internal fun normalizeBaseUrl(value: String, allowsCleartext: Boolean = false): String {
             val normalized = value.trim().trimEnd('/')
@@ -130,9 +129,6 @@ class BackendPreferences(context: Context) {
                 require(allowsCleartext) {
                     "Enable plain-HTTP access before using an http:// address"
                 }
-                require(isPrivateHost(host)) {
-                    "Plain HTTP is only allowed for a private or tunnel address"
-                }
             }
             require(uri.userInfo == null && uri.query == null && uri.fragment == null) {
                 "Backend address must not contain credentials, query, or fragment"
@@ -147,27 +143,5 @@ class BackendPreferences(context: Context) {
         fun usesPlainHttp(baseUrl: String): Boolean =
             baseUrl.trim().lowercase().startsWith("http://")
 
-        /** Loopback, RFC1918, link-local, CGNAT (Tailscale) and cluster-internal names. */
-        internal fun isPrivateHost(host: String): Boolean {
-            val clean = host.removePrefix("[").removeSuffix("]").lowercase()
-            if (clean == "localhost" || clean.endsWith(".local") || clean.endsWith(".internal")) {
-                return true
-            }
-            if (clean == "::1" || clean.startsWith("fe80:") || clean.startsWith("fc") || clean.startsWith("fd")) {
-                return true
-            }
-            val octets = clean.split('.')
-            if (octets.size != 4) return false
-            val numbers = octets.map { it.toIntOrNull() ?: return false }
-            if (numbers.any { it !in 0..255 }) return false
-            return when {
-                numbers[0] == 127 -> true
-                numbers[0] == 10 -> true
-                numbers[0] == 192 && numbers[1] == 168 -> true
-                numbers[0] == 172 && numbers[1] in 16..31 -> true
-                numbers[0] == 100 && numbers[1] in 64..127 -> true
-                else -> false
-            }
-        }
     }
 }

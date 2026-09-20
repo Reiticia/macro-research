@@ -126,7 +126,7 @@ class MacroRepository(
         historySyncedAt = 0L
     }
 
-    /** Enables the plain-HTTP escape hatch for a private or tunneled backend address. */
+    /** Enables the explicit plain-HTTP escape hatch for a backend address. */
     fun setAllowBackendCleartext(allowed: Boolean) {
         backendPreferences.setAllowCleartext(allowed)
         backendPreferences.clearVerification()

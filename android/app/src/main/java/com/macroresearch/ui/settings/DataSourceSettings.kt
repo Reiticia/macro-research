@@ -123,8 +123,8 @@ fun DataSourceSettings(repository: MacroRepository) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (settings.allowCleartext || BackendPreferences.usesPlainHttp(baseUrl)) {
-                    // Escape hatch for an IP:port tunnel with no certificate. Off by default and
-                    // limited to private addresses, because the token travels in the clear.
+                    // Escape hatch for an IP:port endpoint with no certificate. Off by default
+                    // because the token travels in the clear, including on public networks.
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),

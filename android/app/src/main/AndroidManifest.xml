@@ -5,10 +5,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
-        Backend mode may point at a plain-HTTP tunnel on a private address, and that host is only
-        known at runtime, so the app-wide default has to permit cleartext. Every other endpoint
-        stays HTTPS-only by construction: the translation endpoint validator and the backend
-        address validator both reject http unless the user explicitly opts in for a private host.
+        Backend mode may point at a plain-HTTP endpoint whose host is only known at runtime, so
+        the app-wide default has to permit cleartext. Every other endpoint stays HTTPS-only by
+        construction: the translation endpoint validator and the backend address validator both
+        reject http unless the user explicitly opts in.
     -->
     <application
         android:name=".MacroApplication"
