@@ -5,7 +5,7 @@ use sqlx::{Row, SqlitePool};
 
 use crate::{
     error::AppError,
-    model::{MarketReaction, MarketSnapshot, MarketSymbol, Quote, ReactionUnit},
+    model::{Candle, MarketReaction, MarketSnapshot, MarketSymbol, Quote, ReactionUnit},
 };
 
 use super::datetime_from_row;
@@ -35,6 +35,38 @@ impl MarketRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Persists candle bars as per-minute snapshots for one event, giving historical events
+    /// the same reaction-timeline samples that live collection produces in real time.
+    pub async fn save_candle_snapshots(
+        &self,
+        event_id: i64,
+        candles: &[Candle],
+    ) -> Result<usize, AppError> {
+        let mut tx = self.pool.begin().await?;
+        for c in candles {
+            sqlx::query(
+                r#"INSERT INTO market_snapshot (event_id, symbol, timestamp, price, open, high, low, close, volume)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(event_id, symbol, timestamp) DO UPDATE SET
+                     price = excluded.price, open = excluded.open, high = excluded.high,
+                     low = excluded.low, close = excluded.close, volume = excluded.volume"#,
+            )
+            .bind(event_id)
+            .bind(c.symbol.as_str())
+            .bind(c.timestamp.to_rfc3339())
+            .bind(c.close)
+            .bind(c.open)
+            .bind(c.high)
+            .bind(c.low)
+            .bind(c.close)
+            .bind(c.volume)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(candles.len())
     }
 
     pub async fn snapshots(&self, event_id: i64) -> Result<Vec<MarketSnapshot>, AppError> {

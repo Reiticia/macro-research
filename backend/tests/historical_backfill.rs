@@ -174,17 +174,26 @@ async fn imports_calendar_and_real_horizon_evidence_once_per_day_asset() {
         assert!(evidence.coverage[0].baseline_time.unwrap() < event.event_time);
     }
     assert!(events.market_active().await.unwrap().is_empty());
+    // Candle bars become per-minute snapshots for the reaction timeline: ten minutes before
+    // through 61 after each event, upserted rather than duplicated.
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM market_snapshot")
             .fetch_one(&pool)
             .await
             .unwrap(),
-        0
+        144
     );
     let second = service.run(range()).await.unwrap();
     assert_eq!(first.id, second.id);
     assert_eq!(cal.calls.load(Ordering::SeqCst), 1); // completed day checkpoint
     assert_eq!(market.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM market_snapshot")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        144
+    );
 }
 
 #[tokio::test]

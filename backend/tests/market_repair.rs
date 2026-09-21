@@ -209,6 +209,25 @@ async fn repair_rebuilds_missing_market_evidence_and_keeps_live_reports() {
         analyses.get(shell).await.unwrap().updated_at,
         shell_report.updated_at
     );
+    // Repaired events also gained per-minute snapshots for the reaction timeline: ten minutes
+    // before through 61 after the release at 1m granularity.
+    for id in [stuck, shell] {
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM market_snapshot WHERE event_id = ?")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 72);
+    }
+    // The preserved live event kept exactly its own real-time quotes; nothing was synthesized.
+    let live_snapshots: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM market_snapshot WHERE event_id = ?")
+            .bind(live)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(live_snapshots, 2);
 
     let live_after = events.get(live).await.unwrap();
     assert_eq!(live_after.status, EventStatus::Completed);
@@ -295,6 +314,11 @@ async fn empty_candle_windows_are_never_cached_as_complete() {
         ledger_rows, 0,
         "empty windows must not poison the fetch ledger"
     );
+    let snapshots: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM market_snapshot")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(snapshots, 0);
 
     // A rerun re-requests the window instead of trusting a cached empty payload.
     let second = service.repair_local(range).await.unwrap();

@@ -356,6 +356,21 @@ impl BackfillService {
                 complete &= entry.status == "complete";
                 coverage.push(entry);
             }
+            // Persist the bars as per-minute snapshots so the client reaction timeline has
+            // real samples at every slider position, not only at the five reaction horizons.
+            for &symbol in self.market.symbols() {
+                if let Ok((_, candles)) = &bars[&symbol] {
+                    let window: Vec<Candle> = candles
+                        .iter()
+                        .filter(|c| {
+                            c.timestamp >= event.event_time - Duration::minutes(10)
+                                && c.timestamp <= event.event_time + Duration::minutes(61)
+                        })
+                        .cloned()
+                        .collect();
+                    self.market.save_candle_snapshots(id, &window).await?;
+                }
+            }
             let evidence = HistoricalEvidence {
                 fetched_at: Utc::now(),
                 revised_data_possible: true,
@@ -512,6 +527,21 @@ impl BackfillService {
                 };
                 complete &= entry.status == "complete";
                 coverage.push(entry);
+            }
+            // Persist the bars as per-minute snapshots so the client reaction timeline has
+            // real samples at every slider position, not only at the five reaction horizons.
+            for &symbol in self.market.symbols() {
+                if let Ok((_, candles)) = &bars[&symbol] {
+                    let window: Vec<Candle> = candles
+                        .iter()
+                        .filter(|c| {
+                            c.timestamp >= event.event_time - Duration::minutes(10)
+                                && c.timestamp <= event.event_time + Duration::minutes(61)
+                        })
+                        .cloned()
+                        .collect();
+                    self.market.save_candle_snapshots(id, &window).await?;
+                }
             }
             let evidence = HistoricalEvidence {
                 fetched_at: Utc::now(),

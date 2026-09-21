@@ -26,7 +26,7 @@ use tokio::{
 use crate::{
     alert::HealthRegistry,
     error::AppError,
-    model::{LiveQuote, MarketSymbol, Quote},
+    model::{Candle, LiveQuote, MarketSymbol, Quote},
     repository::MarketRepository,
 };
 
@@ -303,6 +303,18 @@ impl MarketService {
             }
         }
         Ok(saved)
+    }
+
+    /// Persists candle bars as per-minute snapshots for one event, giving historical events
+    /// the same reaction-timeline samples that live collection produces in real time.
+    pub async fn save_candle_snapshots(
+        &self,
+        event_id: i64,
+        candles: &[Candle],
+    ) -> Result<usize, AppError> {
+        self.repository
+            .save_candle_snapshots(event_id, candles)
+            .await
     }
 }
 

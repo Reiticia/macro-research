@@ -473,8 +473,9 @@ cargo run -- --repair-market 2026-09-16 2026-09-18   # 单日可只写一个日�
 用于修复「已公布但没有任何市场证据」的本地事件：停机错过监视窗口、或实况采集窗口内行情全部
 失败。处理条件：`timeExact`、+60 分钟窗口已结束；已有实况反应的报告与实况流水线中的事件
 一律跳过。空壳报告与历史证据会被重建，失败日期重跑时自动重试缺失窗口（见
-`backend/tests/market_repair.rs`）。修复后报告带 HistoricalEvidence，事件状态落
-`historical`；分钟级实况快照不可复活，客户端改以反应基准价展示。
+`backend/tests/market_repair.rs`）。修复后报告带 HistoricalEvidence，事件状态落 `historical`；
+所用 K 线同时写入该事件的 market_snapshot 分钟级样本，客户端反应时间线与详情页价格列
+据此展示，与实况事件一致。
 
 ### 数据真实性与覆盖范围
 
