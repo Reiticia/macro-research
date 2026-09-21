@@ -50,6 +50,7 @@
     <string name="event_intro_body">%1$s · %2$s。重點比較實際值與市場預期；總體經濟方向需結合指標類型判斷，不能把高於預期直接理解為利多。</string>
     <string name="event_intro_nonnumeric">%1$s · %2$s。此事件沒有標準化的實際值或市場預期，重點關注公布時間、事件內容及其對市場的即時影響。</string>
     <string name="market_tracking">市場關注</string>
+    <string name="market_data_unavailable">該事件公布前後未採集到市場數據。</string>
     <string name="market_selection_note">選擇 2–4 個首頁概覽標的 · 已選 %1$d 個</string>
     <string name="analysis_progress">分析進度</string>
     <string name="minutes_short">%1$d分鐘</string>

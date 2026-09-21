@@ -50,6 +50,7 @@
     <string name="event_intro_body">%1$s · %2$s。重点比较实际值与市场预期；宏观方向需结合指标类型判断，不能把高于预期简单理解为利好。</string>
     <string name="event_intro_nonnumeric">%1$s · %2$s。此事件没有标准化的实际值或市场预期，重点关注公布时间、事件内容及其对市场的即时影响。</string>
     <string name="market_tracking">市场关注</string>
+    <string name="market_data_unavailable">该事件公布前后未采集到市场数据。</string>
     <string name="market_selection_note">选择 2–4 个首页概览标的 · 已选 %1$d 个</string>
     <string name="analysis_progress">分析进度</string>
     <string name="minutes_short">%1$d分钟</string>

@@ -49,7 +49,9 @@ import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.CalendarWarning
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.data.model.currentStatus
+import com.macroresearch.data.model.MarketReaction
 import com.macroresearch.data.model.MarketResponse
+import com.macroresearch.data.model.MarketSnapshot
 import com.macroresearch.ui.EventDetailViewModel
 import com.macroresearch.ui.ReleaseFetchOutcome
 import com.macroresearch.ui.common.assetLabel
@@ -311,36 +313,69 @@ private fun EventIntroduction(event: EconomicEvent) {
     }
 }
 
+internal val MARKET_TRACKING_SYMBOLS =
+    listOf("gold", "dxy", "us2y", "us10y", "nasdaq100", "bitcoin", "wti", "natural_gas")
+
+/** States that may still deliver quotes; their rows stay visible even while they are empty. */
+internal fun marketTrackingAwaitingData(status: String): Boolean =
+    status in setOf("scheduled", "released", "collecting_market_data", "analyzing")
+
+/**
+ * Rows shown in the market card. Live states keep the full placeholder list; terminal states
+ * only list symbols that produced a snapshot or a reaction, so an event the backend never
+ * tracked no longer renders eight "--" rows that read as a malfunction.
+ */
+internal fun visibleMarketSymbols(
+    status: String,
+    snapshots: List<MarketSnapshot>,
+    reactions: List<MarketReaction>,
+): List<String> {
+    if (marketTrackingAwaitingData(status)) return MARKET_TRACKING_SYMBOLS
+    val available = snapshots.mapTo(hashSetOf()) { it.symbol } +
+        reactions.mapTo(hashSetOf()) { it.symbol }
+    return MARKET_TRACKING_SYMBOLS.filter { it in available }
+}
+
 @Composable
 private fun MarketTrackingCard(event: EconomicEvent, market: MarketResponse?) {
-    val symbols = listOf(
-        "gold", "dxy", "us2y", "us10y", "nasdaq100", "bitcoin", "wti", "natural_gas",
-    )
+    val status = event.currentStatus()
     val latest = market?.snapshots.orEmpty().groupBy { it.symbol }.mapValues { it.value.maxByOrNull { row -> row.timestamp } }
     val reactions = market?.reactions.orEmpty().associateBy { it.symbol }
+    val rows = visibleMarketSymbols(status, market?.snapshots.orEmpty(), market?.reactions.orEmpty())
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(stringResource(R.string.market_tracking), fontWeight = FontWeight.Bold)
-                Text(statusLabel(event.status), color = MaterialTheme.colorScheme.primary)
+                Text(statusLabel(status), color = MaterialTheme.colorScheme.primary)
             }
             HorizontalDivider()
-            symbols.forEach { symbol ->
+            rows.forEach { symbol ->
                 val reaction = reactions[symbol]
                 val change = reaction?.change5m ?: reaction?.change1m
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(assetLabel(symbol))
-                    Text(latest[symbol]?.price?.let { "%,.2f".format(it) } ?: "--")
+                    // Backfilled events keep only a reaction: its baseline is the pre-release close.
+                    Text(
+                        latest[symbol]?.price?.let { "%,.2f".format(it) }
+                            ?: reaction?.baselinePrice?.let { "%,.2f".format(it) }
+                            ?: "--"
+                    )
                     Text(
                         formatChange(change, reaction?.reactionUnit ?: "percent"),
                         color = when { change == null -> MaterialTheme.colorScheme.onSurfaceVariant; change >= 0 -> AssetUp; else -> AssetDown },
                     )
                 }
             }
-            if (event.status == "historical") {
+            if (rows.isEmpty()) {
+                Text(
+                    stringResource(R.string.market_data_unavailable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (status == "historical") {
                 Text(stringResource(R.string.historical_method), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                AnalysisProgress(event.eventTime, event.status)
+                AnalysisProgress(event.eventTime, status)
             }
         }
     }
