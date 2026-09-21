@@ -20,3 +20,6 @@
 /backend/config.toml
 
 ANDROID_KEYSTORE_PASSWORD
+
+# 本地/传输用数据库副本，不入库
+/market.db*
