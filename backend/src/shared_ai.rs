@@ -13,16 +13,8 @@ use futures_util::{StreamExt, stream};
 use sqlx::{Row, SqlitePool};
 use std::{sync::Arc, time::Duration};
 
-pub fn language(value: &str) -> &'static str {
-    if value.starts_with("zh") {
-        if value.contains("TW") || value.contains("HK") || value.contains("Hant") {
-            "zh-TW"
-        } else {
-            "zh-CN"
-        }
-    } else {
-        "en"
-    }
+pub fn language(value: &str) -> String {
+    crate::ai_analysis::normalize_language(value)
 }
 
 pub async fn submit_feedback(
@@ -88,10 +80,10 @@ pub async fn run(state: AppState, alerts: Arc<AlertService>) {
         if let Err(error) = notify_feedback(&state, &alerts).await {
             tracing::warn!(%error,"analysis feedback notification failed; will retry");
         }
-        if state.ai_analysis_service.is_some() {
-            if let Err(error) = generate_pending(&state).await {
-                tracing::warn!(%error,"shared AI jobs failed; will retry");
-            }
+        if state.ai_analysis_service.is_some()
+            && let Err(error) = generate_pending(&state).await
+        {
+            tracing::warn!(%error,"shared AI jobs failed; will retry");
         }
         tokio::time::sleep(Duration::from_secs(30)).await;
     }
@@ -102,7 +94,22 @@ async fn notify_feedback(state: &AppState, alerts: &AlertService) -> Result<(), 
         return Ok(());
     }
     let pool = state.events.pool();
-    let rows = sqlx::query("SELECT f.id,f.message,f.revision,a.event_id,a.method,a.language,e.event FROM analysis_feedback f JOIN ai_analysis a ON a.id=f.analysis_id JOIN economic_event e ON e.id=a.event_id WHERE f.notified=0 AND f.status='pending' ORDER BY f.id LIMIT 20").fetch_all(pool).await?;
+    let chats = state.config.telegram.admin_chat_ids();
+    if chats.is_empty() {
+        return Ok(());
+    }
+    // Seed the current administrator set for legacy rows that predate the per-chat table. This
+    // preserves the old aggregate `notified=1` meaning while still allowing a newly configured
+    // administrator to receive an older pending feedback item.
+    for chat in chats.iter().copied() {
+        sqlx::query(
+            "INSERT INTO analysis_feedback_notification(feedback_id, chat_id, notified_at) SELECT id, ?, created_at FROM analysis_feedback WHERE notified=1 AND status='pending' ON CONFLICT(feedback_id, chat_id) DO NOTHING",
+        )
+        .bind(chat)
+        .execute(pool)
+        .await?;
+    }
+    let rows = sqlx::query("SELECT f.id,f.message,f.revision,a.event_id,a.method,a.language,e.event FROM analysis_feedback f JOIN ai_analysis a ON a.id=f.analysis_id JOIN economic_event e ON e.id=a.event_id WHERE f.status='pending' ORDER BY f.id LIMIT 20").fetch_all(pool).await?;
     for row in rows {
         let id: i64 = row.try_get("id")?;
         let text = format!(
@@ -115,7 +122,25 @@ async fn notify_feedback(state: &AppState, alerts: &AlertService) -> Result<(), 
             row.try_get::<i64, _>("revision")?,
             escape(&row.try_get::<String, _>("message")?)
         );
-        for chat in state.config.telegram.admin_chat_ids() {
+        for chat in chats.iter().copied() {
+            sqlx::query(
+                "INSERT INTO analysis_feedback_notification(feedback_id, chat_id) VALUES (?, ?) ON CONFLICT(feedback_id, chat_id) DO NOTHING",
+            )
+            .bind(id)
+            .bind(chat)
+            .execute(pool)
+            .await?;
+            let sent: Option<String> = sqlx::query_scalar(
+                "SELECT notified_at FROM analysis_feedback_notification WHERE feedback_id=? AND chat_id=?",
+            )
+            .bind(id)
+            .bind(chat)
+            .fetch_one(pool)
+            .await?;
+            if sent.is_some() {
+                continue;
+            }
+
             alerts
                 .notify_with_buttons(
                     chat,
@@ -132,11 +157,27 @@ async fn notify_feedback(state: &AppState, alerts: &AlertService) -> Result<(), 
                     ]],
                 )
                 .await?;
-        }
-        sqlx::query("UPDATE analysis_feedback SET notified=1 WHERE id=?")
+            sqlx::query(
+                "UPDATE analysis_feedback_notification SET notified_at=? WHERE feedback_id=? AND chat_id=?",
+            )
+            .bind(Utc::now().to_rfc3339())
             .bind(id)
+            .bind(chat)
             .execute(pool)
             .await?;
+        }
+        let pending: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM analysis_feedback_notification WHERE feedback_id=? AND notified_at IS NULL",
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await?;
+        if pending == 0 {
+            sqlx::query("UPDATE analysis_feedback SET notified=1 WHERE id=?")
+                .bind(id)
+                .execute(pool)
+                .await?;
+        }
     }
     Ok(())
 }

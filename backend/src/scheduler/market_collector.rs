@@ -67,7 +67,7 @@ async fn collect_once(
                         .events
                         .set_status(event.id, EventStatus::CollectingMarketData)
                         .await?;
-                    return Err(error);
+                    tracing::error!(event_id = event.id, %error, "event analysis failed; continuing market collection");
                 }
             }
         }

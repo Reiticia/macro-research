@@ -37,7 +37,9 @@ pub(crate) fn event_from_row(row: SqliteRow) -> Result<EconomicEvent, AppError> 
         id: row.try_get("id")?,
         provider: row.try_get("provider")?,
         provider_id: row.try_get("provider_id")?,
-        release_group_id: row.try_get("release_group_id")?,
+        // Release grouping was removed from the server schema; keep the nullable API field for
+        // wire compatibility with older Android clients.
+        release_group_id: None,
         country: row.try_get("country")?,
         currency: row.try_get("currency")?,
         category: row.try_get("category")?,

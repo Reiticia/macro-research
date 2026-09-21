@@ -88,6 +88,26 @@ class CnbcYieldTest {
     }
 
     @Test
+    fun noPostReleaseBarDoesNotReuseThePreReleaseBaseline() {
+        val eventTime = Instant.now().minusSeconds(7_200).truncatedTo(ChronoUnit.SECONDS)
+        val bars = client.parseCnbcCandles(
+            "us10y",
+            chart(
+                listOf(
+                    eventTime.minusSeconds(60) to 4.90,
+                    eventTime to 4.90,
+                ),
+            ),
+            eventTime.plusSeconds(3_600),
+        )
+
+        val reaction = client.reaction(7, "us10y", eventTime, bars)
+
+        assertTrue(reaction != null)
+        assertEquals(null, reaction?.change1m)
+    }
+
+    @Test
     fun barsAfterTheObservationWindowAndBrokenRowsAreIgnored() {
         val eventTime = Instant.now().minusSeconds(7_200).truncatedTo(ChronoUnit.SECONDS)
         val json = """

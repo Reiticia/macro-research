@@ -25,39 +25,37 @@ impl EventRepository {
     }
 
     pub async fn save_events(&self, events: &[EconomicEvent]) -> Result<Vec<i64>, AppError> {
+        self.save_events_inner(events, true).await
+    }
+
+    /// Saves provider values without creating a historical observation. Watchers use this path
+    /// because they poll frequently and should not turn unchanged values into history rows.
+    pub async fn save_events_without_observations(
+        &self,
+        events: &[EconomicEvent],
+    ) -> Result<Vec<i64>, AppError> {
+        self.save_events_inner(events, false).await
+    }
+
+    async fn save_events_inner(
+        &self,
+        events: &[EconomicEvent],
+        record_observations: bool,
+    ) -> Result<Vec<i64>, AppError> {
         let mut transaction = self.pool.begin().await?;
         let mut ids = Vec::with_capacity(events.len());
 
         for event in events {
-            let group_key = format!("{}|{}", event.country, event.event_time.timestamp());
-            sqlx::query(
-                r#"INSERT INTO release_group (group_key, country, release_time)
-                   VALUES (?, ?, ?)
-                   ON CONFLICT(group_key) DO UPDATE SET
-                     country = excluded.country, release_time = excluded.release_time"#,
-            )
-            .bind(&group_key)
-            .bind(&event.country)
-            .bind(event.event_time.to_rfc3339())
-            .execute(&mut *transaction)
-            .await?;
-            let release_group_id: i64 =
-                sqlx::query_scalar("SELECT id FROM release_group WHERE group_key = ?")
-                    .bind(&group_key)
-                    .fetch_one(&mut *transaction)
-                    .await?;
-
-            sqlx::query(
+            let event_query = sqlx::query(
                 r#"INSERT INTO economic_event (
-                    provider, provider_id, release_group_id, country, currency, category, event,
+                    provider, provider_id, country, currency, category, event,
                     event_zh_cn, event_zh_tw, event_time, importance, actual, previous, consensus,
                     forecast, unit, status, time_exact, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?,
+                ) VALUES (?, ?, ?, ?, ?, ?,
                     COALESCE(?, (SELECT zh_cn FROM event_name_translation WHERE source_text = ?)),
                     COALESCE(?, (SELECT zh_tw FROM event_name_translation WHERE source_text = ?)),
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider, provider_id) DO UPDATE SET
-                    release_group_id = excluded.release_group_id,
                     country = excluded.country,
                     currency = excluded.currency,
                     category = excluded.category,
@@ -81,11 +79,11 @@ impl EventRepository {
                     unit = excluded.unit,
                     time_exact = excluded.time_exact,
                     updated_at = excluded.updated_at
-                WHERE economic_event.status != 'historical' OR excluded.status = 'historical'"#,
+                WHERE economic_event.status != 'historical' OR excluded.status = 'historical'
+                RETURNING id"#,
             )
             .bind(&event.provider)
             .bind(&event.provider_id)
-            .bind(release_group_id)
             .bind(&event.country)
             .bind(&event.currency)
             .bind(&event.category)
@@ -103,31 +101,63 @@ impl EventRepository {
             .bind(&event.unit)
             .bind(event.status.as_str())
             .bind(event.time_exact)
-            .bind(Utc::now().to_rfc3339())
-            .execute(&mut *transaction)
-            .await?;
+            .bind(Utc::now().to_rfc3339());
+            let (id, persisted) = match event_query.fetch_optional(&mut *transaction).await? {
+                Some(row) => (row.try_get("id")?, true),
+                // SQLite returns no row when the historical-preservation WHERE clause rejects
+                // the update. The existing row still supplies the stable id, but the incoming
+                // values must not become an observation because they were not persisted.
+                None => {
+                    let id = sqlx::query_scalar(
+                        "SELECT id FROM economic_event WHERE provider = ? AND provider_id = ?",
+                    )
+                    .bind(&event.provider)
+                    .bind(&event.provider_id)
+                    .fetch_one(&mut *transaction)
+                    .await?;
+                    (id, false)
+                }
+            };
 
-            let id: i64 = sqlx::query_scalar(
-                "SELECT id FROM economic_event WHERE provider = ? AND provider_id = ?",
-            )
-            .bind(&event.provider)
-            .bind(&event.provider_id)
-            .fetch_one(&mut *transaction)
-            .await?;
-
-            sqlx::query(
-                r#"INSERT INTO event_observation
-                    (event_id, observed_at, actual, previous, consensus, forecast)
-                    VALUES (?, ?, ?, ?, ?, ?)"#,
-            )
-            .bind(id)
-            .bind(Utc::now().to_rfc3339())
-            .bind(event.actual.map(|value| value.to_string()))
-            .bind(event.previous.map(|value| value.to_string()))
-            .bind(event.consensus.map(|value| value.to_string()))
-            .bind(event.forecast.map(|value| value.to_string()))
-            .execute(&mut *transaction)
-            .await?;
+            if record_observations && persisted {
+                let latest = sqlx::query(
+                    "SELECT actual, previous, consensus, forecast FROM event_observation WHERE event_id = ? ORDER BY id DESC LIMIT 1",
+                )
+                .bind(id)
+                .fetch_optional(&mut *transaction)
+                .await?;
+                let values = (
+                    event.actual.map(|value| value.to_string()),
+                    event.previous.map(|value| value.to_string()),
+                    event.consensus.map(|value| value.to_string()),
+                    event.forecast.map(|value| value.to_string()),
+                );
+                let changed = if let Some(row) = latest {
+                    (
+                        row.try_get::<Option<String>, _>("actual")?,
+                        row.try_get::<Option<String>, _>("previous")?,
+                        row.try_get::<Option<String>, _>("consensus")?,
+                        row.try_get::<Option<String>, _>("forecast")?,
+                    ) != values
+                } else {
+                    true
+                };
+                if changed {
+                    sqlx::query(
+                        r#"INSERT INTO event_observation
+                            (event_id, observed_at, actual, previous, consensus, forecast)
+                            VALUES (?, ?, ?, ?, ?, ?)"#,
+                    )
+                    .bind(id)
+                    .bind(Utc::now().to_rfc3339())
+                    .bind(&values.0)
+                    .bind(&values.1)
+                    .bind(&values.2)
+                    .bind(&values.3)
+                    .execute(&mut *transaction)
+                    .await?;
+                }
+            }
 
             ids.push(id);
         }

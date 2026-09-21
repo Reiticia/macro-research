@@ -473,7 +473,9 @@ class DirectMarketClient(
         fun change(minutes: Long): Double? {
             val target = eventTime.plusSeconds(minutes * 60)
             if (target.isAfter(Instant.now())) return null
-            val sample = values.filter { !it.timestamp.isAfter(target) }.maxByOrNull { it.timestamp }
+            val sample = values
+                .filter { it.timestamp.isAfter(eventTime) && !it.timestamp.isAfter(target) }
+                .maxByOrNull { it.timestamp }
                 ?: return null
             if (abs(Duration.between(sample.timestamp, target).seconds) > 180) return null
             return if (symbol in YIELD_SYMBOLS) {

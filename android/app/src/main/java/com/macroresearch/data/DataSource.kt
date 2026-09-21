@@ -66,6 +66,7 @@ interface DataSource {
         event: EconomicEvent,
         language: String,
         method: AnalysisMethod,
+        timezone: String = ZoneId.systemDefault().id,
     ): AiAnalysis? = null
 
     suspend fun serverEventId(event: EconomicEvent): Long = event.id
@@ -212,7 +213,8 @@ class BackendDataSource(
         event: EconomicEvent,
         language: String,
         method: AnalysisMethod,
-    ): AiAnalysis? = client.aiAnalysisByProvider(event, language, method)
+        timezone: String,
+    ): AiAnalysis? = client.aiAnalysisByProvider(event, language, method, timezone)
 
     override suspend fun feedback(id: Long, language: String, method: Int, revision: Int, message: String) {
         client.submitAnalysisFeedback(id, language, method, revision, message)

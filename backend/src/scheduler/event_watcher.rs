@@ -77,7 +77,10 @@ async fn watch_once(
         .into_iter()
         .filter(|event| watched_ids.contains(event.provider_id.as_str()))
         .collect();
-    state.events.save_events(&relevant).await?;
+    state
+        .events
+        .save_events_without_observations(&relevant)
+        .await?;
 
     for watched in active {
         if let Some(updated) = relevant

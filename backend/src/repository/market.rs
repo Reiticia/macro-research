@@ -22,10 +22,10 @@ impl MarketRepository {
 
     pub async fn save_quote(&self, event_id: i64, quote: &Quote) -> Result<(), AppError> {
         sqlx::query(
-            r#"INSERT INTO market_snapshot (event_id, symbol, timestamp, price, close)
-               VALUES (?, ?, ?, ?, ?)
+            r#"INSERT INTO market_snapshot (event_id, symbol, timestamp, price, close, source)
+               VALUES (?, ?, ?, ?, ?, 'quote')
                ON CONFLICT(event_id, symbol, timestamp) DO UPDATE SET
-                 price = excluded.price, close = excluded.close"#,
+                 price = excluded.price, close = excluded.close, source = 'quote'"#,
         )
         .bind(event_id)
         .bind(quote.symbol.as_str())
@@ -47,11 +47,13 @@ impl MarketRepository {
         let mut tx = self.pool.begin().await?;
         for c in candles {
             sqlx::query(
-                r#"INSERT INTO market_snapshot (event_id, symbol, timestamp, price, open, high, low, close, volume)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                r#"INSERT INTO market_snapshot (event_id, symbol, timestamp, price, open, high, low, close, volume, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'candle')
                    ON CONFLICT(event_id, symbol, timestamp) DO UPDATE SET
                      price = excluded.price, open = excluded.open, high = excluded.high,
-                     low = excluded.low, close = excluded.close, volume = excluded.volume"#,
+                     low = excluded.low, close = excluded.close, volume = excluded.volume,
+                     source = 'candle'
+                   WHERE market_snapshot.source = 'candle'"#,
             )
             .bind(event_id)
             .bind(c.symbol.as_str())

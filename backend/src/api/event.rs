@@ -141,6 +141,7 @@ pub async fn history(
 pub struct AiQuery {
     language: Option<String>,
     method: Option<u8>,
+    timezone: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,6 +150,7 @@ pub struct ProviderAiQuery {
     provider_id: String,
     language: Option<String>,
     method: Option<u8>,
+    timezone: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,18 +170,21 @@ async fn cached_ai_analysis(
     id: i64,
     language: Option<&str>,
     method: Option<u8>,
+    timezone: Option<&str>,
 ) -> Result<Json<AiAnalysisResponse>, AppError> {
     let language = language_or_default(language);
+    let timezone = crate::ai_analysis::normalize_timezone(timezone.unwrap_or("UTC"));
     let method = method.unwrap_or(state.config.ai.default_method);
     if !(1..=3).contains(&method) {
         return Err(AppError::InvalidRequest("method must be 1..3".into()));
     }
     let row = sqlx::query(
-        "SELECT * FROM ai_analysis WHERE event_id=? AND language=? AND method=? AND timezone='UTC'",
+        "SELECT * FROM ai_analysis WHERE event_id=? AND language=? AND method=? AND timezone=?",
     )
     .bind(id)
     .bind(crate::shared_ai::language(&language))
     .bind(method)
+    .bind(&timezone)
     .fetch_optional(state.events.pool())
     .await?
     .ok_or(AppError::NotFound)?;
@@ -200,6 +205,7 @@ pub async fn ai_analysis(
         id,
         query.language.as_deref(),
         query.method,
+        query.timezone.as_deref(),
         &token.0,
     )
     .await
@@ -222,6 +228,7 @@ pub async fn ai_analysis_by_provider(
         event.id,
         query.language.as_deref(),
         query.method,
+        query.timezone.as_deref(),
         &token.0,
     )
     .await
@@ -232,10 +239,12 @@ async fn lazy_ai_analysis(
     id: i64,
     language: Option<&str>,
     method: Option<u8>,
+    timezone: Option<&str>,
     caller: &str,
 ) -> Result<Json<AiAnalysisResponse>, AppError> {
+    let timezone = crate::ai_analysis::normalize_timezone(timezone.unwrap_or("UTC"));
     // Keep already persisted briefings readable even when the model relay is currently disabled.
-    match cached_ai_analysis(state, id, language, method).await {
+    match cached_ai_analysis(state, id, language, method, Some(&timezone)).await {
         Ok(response) => return Ok(response),
         Err(AppError::NotFound) => {}
         Err(error) => return Err(error),
@@ -267,7 +276,7 @@ async fn lazy_ai_analysis(
             id,
             &language,
             crate::ai_analysis::AnalysisMethod::from_u8(method),
-            "UTC",
+            &timezone,
             caller,
             &state.quota,
         )

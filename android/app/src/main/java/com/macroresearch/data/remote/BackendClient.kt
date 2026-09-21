@@ -175,6 +175,7 @@ class BackendClient(
         event: EconomicEvent,
         languageTag: String,
         method: AnalysisMethod,
+        timezone: String = ZoneId.systemDefault().id,
     ): AiAnalysis? = withContext(Dispatchers.IO) {
         val root = try {
             getJson("/api/v1/ai-analysis/by-provider") { url ->
@@ -182,6 +183,7 @@ class BackendClient(
                 url.addQueryParameter("provider_id", event.providerId)
                 url.addQueryParameter("language", languageTag)
                 url.addQueryParameter("method", method.wireValue.toString())
+                url.addQueryParameter("timezone", timezone)
             }
         } catch (missing: BackendException) {
             if (missing.statusCode == 404) return@withContext null

@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.macroresearch.data.model.SocketEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -39,12 +40,21 @@ class BackendSocket(
     private val _connected = MutableSharedFlow<Boolean>(extraBufferCapacity = 4)
     val connected: SharedFlow<Boolean> = _connected.asSharedFlow()
 
+    @Volatile
     private var webSocket: WebSocket? = null
+    @Volatile
     private var reconnectAttempt = 0
+    @Volatile
+    private var closed = true
+    private var reconnectJob: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    @Synchronized
     fun connect() {
+        closed = false
         if (webSocket != null) return
+        reconnectJob?.cancel()
+        reconnectJob = null
         val url = urlProvider() ?: return
         val token = tokenProvider() ?: return
         webSocket = client.newWebSocket(
@@ -53,37 +63,78 @@ class BackendSocket(
         )
     }
 
+    @Synchronized
     fun close() {
+        closed = true
+        reconnectJob?.cancel()
+        reconnectJob = null
         webSocket?.close(NORMAL_CLOSURE, "client paused")
         webSocket = null
+        reconnectAttempt = 0
     }
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            val current = synchronized(this@BackendSocket) {
+                !closed && this@BackendSocket.webSocket === webSocket
+            }
+            if (!current) return
             reconnectAttempt = 0
             _connected.tryEmit(true)
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            val current = synchronized(this@BackendSocket) {
+                !closed && this@BackendSocket.webSocket === webSocket
+            }
+            if (!current) return
             runCatching { gson.fromJson(text, SocketEvent::class.java) }
                 .onSuccess(_events::tryEmit)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            this@BackendSocket.webSocket = null
-            _connected.tryEmit(false)
+            val current = synchronized(this@BackendSocket) {
+                if (this@BackendSocket.webSocket !== webSocket) {
+                    false
+                } else {
+                    this@BackendSocket.webSocket = null
+                    true
+                }
+            }
+            if (current) _connected.tryEmit(false)
         }
 
         override fun onFailure(webSocket: WebSocket, throwable: Throwable, response: Response?) {
-            this@BackendSocket.webSocket = null
+            val (current, delaySeconds) = synchronized(this@BackendSocket) {
+                if (this@BackendSocket.webSocket !== webSocket) {
+                    false to null
+                } else {
+                    this@BackendSocket.webSocket = null
+                    val delay = if (closed) {
+                        null
+                    } else {
+                        val next = 1L shl reconnectAttempt.coerceAtMost(5)
+                        reconnectAttempt++
+                        next
+                    }
+                    true to delay
+                }
+            }
+            if (!current) return
             _connected.tryEmit(false)
+            if (delaySeconds == null) return
             // The token may have been rotated or the server restarted; retry with a bounded
             // backoff and a hard stop once the screen is gone.
-            val delaySeconds = (1L shl reconnectAttempt.coerceAtMost(5))
-            reconnectAttempt++
-            scope.launch {
-                delay(delaySeconds * 1_000)
-                if (this@BackendSocket.webSocket == null) connect()
+            synchronized(this@BackendSocket) {
+                if (closed) return
+                reconnectJob = scope.launch {
+                    delay(delaySeconds * 1_000)
+                    synchronized(this@BackendSocket) {
+                        reconnectJob = null
+                        if (closed || this@BackendSocket.webSocket != null) return@launch
+                    }
+                    connect()
+                }
             }
         }
     }

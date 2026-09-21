@@ -137,7 +137,7 @@ async fn startup_calendar_persists_recent_events_and_translations() {
         assert_eq!(row.actual, Some(3.into()));
         assert_eq!(row.event_zh_cn.as_deref(), Some("消费者价格指数同比"));
         assert_eq!(row.event_zh_tw.as_deref(), Some("消費者價格指數同比"));
-        assert_eq!(repository.observations(row.id).await.unwrap().len(), 2);
+        assert_eq!(repository.observations(row.id).await.unwrap().len(), 1);
     }
 }
 

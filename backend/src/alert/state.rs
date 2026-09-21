@@ -53,6 +53,13 @@ enum Outcome {
     Degraded(String),
 }
 
+struct PendingAlert {
+    severity: Severity,
+    key: String,
+    status: String,
+    message: String,
+}
+
 /// Tracks consecutive failures per source and notifies the admin on state transitions.
 ///
 /// Updates are serialized: several schedulers record into the same rows, and a lost
@@ -95,13 +102,36 @@ impl HealthRegistry {
     }
 
     async fn record(&self, key: &str, outcome: Outcome) {
-        let _guard = self.lock.lock().await;
-        if let Err(error) = self.record_locked(key, outcome).await {
-            tracing::warn!(key, %error, "source health update failed");
+        let pending = {
+            let _guard = self.lock.lock().await;
+            match self.record_locked(key, outcome).await {
+                Ok(pending) => pending,
+                Err(error) => {
+                    tracing::warn!(key, %error, "source health update failed");
+                    return;
+                }
+            }
+        };
+        if let Some(pending) = pending
+            && let Some(alerts) = &self.alerts
+            && let Err(error) = alerts
+                .notify(
+                    pending.severity,
+                    &pending.key,
+                    &pending.status,
+                    pending.message,
+                )
+                .await
+        {
+            tracing::warn!(key, %error, "source health notification failed");
         }
     }
 
-    async fn record_locked(&self, key: &str, outcome: Outcome) -> Result<(), AppError> {
+    async fn record_locked(
+        &self,
+        key: &str,
+        outcome: Outcome,
+    ) -> Result<Option<PendingAlert>, AppError> {
         let now = Utc::now();
         let current = self.load(key).await?;
         let previous_status = current
@@ -177,28 +207,31 @@ impl HealthRegistry {
         .execute(&self.pool)
         .await?;
 
-        if should_notify && let Some(alerts) = &self.alerts {
-            let severity = match status {
-                Status::Healthy => Severity::Info,
-                Status::Degraded => Severity::Warning,
-                Status::Down => Severity::Warning,
-            };
-            let message = match status {
-                Status::Healthy => format!("数据源 {key} 已恢复。"),
-                Status::Degraded => format!(
-                    "数据源 {key} 已降级，正在使用回退路径。{}",
-                    last_error.unwrap_or_default()
-                ),
-                Status::Down => format!(
-                    "数据源 {key} 连续失败 {failures} 次，已判定不可用。{}",
-                    last_error.unwrap_or_default()
-                ),
-            };
-            alerts
-                .notify(severity, key, status.as_str(), message)
-                .await?;
+        if !should_notify || self.alerts.is_none() {
+            return Ok(None);
         }
-        Ok(())
+        let severity = match status {
+            Status::Healthy => Severity::Info,
+            Status::Degraded => Severity::Warning,
+            Status::Down => Severity::Warning,
+        };
+        let message = match status {
+            Status::Healthy => format!("数据源 {key} 已恢复。"),
+            Status::Degraded => format!(
+                "数据源 {key} 已降级，正在使用回退路径。{}",
+                last_error.as_deref().unwrap_or_default()
+            ),
+            Status::Down => format!(
+                "数据源 {key} 连续失败 {failures} 次，已判定不可用。{}",
+                last_error.as_deref().unwrap_or_default()
+            ),
+        };
+        Ok(Some(PendingAlert {
+            severity,
+            key: key.to_owned(),
+            status: status.as_str().to_owned(),
+            message,
+        }))
     }
 
     async fn load(&self, key: &str) -> Result<Option<SourceHealth>, AppError> {

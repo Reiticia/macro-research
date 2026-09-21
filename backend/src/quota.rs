@@ -63,17 +63,19 @@ impl QuotaService {
             return Ok(QuotaOutcome::Allowed);
         }
         let day = Utc::now().format("%Y-%m-%d").to_string();
-        let count: i64 = sqlx::query_scalar(
+        let count: Option<i64> = sqlx::query_scalar(
             r#"INSERT INTO api_usage (token_id, day, scope, count) VALUES (?, ?, ?, 1)
                ON CONFLICT(token_id, day, scope) DO UPDATE SET count = count + 1
+               WHERE api_usage.count < ?
                RETURNING count"#,
         )
         .bind(token_id)
         .bind(&day)
         .bind(scope)
-        .fetch_one(&self.pool)
+        .bind(i64::from(limit))
+        .fetch_optional(&self.pool)
         .await?;
-        if count > i64::from(limit) {
+        if count.is_none() {
             return Ok(QuotaOutcome::Exhausted {
                 retry_after_seconds: seconds_until_utc_midnight(),
             });
@@ -142,6 +144,6 @@ mod tests {
         // Another token keeps its own budget.
         assert!(quota.consume("bob", "ai_analysis", 2).await.is_ok());
         let usage = quota.usage_today("alice").await.unwrap();
-        assert_eq!(usage, vec![("ai_analysis".to_owned(), 3)]);
+        assert_eq!(usage, vec![("ai_analysis".to_owned(), 2)]);
     }
 }

@@ -619,34 +619,49 @@ impl TranslationService {
         if names.is_empty() {
             return Ok(HashMap::new());
         }
-        let _guard = self.lock.lock().await;
-        let mut cached = HashMap::new();
-        for batch in names.chunks(500) {
-            cached.extend(self.events.cached_event_name_translations(batch).await?);
-        }
-        if !cached.is_empty() {
-            let rows: Vec<_> = cached
+        let (mut cached, missing) = {
+            let _guard = self.lock.lock().await;
+            let mut cached = HashMap::new();
+            for batch in names.chunks(500) {
+                cached.extend(self.events.cached_event_name_translations(batch).await?);
+            }
+            if !cached.is_empty() {
+                let rows: Vec<_> = cached
+                    .iter()
+                    .map(|(source, (zh_cn, zh_tw))| (source.clone(), zh_cn.clone(), zh_tw.clone()))
+                    .collect();
+                self.events.save_event_name_translations(&rows).await?;
+            }
+            let missing: Vec<String> = names
                 .iter()
-                .map(|(source, (zh_cn, zh_tw))| (source.clone(), zh_cn.clone(), zh_tw.clone()))
+                .filter(|name| !cached.contains_key(*name))
+                .cloned()
                 .collect();
-            self.events.save_event_name_translations(&rows).await?;
-        }
-        let missing: Vec<String> = names
-            .iter()
-            .filter(|name| !cached.contains_key(*name))
-            .cloned()
-            .collect();
+            (cached, missing)
+        };
+
         for batch in missing.chunks(self.batch_size) {
+            // Model calls intentionally happen outside the cache lock. A concurrent sync may
+            // translate the same missing name, so re-read the cache before publishing results.
             let approved = self.translate_verified(batch).await?;
             if approved.is_empty() {
                 continue;
             }
-            let rows: Vec<_> = approved
-                .iter()
-                .map(|(source, (zh_cn, zh_tw))| (source.clone(), zh_cn.clone(), zh_tw.clone()))
+            let _guard = self.lock.lock().await;
+            let existing = self.events.cached_event_name_translations(batch).await?;
+            cached.extend(existing);
+            let fresh: HashMap<_, _> = approved
+                .into_iter()
+                .filter(|(source, _)| !cached.contains_key(source))
                 .collect();
-            self.events.save_event_name_translations(&rows).await?;
-            cached.extend(approved);
+            if !fresh.is_empty() {
+                let rows: Vec<_> = fresh
+                    .iter()
+                    .map(|(source, (zh_cn, zh_tw))| (source.clone(), zh_cn.clone(), zh_tw.clone()))
+                    .collect();
+                self.events.save_event_name_translations(&rows).await?;
+                cached.extend(fresh);
+            }
         }
         Ok(cached)
     }

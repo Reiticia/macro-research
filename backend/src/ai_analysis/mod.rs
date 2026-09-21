@@ -119,6 +119,58 @@ struct GenerationKey {
     timezone: String,
 }
 
+struct GenerationLockEntry {
+    lock: Arc<Mutex<()>>,
+    users: usize,
+}
+
+struct GenerationLease {
+    registry: Arc<Mutex<HashMap<GenerationKey, GenerationLockEntry>>>,
+    key: GenerationKey,
+    lock: Arc<Mutex<()>>,
+    released: bool,
+}
+
+impl GenerationLease {
+    async fn release(&mut self) {
+        if self.released {
+            return;
+        }
+        release_generation_entry(&self.registry, &self.key).await;
+        self.released = true;
+    }
+}
+
+impl Drop for GenerationLease {
+    fn drop(&mut self) {
+        if self.released {
+            return;
+        }
+        let registry = self.registry.clone();
+        let key = self.key.clone();
+        tokio::spawn(async move {
+            release_generation_entry(&registry, &key).await;
+        });
+        self.released = true;
+    }
+}
+
+async fn release_generation_entry(
+    registry: &Arc<Mutex<HashMap<GenerationKey, GenerationLockEntry>>>,
+    key: &GenerationKey,
+) {
+    let mut locks = registry.lock().await;
+    let remove = if let Some(entry) = locks.get_mut(key) {
+        entry.users = entry.users.saturating_sub(1);
+        entry.users == 0
+    } else {
+        false
+    };
+    if remove {
+        locks.remove(key);
+    }
+}
+
 /// Generates and caches post-release briefings on the server's own model key.
 pub struct AiAnalysisService {
     http: reqwest::Client,
@@ -135,7 +187,7 @@ pub struct AiAnalysisService {
     /// Minimum seconds between two generations of the same (event, method).
     regenerate_cooldown_seconds: i64,
     /// Prevents concurrent cache misses for the same briefing from calling the model twice.
-    generation_locks: Arc<Mutex<HashMap<GenerationKey, Arc<Mutex<()>>>>>,
+    generation_locks: Arc<Mutex<HashMap<GenerationKey, GenerationLockEntry>>>,
 }
 
 /// Health key reported to the alert registry when the relay fails.
@@ -282,17 +334,20 @@ impl AiAnalysisService {
     ) -> Result<AiAnalysisResponse, AppError> {
         let language = normalize_language(language);
         let timezone = normalize_timezone(timezone);
-        let lock = self
-            .generation_lock(GenerationKey {
-                event_id,
-                language: language.clone(),
-                method: method.as_u8(),
-                timezone: timezone.clone(),
-            })
-            .await;
-        let _guard = lock.lock().await;
-        self.generate_locked(event_id, &language, method, &timezone, regenerate, caller)
-            .await
+        let key = GenerationKey {
+            event_id,
+            language: language.clone(),
+            method: method.as_u8(),
+            timezone: timezone.clone(),
+        };
+        let mut lease = self.generation_lock(&key).await;
+        let result = {
+            let _guard = lease.lock.lock().await;
+            self.generate_locked(event_id, &language, method, &timezone, regenerate, caller)
+                .await
+        };
+        lease.release().await;
+        result
     }
 
     /// Generates one missing briefing on behalf of an authenticated API caller.
@@ -312,34 +367,49 @@ impl AiAnalysisService {
     ) -> Result<AiAnalysisResponse, AppError> {
         let language = normalize_language(language);
         let timezone = normalize_timezone(timezone);
-        let lock = self
-            .generation_lock(GenerationKey {
-                event_id,
-                language: language.clone(),
-                method: method.as_u8(),
-                timezone: timezone.clone(),
-            })
-            .await;
-        let _guard = lock.lock().await;
+        let key = GenerationKey {
+            event_id,
+            language: language.clone(),
+            method: method.as_u8(),
+            timezone: timezone.clone(),
+        };
+        let mut lease = self.generation_lock(&key).await;
+        let result = {
+            let _guard = lease.lock.lock().await;
 
-        if let Some(cached) = self.cached(event_id, &language, method, &timezone).await? {
-            return Ok(AiAnalysisResponse::cached(cached));
-        }
+            async {
+                if let Some(cached) = self.cached(event_id, &language, method, &timezone).await? {
+                    return Ok(AiAnalysisResponse::cached(cached));
+                }
 
-        quota
-            .consume(caller, "ai_analysis", quota.ai_analysis_limit())
-            .await?;
-        let _slot = quota.acquire_ai_slot().await?;
-        self.generate_locked(event_id, &language, method, &timezone, false, caller)
+                quota
+                    .consume(caller, "ai_analysis", quota.ai_analysis_limit())
+                    .await?;
+                let _slot = quota.acquire_ai_slot().await?;
+                self.generate_locked(event_id, &language, method, &timezone, false, caller)
+                    .await
+            }
             .await
+        };
+        lease.release().await;
+        result
     }
 
-    async fn generation_lock(&self, key: GenerationKey) -> Arc<Mutex<()>> {
+    async fn generation_lock(&self, key: &GenerationKey) -> GenerationLease {
         let mut locks = self.generation_locks.lock().await;
-        locks
-            .entry(key)
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone()
+        let entry = locks
+            .entry(key.clone())
+            .or_insert_with(|| GenerationLockEntry {
+                lock: Arc::new(Mutex::new(())),
+                users: 0,
+            });
+        entry.users += 1;
+        GenerationLease {
+            registry: self.generation_locks.clone(),
+            key: key.clone(),
+            lock: entry.lock.clone(),
+            released: false,
+        }
     }
 
     async fn generate_locked(
@@ -351,7 +421,7 @@ impl AiAnalysisService {
         regenerate: bool,
         caller: &str,
     ) -> Result<AiAnalysisResponse, AppError> {
-        let cached = self.cached(event_id, &language, method, &timezone).await?;
+        let cached = self.cached(event_id, language, method, timezone).await?;
         if let Some(cached) = cached {
             if !regenerate {
                 return Ok(AiAnalysisResponse::cached(cached));
@@ -857,7 +927,7 @@ fn accumulate(totals: &mut LlmUsageTotals, usage: TokenUsage) {
 }
 
 /// `zh`, `zh-CN`, `zh-Hans` collapse onto one cache entry, and so do the traditional variants.
-fn normalize_language(language: &str) -> String {
+pub(crate) fn normalize_language(language: &str) -> String {
     let value = language.trim().to_lowercase();
     if value.starts_with("zh-hant") || value.starts_with("zh-tw") || value.starts_with("zh-hk") {
         "zh-TW".to_owned()
@@ -868,7 +938,7 @@ fn normalize_language(language: &str) -> String {
     }
 }
 
-fn normalize_timezone(timezone: &str) -> String {
+pub(crate) fn normalize_timezone(timezone: &str) -> String {
     let value = timezone.trim();
     if value.is_empty() {
         return "UTC".to_owned();

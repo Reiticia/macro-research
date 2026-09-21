@@ -44,13 +44,14 @@ async fn event_upsert_preserves_state_and_records_revisions() {
         .unwrap();
     event.actual = Some(Decimal::new(32, 1));
     event.previous = Some(Decimal::new(27, 1));
+    repository.save_events(&[event.clone()]).await.unwrap();
     repository.save_events(&[event]).await.unwrap();
 
     let stored = repository.get(id).await.unwrap();
     assert_eq!(stored.status, EventStatus::Watching);
     assert_eq!(stored.actual, Some(Decimal::new(32, 1)));
     assert_eq!(stored.previous, Some(Decimal::new(27, 1)));
-    assert!(stored.release_group_id.is_some());
+    assert!(stored.release_group_id.is_none());
     let observations = repository.observations(id).await.unwrap();
     assert_eq!(observations.len(), 2);
     assert_eq!(observations[0].actual, None);

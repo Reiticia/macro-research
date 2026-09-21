@@ -103,11 +103,13 @@ class BackendClientTest {
             event,
             "zh-CN",
             AnalysisMethod.EX_ANTE_THEN_COMPARE,
+            "Asia/Shanghai",
         )
 
         requireNotNull(analysis)
         val request = server.takeRequest()
         assertTrue(request.path.orEmpty().startsWith("/api/v1/ai-analysis/by-provider?"))
+        assertTrue(request.path.orEmpty().contains("timezone=Asia%2FShanghai"))
         assertEquals("Bearer $token", request.getHeader("authorization"))
     }
 
