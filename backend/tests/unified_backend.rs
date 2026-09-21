@@ -330,14 +330,14 @@ async fn shared_ai_is_readable_and_feedback_is_recorded_once_per_revision() {
         .unwrap();
     assert_eq!(cached.status(), StatusCode::OK);
 
-    // Direct-mode clients have a device-local id, so they read the same frozen row by provider
-    // identity. This cache lookup is public and never triggers model work.
+    // Direct-mode clients have a device-local id, so they read the same cached row by provider
+    // identity. The lookup is authenticated because a cache miss can now trigger model work.
     let public_cached = router
         .clone()
         .oneshot(request(
             "GET",
             "/api/v1/ai-analysis/by-provider?provider=trading_view&provider_id=fixture-2&language=en&method=2",
-            None,
+            Some("secret-token"),
         ))
         .await
         .unwrap();

@@ -1,4 +1,4 @@
-//! Immutable public briefings: scheduled generation, durable retries and administrator review.
+//! Immutable public briefings: lazy generation, durable retries and administrator review.
 use crate::{
     AppState,
     ai_analysis::AnalysisMethod,
@@ -141,42 +141,6 @@ async fn notify_feedback(state: &AppState, alerts: &AlertService) -> Result<(), 
     Ok(())
 }
 
-const SHARED_LANGUAGES: [&str; 3] = ["en", "zh-CN", "zh-TW"];
-const SHARED_METHODS: [i64; 3] = [1, 2, 3];
-
-/// Creates the complete cache bundle for one event: three languages × three methods.
-///
-/// `INSERT OR IGNORE` makes this safe to call both from the market collector and from startup
-/// recovery. A completed or retried row is never reset accidentally.
-pub async fn enqueue_event_bundle(pool: &SqlitePool, event_id: i64) -> Result<(), AppError> {
-    let mut tx = pool.begin().await?;
-    for language in SHARED_LANGUAGES {
-        for method in SHARED_METHODS {
-            sqlx::query(
-                "INSERT OR IGNORE INTO shared_ai_job(event_id,method,language) VALUES(?,?,?)",
-            )
-            .bind(event_id)
-            .bind(method)
-            .bind(language)
-            .execute(&mut *tx)
-            .await?;
-        }
-    }
-    tx.commit().await?;
-    Ok(())
-}
-
-/// Moves an existing or recovered nine-row bundle ahead of the historical backlog. Reading a
-/// missing cache row may call this, but generation remains asynchronous in the bounded worker.
-pub async fn prioritize_event_bundle(pool: &SqlitePool, event_id: i64) -> Result<(), AppError> {
-    enqueue_event_bundle(pool, event_id).await?;
-    sqlx::query("UPDATE shared_ai_job SET priority=1 WHERE event_id=? AND status='pending'")
-        .bind(event_id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
 #[derive(Clone, Debug)]
 struct SharedJob {
     event_id: i64,
@@ -185,29 +149,8 @@ struct SharedJob {
     target_revision: i64,
 }
 
-/// Recovers events that crossed the collection window while the process was stopped. One
-/// set-based statement replaces thousands of per-row inserts on every 30-second worker tick.
-async fn enqueue_missing_bundles(state: &AppState) -> Result<(), AppError> {
-    let cutoff = Utc::now()
-        - chrono::Duration::minutes(state.config.scheduler.market_collect_after_minutes.max(0));
-    sqlx::query(
-        r#"WITH methods(method) AS (VALUES (1), (2), (3)),
-                  languages(language) AS (VALUES ('en'), ('zh-CN'), ('zh-TW'))
-           INSERT OR IGNORE INTO shared_ai_job(event_id, method, language)
-           SELECT event.id, methods.method, languages.language
-             FROM economic_event AS event
-             CROSS JOIN methods
-             CROSS JOIN languages
-            WHERE event.actual IS NOT NULL AND event.event_time <= ?"#,
-    )
-    .bind(cutoff.to_rfc3339())
-    .execute(state.events.pool())
-    .await?;
-    Ok(())
-}
-
-/// Picks one event rather than nine unrelated rows. This lets each released event converge to a
-/// complete nine-row cache, while the global AI semaphore still caps upstream concurrency.
+/// Picks one event rather than unrelated rows. Administrator-approved regeneration jobs for the
+/// same event are processed together, while ordinary events never enter this queue.
 async fn next_event_jobs(state: &AppState) -> Result<Vec<SharedJob>, AppError> {
     let pool = state.events.pool();
     let now = Utc::now().to_rfc3339();
@@ -215,7 +158,7 @@ async fn next_event_jobs(state: &AppState) -> Result<Vec<SharedJob>, AppError> {
         r#"SELECT job.event_id
              FROM shared_ai_job AS job
              JOIN economic_event AS event ON event.id = job.event_id
-            WHERE job.status = 'pending' AND job.retry_at <= ?
+            WHERE job.status = 'pending' AND job.target_revision > 1 AND job.retry_at <= ?
             GROUP BY job.event_id
             ORDER BY MAX(job.priority) DESC,
                      CASE event.status WHEN 'completed' THEN 0 WHEN 'historical' THEN 2 ELSE 1 END,
@@ -231,7 +174,7 @@ async fn next_event_jobs(state: &AppState) -> Result<Vec<SharedJob>, AppError> {
     let rows = sqlx::query(
         r#"SELECT event_id, method, language, target_revision
              FROM shared_ai_job
-            WHERE event_id = ? AND status = 'pending' AND retry_at <= ?
+            WHERE event_id = ? AND status = 'pending' AND target_revision > 1 AND retry_at <= ?
             ORDER BY language, method"#,
     )
     .bind(event_id)
@@ -312,14 +255,13 @@ async fn finish_job(
 }
 
 async fn generate_pending(state: &AppState) -> Result<(), AppError> {
-    enqueue_missing_bundles(state).await?;
     let jobs = next_event_jobs(state).await?;
     if jobs.is_empty() {
         return Ok(());
     }
 
-    // Build the deterministic rule report once before the nine model jobs start. Without this,
-    // a recovered event could make all nine jobs race to create the same prerequisite row.
+    // Build the deterministic rule report once before the approved model jobs start. Without
+    // this, several administrator-approved methods could race to create the same prerequisite.
     let event_id = jobs[0].event_id;
     match state.analyses.get(event_id).await {
         Ok(_) => {}

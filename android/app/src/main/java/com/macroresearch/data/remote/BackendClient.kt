@@ -170,14 +170,14 @@ class BackendClient(
         }.let { gson.fromJson(it, MarketQuotesResponse::class.java) }
     }
 
-    /** Public cached briefing lookup for a direct-mode event with a device-local id. */
+    /** Lazy server briefing lookup for a direct-mode event with a device-local id. */
     suspend fun aiAnalysisByProvider(
         event: EconomicEvent,
         languageTag: String,
         method: AnalysisMethod,
     ): AiAnalysis? = withContext(Dispatchers.IO) {
         val root = try {
-            getJson("/api/v1/ai-analysis/by-provider", authenticated = false) { url ->
+            getJson("/api/v1/ai-analysis/by-provider") { url ->
                 url.addQueryParameter("provider", event.provider)
                 url.addQueryParameter("provider_id", event.providerId)
                 url.addQueryParameter("language", languageTag)
@@ -190,7 +190,7 @@ class BackendClient(
         gson.fromJson(root, AiAnalysis::class.java)
     }
 
-    /** Cached server-side briefing, or null when nothing has been generated yet. */
+    /** Cached or lazily generated server-side briefing, or null when it is unavailable. */
     suspend fun aiAnalysis(
         id: Long,
         languageTag: String,

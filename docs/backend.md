@@ -101,9 +101,9 @@ request_timeout_seconds = 20
 - `[auth] enabled = true`，令牌来自配置文件的 `auth.tokens`（`name:token,name:token`），
   常量时间比较；`GET /health` 与 `GET /api/v1/meta` 免鉴权，其余全部要求
   `Authorization: Bearer <token>`。
-- 令牌是配额与审计身份：共享 AI 分析由服务端定时任务生成，不消耗客户端配额；客户端自带
-  Key 的分析直接请求模型，同样不经过服务端。`[limits]` 中的每日预算字段仅保留兼容；
-  进程内的 `ai_concurrency` 信号量仍限制同时打给模型的请求数。
+- 令牌是配额与审计身份：共享 AI 分析首次请求时才生成，并计入该令牌的每日预算；缓存命中
+  不消耗配额。客户端自带 Key 的分析直接请求模型，不经过服务端。进程内的
+  `ai_concurrency` 信号量仍限制同时打给模型的请求数。
 - 错误统一为 `{"error":{"code","message"}}`，客户端按 `code` 本地化。
 - 错误统一为 `{"error":{"code","message"}}`，客户端按 `code` 本地化。
 
@@ -149,7 +149,6 @@ request_timeout_seconds = 20
 | GET | `/health` | 存活检查 |
 | GET | `/api/v1/meta` | `{version, apiVersion:1, capabilities, aiEnabled, serverTime}` |
 | POST | `/api/v1/translations/names` | 批量读取已缓存的事件名译名（最多 100 个；只读、不触发模型） |
-| GET | `/api/v1/ai-analysis/by-provider?provider&provider_id&language&method` | 直连客户端按上游身份读取已缓存共享分析（只读、不触发模型） |
 
 需要 Bearer：
 
@@ -165,7 +164,8 @@ request_timeout_seconds = 20
 | GET | `/api/v1/events/{id}/market` | `{snapshots, reactions}` |
 | GET | `/api/v1/events/by-provider?provider&provider_id` | 按上游身份查事件（直连客户端映射共享结果用） |
 | GET | `/api/v1/market/quotes?symbols=` | 批量当前行情与不可用列表 |
-| GET | `/api/v1/events/{id}/ai-analysis?language&method` | 共享分析，未生成 `404`；结果冻结，不随请求变化 |
+| GET | `/api/v1/events/{id}/ai-analysis?language&method` | 共享分析，缓存未命中时惰性生成当前语言和方法 |
+| GET | `/api/v1/ai-analysis/by-provider?provider&provider_id&language&method` | 按上游身份读取或惰性生成共享分析 |
 | POST | `/api/v1/events/{id}/analysis-feedback` | `{language, method, revision, message}`；同一结果只记一条 |
 | GET | `/api/v1/usage?days=7&recent=20` | 模型调用审计：按类别汇总的 token 消耗与最近记录 |
 | POST | `/api/v1/translations/corrections` | 提交译名勘正（进入管理员审核） |
@@ -297,17 +297,15 @@ cargo run -- --check-ai            # 开发机上，读当前目录 config.toml
 
 ## 共享 AI 分析：服务端生成，结果冻结
 
-服务端在事件公布后的行情采集窗口结束（默认公布后 60 分钟）自动调用 `[ai]` 配置的
-OpenAI 兼容接口，按 **3 种语言 × 3 种方法**生成并写入数据库，即每个事件固定缓存 **9 条**
-简报（`shared_ai_job` 持久化队列，失败 5 分钟后重试）。缓存键是
-`(event_id, language, method)`，语言固定 en / zh-CN / zh-TW。规则分析完成时会立即、幂等地写入
-完整九任务；进程重启后用一条集合查询补齐遗漏任务。Worker 每次选中一个事件并发完成整组任务，
-避免大量历史任务交错后让某个事件长期只有部分缓存。客户端读取一条尚未生成的历史分析时，
-只会提高该事件已有九任务的队列优先级，不会在 HTTP 请求内直接调用模型。
+服务端采用惰性生成：用户首次请求某个已公布事件的某个语言和方法时，才调用 `[ai]` 配置的
+OpenAI 兼容接口，并且只生成当前请求的这一条。缓存键是
+`(event_id, language, method, timezone)`，语言固定 en / zh-CN / zh-TW；之后相同请求直接读取
+数据库，不再调用模型。不存在规则分析报告时，首次请求会先生成确定性的规则报告；未公布的事件
+不会触发 AI 调用。并发请求同一个缓存键时，服务端只保留一次模型调用。
 
-- 结果对客户端**只读**：后端模式使用 `GET /api/v1/events/{id}/ai-analysis`；直连模式使用
-  免鉴权的 `GET /api/v1/ai-analysis/by-provider`。二者都只返回已生成的行，不触发模型调用，
-  也不再提供客户端触发的重新生成（原 POST 接口已移除）；
+- 后端模式使用 `GET /api/v1/events/{id}/ai-analysis`；按 provider 查询使用
+  `GET /api/v1/ai-analysis/by-provider`，两者都需要 Bearer token。缓存命中直接返回，缓存未命中
+  才同步生成当前语言/方法；
 - 读者对结果有异议时 `POST /api/v1/events/{id}/analysis-feedback` 提交反馈，同一结果
   （同一 revision）只记一条；
 - 反馈通过 Telegram 推送给管理员，消息带「重新分析 / 忽略」按钮；只有管理员点击
@@ -319,8 +317,8 @@ OpenAI 兼容接口，按 **3 种语言 × 3 种方法**生成并写入数据库
 
 | 字段 | 含义 |
 |---|---|
-| `fromCache` | 恒为 `true`：共享结果永远来自数据库，接口不触发模型调用 |
-| `rateLimited` | 恒为 `false`（保留字段，兼容客户端解析） |
+| `fromCache` | 首次生成返回 `false`，之后命中数据库返回 `true` |
+| `rateLimited` | 普通首次请求为 `false`（保留字段，兼容客户端解析） |
 | `usage` | 生成时的模型消耗（中转站未上报时缺省） |
 
 客户端自带 Key 时走另一条路：设备直接请求用户配置的模型接口，payload 与结果都不经过
@@ -328,9 +326,9 @@ OpenAI 兼容接口，按 **3 种语言 × 3 种方法**生成并写入数据库
 
 ## 管理员才能重新生成
 
-共享结果没有用户侧限流：读永远免费，写只有管理员。`[limits] ai_regenerate_cooldown_seconds`
-（默认 600 秒）用于约束管理员批准后的重新生成频率：窗口内的重试会拿到上一次结果，
-任务保持待重试状态直到冷却结束。`ai_concurrency` 限制同时打给模型的任务数。
+首次生成按 Bearer token 计入 `[limits] ai_analysis_per_token_per_day`，缓存命中不消耗配额。
+`ai_concurrency` 限制同时打给模型的任务数。用户反馈后仍由管理员决定是否重新生成，
+`ai_regenerate_cooldown_seconds`（默认 600 秒）约束管理员批准后的重生成频率。
 
 ## 模型调用审计（按类别分类）
 

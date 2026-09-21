@@ -31,6 +31,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/events/{id}/market", get(market::market))
         .route("/api/v1/events/{id}/ai-analysis", get(event::ai_analysis))
         .route(
+            "/api/v1/ai-analysis/by-provider",
+            get(event::ai_analysis_by_provider),
+        )
+        .route(
             "/api/v1/events/{id}/analysis-feedback",
             post(event::analysis_feedback),
         )
@@ -48,10 +52,6 @@ pub fn router(state: AppState) -> Router {
         // this lookup public lets direct-mode readers localize names without a full data-source
         // token; the bounded request cannot trigger model work or mutate the cache.
         .route("/api/v1/translations/names", post(translation::names))
-        .route(
-            "/api/v1/ai-analysis/by-provider",
-            get(event::ai_analysis_by_provider),
-        )
         .merge(protected)
         // No browser clients: sending permissive CORS headers would only widen the surface.
         .layer(TraceLayer::new_for_http())

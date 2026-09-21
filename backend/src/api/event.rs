@@ -188,40 +188,91 @@ async fn cached_ai_analysis(
     )))
 }
 
-/// Returns the cached briefing, or 404 when nothing has been generated for this shape yet.
+/// Returns a briefing from the cache, generating only the requested shape on a cache miss.
 pub async fn ai_analysis(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Query(query): Query<AiQuery>,
+    Extension(token): Extension<TokenId>,
 ) -> Result<Json<AiAnalysisResponse>, AppError> {
-    cached_ai_analysis(&state, id, query.language.as_deref(), query.method).await
+    lazy_ai_analysis(
+        &state,
+        id,
+        query.language.as_deref(),
+        query.method,
+        &token.0,
+    )
+    .await
 }
 
-/// Public cache lookup for direct-mode clients whose local event id differs from the backend id.
-/// A miss only prioritizes the event's durable bundle; this request never calls the model.
+/// Looks up or lazily generates a briefing for a client whose local event id differs from the
+/// backend id.
 pub async fn ai_analysis_by_provider(
     State(state): State<AppState>,
     Query(query): Query<ProviderAiQuery>,
+    Extension(token): Extension<TokenId>,
 ) -> Result<Json<AiAnalysisResponse>, AppError> {
     let event = state
         .events
         .find_provider_event(&query.provider, &query.provider_id)
         .await?
         .ok_or(AppError::NotFound)?;
-    match cached_ai_analysis(&state, event.id, query.language.as_deref(), query.method).await {
-        Ok(response) => Ok(response),
-        Err(AppError::NotFound) => {
-            // Move a released event's complete bundle ahead of unrelated historical recovery
-            // work. Future/unreleased events must never be analyzed from incomplete numbers.
-            let collection_end = event.event_time
-                + Duration::minutes(state.config.scheduler.market_collect_after_minutes.max(0));
-            if event.actual.is_some() && collection_end <= Utc::now() {
-                crate::shared_ai::prioritize_event_bundle(state.events.pool(), event.id).await?;
-            }
-            Err(AppError::NotFound)
-        }
-        Err(error) => Err(error),
+    lazy_ai_analysis(
+        &state,
+        event.id,
+        query.language.as_deref(),
+        query.method,
+        &token.0,
+    )
+    .await
+}
+
+async fn lazy_ai_analysis(
+    state: &AppState,
+    id: i64,
+    language: Option<&str>,
+    method: Option<u8>,
+    caller: &str,
+) -> Result<Json<AiAnalysisResponse>, AppError> {
+    // Keep already persisted briefings readable even when the model relay is currently disabled.
+    match cached_ai_analysis(state, id, language, method).await {
+        Ok(response) => return Ok(response),
+        Err(AppError::NotFound) => {}
+        Err(error) => return Err(error),
     }
+
+    let service = state
+        .ai_analysis_service
+        .as_ref()
+        .ok_or(AppError::NotFound)?;
+    let event = state.events.get(id).await?;
+    // A post-release briefing must never be generated from a future or unpublished event.
+    if event.actual.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    if let Err(error) = state.analyses.get(id).await {
+        match error {
+            AppError::NotFound => {
+                state.analysis_service.analyze(id).await?;
+            }
+            other => return Err(other),
+        }
+    }
+
+    let language = language_or_default(language);
+    let method = method.unwrap_or(state.config.ai.default_method);
+    let response = service
+        .generate_lazy(
+            id,
+            &language,
+            crate::ai_analysis::AnalysisMethod::from_u8(method),
+            "UTC",
+            caller,
+            &state.quota,
+        )
+        .await?;
+    Ok(Json(response))
 }
 
 /// Readers can report a frozen result, but cannot trigger model calls.

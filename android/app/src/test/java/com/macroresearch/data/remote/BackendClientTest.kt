@@ -89,17 +89,17 @@ class BackendClientTest {
     }
 
     @Test
-    fun sharedAnalysisByProviderDoesNotRequireAnAccessToken() = runBlocking {
+    fun sharedAnalysisByProviderSendsTheAccessToken() = runBlocking {
         server.enqueue(MockResponse().setBody(briefingJson()))
-        val publicClient = BackendClient(
+        val authenticatedClient = BackendClient(
             client = OkHttpClient(),
             gson = gson,
             baseUrl = { server.url("/").toString().trimEnd('/') },
-            token = { null },
+            token = { token },
         )
         val event = gson.fromJson(eventJson(), EconomicEvent::class.java)
 
-        val analysis = publicClient.aiAnalysisByProvider(
+        val analysis = authenticatedClient.aiAnalysisByProvider(
             event,
             "zh-CN",
             AnalysisMethod.EX_ANTE_THEN_COMPARE,
@@ -108,7 +108,7 @@ class BackendClientTest {
         requireNotNull(analysis)
         val request = server.takeRequest()
         assertTrue(request.path.orEmpty().startsWith("/api/v1/ai-analysis/by-provider?"))
-        assertEquals(null, request.getHeader("authorization"))
+        assertEquals("Bearer $token", request.getHeader("authorization"))
     }
 
     @Test

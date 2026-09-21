@@ -1,6 +1,6 @@
 pub mod parse;
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
@@ -15,8 +15,10 @@ use crate::{
     llm_usage::{LlmKind, LlmScope, LlmUsageEntry, LlmUsageRepository, TokenUsage, endpoint_host},
     model::{EconomicEvent, MacroSignal, MarketReaction},
     openai_compat::{ExtraHeaders, chat_endpoint},
+    quota::QuotaService,
     repository::{AnalysisRepository, EventRepository, MarketRepository},
 };
+use tokio::sync::Mutex;
 
 pub use parse::Draft;
 
@@ -109,6 +111,14 @@ struct AnalysisInput {
     caller: String,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct GenerationKey {
+    event_id: i64,
+    language: String,
+    method: u8,
+    timezone: String,
+}
+
 /// Generates and caches post-release briefings on the server's own model key.
 pub struct AiAnalysisService {
     http: reqwest::Client,
@@ -124,6 +134,8 @@ pub struct AiAnalysisService {
     audit: Option<Arc<LlmUsageRepository>>,
     /// Minimum seconds between two generations of the same (event, method).
     regenerate_cooldown_seconds: i64,
+    /// Prevents concurrent cache misses for the same briefing from calling the model twice.
+    generation_locks: Arc<Mutex<HashMap<GenerationKey, Arc<Mutex<()>>>>>,
 }
 
 /// Health key reported to the alert registry when the relay fails.
@@ -206,6 +218,7 @@ impl AiAnalysisService {
             health: None,
             audit: None,
             regenerate_cooldown_seconds: 0,
+            generation_locks: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -269,6 +282,75 @@ impl AiAnalysisService {
     ) -> Result<AiAnalysisResponse, AppError> {
         let language = normalize_language(language);
         let timezone = normalize_timezone(timezone);
+        let lock = self
+            .generation_lock(GenerationKey {
+                event_id,
+                language: language.clone(),
+                method: method.as_u8(),
+                timezone: timezone.clone(),
+            })
+            .await;
+        let _guard = lock.lock().await;
+        self.generate_locked(event_id, &language, method, &timezone, regenerate, caller)
+            .await
+    }
+
+    /// Generates one missing briefing on behalf of an authenticated API caller.
+    ///
+    /// The cache check, quota reservation and model call are serialized for this exact
+    /// `(event, language, method, timezone)` key. A second request arriving while the first one
+    /// is running therefore observes the newly persisted row and does not spend another quota
+    /// unit or make another upstream call.
+    pub async fn generate_lazy(
+        &self,
+        event_id: i64,
+        language: &str,
+        method: AnalysisMethod,
+        timezone: &str,
+        caller: &str,
+        quota: &QuotaService,
+    ) -> Result<AiAnalysisResponse, AppError> {
+        let language = normalize_language(language);
+        let timezone = normalize_timezone(timezone);
+        let lock = self
+            .generation_lock(GenerationKey {
+                event_id,
+                language: language.clone(),
+                method: method.as_u8(),
+                timezone: timezone.clone(),
+            })
+            .await;
+        let _guard = lock.lock().await;
+
+        if let Some(cached) = self.cached(event_id, &language, method, &timezone).await? {
+            return Ok(AiAnalysisResponse::cached(cached));
+        }
+
+        quota
+            .consume(caller, "ai_analysis", quota.ai_analysis_limit())
+            .await?;
+        let _slot = quota.acquire_ai_slot().await?;
+        self.generate_locked(event_id, &language, method, &timezone, false, caller)
+            .await
+    }
+
+    async fn generation_lock(&self, key: GenerationKey) -> Arc<Mutex<()>> {
+        let mut locks = self.generation_locks.lock().await;
+        locks
+            .entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    async fn generate_locked(
+        &self,
+        event_id: i64,
+        language: &str,
+        method: AnalysisMethod,
+        timezone: &str,
+        regenerate: bool,
+        caller: &str,
+    ) -> Result<AiAnalysisResponse, AppError> {
         let cached = self.cached(event_id, &language, method, &timezone).await?;
         if let Some(cached) = cached {
             if !regenerate {
@@ -306,8 +388,8 @@ impl AiAnalysisService {
             } else {
                 observed
             },
-            language,
-            timezone,
+            language: language.to_owned(),
+            timezone: timezone.to_owned(),
             caller: caller.to_owned(),
         };
         let (draft, usage) = match self.run(&input, method).await {

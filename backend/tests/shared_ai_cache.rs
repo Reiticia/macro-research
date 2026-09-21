@@ -2,13 +2,13 @@ use chrono::{Duration, Utc};
 use market_event_analyzer::{
     model::{EconomicEvent, EventStatus},
     repository::EventRepository,
-    shared_ai::{enqueue_event_bundle, prioritize_event_bundle},
+    shared_ai::{decide, submit_feedback},
 };
 use rust_decimal::Decimal;
 use sqlx::{Row, sqlite::SqlitePoolOptions};
 
 #[tokio::test]
-async fn one_event_enqueues_exactly_three_languages_by_three_methods() {
+async fn administrator_regeneration_queues_only_the_reviewed_shape() {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -19,7 +19,7 @@ async fn one_event_enqueues_exactly_three_languages_by_three_methods() {
     let event = EconomicEvent {
         id: 0,
         provider: "test".into(),
-        provider_id: "shared-ai-nine".into(),
+        provider_id: "shared-ai-lazy".into(),
         release_group_id: None,
         country: "United States".into(),
         currency: Some("USD".into()),
@@ -38,38 +38,42 @@ async fn one_event_enqueues_exactly_three_languages_by_three_methods() {
         time_exact: true,
     };
     let event_id = events.save_events(&[event]).await.unwrap()[0];
-
-    enqueue_event_bundle(&pool, event_id).await.unwrap();
-    enqueue_event_bundle(&pool, event_id).await.unwrap();
-
-    let rows = sqlx::query(
-        "SELECT language, method, status FROM shared_ai_job WHERE event_id=? ORDER BY language,method",
+    sqlx::query(
+        "INSERT INTO ai_analysis (event_id, language, method, timezone, revision, chain_json, data_analysis, market_outlook, model, generated_at) VALUES (?, 'zh-CN', 2, 'UTC', 1, '[]', 'data', 'outlook', 'test-model', ?)",
     )
     .bind(event_id)
-    .fetch_all(&pool)
+    .bind(Utc::now().to_rfc3339())
+    .execute(&pool)
     .await
     .unwrap();
-    assert_eq!(rows.len(), 9);
-    let shapes: Vec<(String, i64)> = rows
-        .iter()
-        .map(|row| (row.get("language"), row.get("method")))
-        .collect();
-    for language in ["en", "zh-CN", "zh-TW"] {
-        for method in 1..=3 {
-            assert!(shapes.contains(&(language.to_owned(), method)));
-        }
-    }
-    assert!(
-        rows.iter()
-            .all(|row| row.get::<String, _>("status") == "pending")
-    );
 
-    prioritize_event_bundle(&pool, event_id).await.unwrap();
-    let priorities: Vec<i64> =
-        sqlx::query_scalar("SELECT priority FROM shared_ai_job WHERE event_id=?")
-            .bind(event_id)
-            .fetch_all(&pool)
-            .await
-            .unwrap();
-    assert_eq!(priorities, vec![1; 9]);
+    let feedback = submit_feedback(
+        &pool,
+        event_id,
+        2,
+        "zh-CN",
+        1,
+        "alice",
+        "the outlook needs review",
+    )
+    .await
+    .unwrap();
+    decide(&pool, feedback, true).await.unwrap();
+
+    let row = sqlx::query(
+        "SELECT event_id, language, method, target_revision, status FROM shared_ai_job",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.get::<i64, _>("event_id"), event_id);
+    assert_eq!(row.get::<String, _>("language"), "zh-CN");
+    assert_eq!(row.get::<i64, _>("method"), 2);
+    assert_eq!(row.get::<i64, _>("target_revision"), 2);
+    assert_eq!(row.get::<String, _>("status"), "pending");
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shared_ai_job")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
 }

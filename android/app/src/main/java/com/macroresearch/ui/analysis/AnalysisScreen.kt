@@ -71,7 +71,6 @@ import com.macroresearch.ui.theme.AssetUp
 import com.macroresearch.ui.theme.Dovish
 import com.macroresearch.ui.theme.Hawkish
 import com.macroresearch.ui.viewModelFactory
-import kotlinx.coroutines.delay
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -93,13 +92,9 @@ fun AnalysisScreen(id: Long, repository: MacroRepository, onBack: () -> Unit) {
         if (settings.configured) {
             vm.loadAi(languageTag)
         } else if (dataSource.baseUrl.isNotBlank()) {
-            // A cache miss prioritizes the backend's complete nine-row bundle. Poll the read-only
-            // endpoint until this language/method row is ready so the card updates by itself.
-            do {
-                vm.loadAi(languageTag)
-                if (vm.ai.value.analysis != null) break
-                delay(15_000)
-            } while (true)
+            // The backend generates only this language/method on the first request, then serves
+            // the persisted row on subsequent requests.
+            vm.loadAi(languageTag)
         }
     }
     Scaffold(

@@ -60,10 +60,9 @@ enabled = true
 # tokens = "pixel:9f2c…,emulator:5a1d…"
 tokens = ""
 
-# 只有客户端能触发的接口需要预算；翻译在同步循环内部运行，不在此暴露。
+# 首次请求共享分析时按令牌计费；缓存命中不消耗配额。翻译在同步循环内部运行，
+# 不在此暴露。
 [limits]
-# 保留字段：共享分析由服务端定时任务生成，不消耗客户端配额；
-# 客户端自带 Key 的分析直接请求模型，不经过服务端。
 ai_analysis_per_token_per_day = 60
 # 同一 (事件, 方法) 两次生成之间的最小间隔；窗口内的重试直接返回上一次结果。
 ai_regenerate_cooldown_seconds = 600
