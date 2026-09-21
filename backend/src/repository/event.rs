@@ -463,4 +463,39 @@ impl EventRepository {
         }
         Ok(())
     }
+
+    /// All events in the half-open UTC window `[start, end)`, regardless of status.
+    pub async fn in_range(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<EconomicEvent>, AppError> {
+        let rows = sqlx::query(
+            "SELECT * FROM economic_event WHERE event_time >= ? AND event_time < ? ORDER BY event_time ASC",
+        )
+        .bind(start.to_rfc3339())
+        .bind(end.to_rfc3339())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(event_from_row).collect()
+    }
+
+    /// Reclassifies past events that hold an actual value but can never advance again: the
+    /// watcher only reaches `release_timeout_minutes` back, so a release first seen through a
+    /// later calendar sync (e.g. after downtime) would otherwise stay `scheduled` forever.
+    /// Stored as historical, which is what client-side status recomputation already displays.
+    pub async fn reconcile_missed_releases(&self, cutoff: DateTime<Utc>) -> Result<u64, AppError> {
+        let result = sqlx::query(
+            r#"UPDATE economic_event
+                  SET status = 'historical', updated_at = ?
+                WHERE status IN ('scheduled', 'timeout', 'data_unavailable')
+                  AND actual IS NOT NULL
+                  AND event_time < ?"#,
+        )
+        .bind(Utc::now().to_rfc3339())
+        .bind(cutoff.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
 }

@@ -60,12 +60,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // `--check-ai` is a diagnostic that does not touch the database, so it is intercepted
     // before the backfill range parser (which would reject the flag).
     let check_ai = args.iter().any(|arg| arg == "--check-ai");
+    let repair_market = args.first().is_some_and(|arg| arg == "--repair-market");
     let history_range = if args.is_empty() || check_ai {
         None
+    } else if repair_market {
+        Some(BackfillRange::from_repair_args(&args, chrono::Utc::now())?)
     } else {
         Some(BackfillRange::from_args(&args, chrono::Utc::now())?)
     };
-    let history_key = if history_range.is_some() {
+    // The local repair reads events from the database and never calls the TradingEconomics
+    // calendar, so only a calendar backfill requires its key.
+    let history_key = if history_range.is_some() && !repair_market {
         Some(
             config::require_secret(&config.backfill.te_api_key, "backfill.te_api_key")
                 .map_err(|error| error.to_string())?,
@@ -117,6 +122,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let market = MarketRepository::new(pool.clone());
     let backfill = BackfillRepository::new(pool.clone());
     let analyses = AnalysisRepository::new(pool.clone());
+
+    // A release first seen through a later calendar sync (e.g. after downtime) can never
+    // re-enter the watch window; reclassify those rows before the scheduler loops start.
+    match events
+        .reconcile_missed_releases(
+            chrono::Utc::now()
+                - chrono::Duration::minutes(config.scheduler.release_timeout_minutes.max(0)),
+        )
+        .await
+    {
+        Ok(0) => {}
+        Ok(count) => tracing::info!(count, "missed releases reclassified as historical"),
+        Err(error) => tracing::warn!(%error, "missed-release reconciliation failed"),
+    }
 
     // Admin alerting: Telegram is optional, the rest of the server works without it.
     let telegram = if config.telegram.enabled {
@@ -318,24 +337,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if let Some(range) = history_range {
-        let provider = Arc::new(TradingEconomicsApiProvider::new(
-            client_for("tradingeconomics"),
-            &config.backfill.calendar_api_base_url,
-            history_key.unwrap(),
-        )?);
-        let mut service = BackfillService::new(
-            backfill,
-            provider,
-            events,
-            analyses,
-            market_service,
-            analysis_service,
-            Duration::from_millis(config.backfill.request_delay_ms.max(250)),
-        );
-        if let Some(translation) = translation_service {
-            service = service.with_translation(translation);
-        }
-        let summary = service.run(range).await?;
+        let request_delay = Duration::from_millis(config.backfill.request_delay_ms.max(250));
+        let service = if repair_market {
+            BackfillService::new_local(
+                backfill,
+                events,
+                analyses,
+                market_service,
+                analysis_service,
+                request_delay,
+            )
+        } else {
+            let provider = Arc::new(TradingEconomicsApiProvider::new(
+                client_for("tradingeconomics"),
+                &config.backfill.calendar_api_base_url,
+                history_key.unwrap(),
+            )?);
+            let mut service = BackfillService::new(
+                backfill,
+                provider,
+                events,
+                analyses,
+                market_service,
+                analysis_service,
+                request_delay,
+            );
+            if let Some(translation) = translation_service {
+                service = service.with_translation(translation);
+            }
+            service
+        };
+        let summary = if repair_market {
+            service.repair_local(range).await?
+        } else {
+            service.run(range).await?
+        };
         println!("{}", serde_json::to_string_pretty(&summary)?);
         if summary.status != "complete" {
             return Err("Historical import is partial; inspect /api/v1/history/backfill and analysis historical.coverage before using the data".into());

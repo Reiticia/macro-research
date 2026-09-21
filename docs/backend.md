@@ -178,6 +178,11 @@ status, timeExact}`，宏观数值以字符串返回以避免浮点误差。`sta
 `scheduled | data_unavailable | released | collecting_market_data | analyzing | completed |
 historical`。
 
+启动时服务会把「已有公布值、已超出监视窗口、但状态仍停留在
+`scheduled / timeout / data_unavailable`」的事件批量改为 `historical`：这些事件不可能再
+进入监视（例如停机期间公布、之后由日历同步补到数值），客户端本就把它们显示为历史事件。
+窗口内的 `scheduled` 事件不受影响，仍由监视器接管。
+
 WebSocket 消息：
 
 ```json
@@ -458,6 +463,18 @@ cargo run -- --backfill 2026-06-08 2026-09-07
 
 服务端自上线起持续采集并保留全部历史；补采只用于补齐上线之前的数据，重跑会跳过完整日期、
 重试失败日期，事件与行情按唯一键幂等入库（见 `backend/tests/historical_backfill.rs`）。
+
+本地市场数据修复（`--repair-market`）事件取本地库，不需要 TE key，也不会插入重复事件：
+
+```bash
+cargo run -- --repair-market 2026-09-16 2026-09-18   # 单日可只写一个日期
+```
+
+用于修复「已公布但没有任何市场证据」的本地事件：停机错过监视窗口、或实况采集窗口内行情全部
+失败。处理条件：`timeExact`、+60 分钟窗口已结束；已有实况反应的报告与实况流水线中的事件
+一律跳过。空壳报告与历史证据会被重建，失败日期重跑时自动重试缺失窗口（见
+`backend/tests/market_repair.rs`）。修复后报告带 HistoricalEvidence，事件状态落
+`historical`；分钟级实况快照不可复活，客户端改以反应基准价展示。
 
 ### 数据真实性与覆盖范围
 

@@ -63,11 +63,33 @@ impl BackfillRange {
             )),
         }
     }
+
+    /// `--repair-market YYYY-MM-DD [YYYY-MM-DD]`: one explicit day or an ordered range.
+    pub fn from_repair_args(args: &[String], now: DateTime<Utc>) -> Result<Self, AppError> {
+        let parse = |v: &str| {
+            NaiveDate::parse_from_str(v, "%Y-%m-%d")
+                .map_err(|_| AppError::InvalidRequest("expected YYYY-MM-DD".into()))
+        };
+        match args {
+            [flag, from] if flag == "--repair-market" => {
+                let from = parse(from)?;
+                Self { from, to: from }.validate(now)
+            }
+            [flag, from, to] if flag == "--repair-market" => Self {
+                from: parse(from)?,
+                to: parse(to)?,
+            }
+            .validate(now),
+            _ => Err(AppError::InvalidRequest(
+                "usage: --repair-market YYYY-MM-DD [YYYY-MM-DD]".into(),
+            )),
+        }
+    }
 }
 
 pub struct BackfillService {
     pub repository: BackfillRepository,
-    calendar: Arc<dyn CalendarProvider>,
+    calendar: Option<Arc<dyn CalendarProvider>>,
     events: EventRepository,
     analyses: AnalysisRepository,
     market: Arc<MarketService>,
@@ -88,7 +110,29 @@ impl BackfillService {
     ) -> Self {
         Self {
             repository,
-            calendar,
+            calendar: Some(calendar),
+            events,
+            analyses,
+            market,
+            analysis,
+            request_delay,
+            translation: None,
+        }
+    }
+
+    /// Local-event market repair: the same candle pipeline, but events come from the database,
+    /// so no TradingEconomics key is needed and no duplicate provider rows can appear.
+    pub fn new_local(
+        repository: BackfillRepository,
+        events: EventRepository,
+        analyses: AnalysisRepository,
+        market: Arc<MarketService>,
+        analysis: Arc<AnalysisService>,
+        request_delay: StdDuration,
+    ) -> Self {
+        Self {
+            repository,
+            calendar: None,
             events,
             analyses,
             market,
@@ -163,12 +207,191 @@ impl BackfillService {
         Ok(())
     }
 
-    async fn run_day(&self, run: i64, date: NaiveDate) -> Result<(), AppError> {
+    /// Repairs local events whose release never gained market evidence: the watch window was
+    /// missed (e.g. downtime) or every live quote failed. Only live reports with real reactions
+    /// are kept; everything else is (re)built, so reruns heal days that stayed partial.
+    pub async fn repair_local(&self, range: BackfillRange) -> Result<BackfillSummary, AppError> {
+        if self.market.symbols().is_empty() {
+            return Err(AppError::Config(
+                "market repair requires at least one configured market symbol".into(),
+            ));
+        }
+        let range = range.validate(Utc::now())?;
+        let id = self.repository.begin(range.from, range.to).await?;
+        let result = tokio::select! {
+            result = self.repair_days(id, range) => result,
+            _ = tokio::signal::ctrl_c() => Err(AppError::Internal("market repair cancelled; rerun the same range to resume".into())),
+        };
+        match result {
+            Ok(()) => {
+                let s = self.repository.summary(id).await?;
+                let status = if s.days_failed > 0 || s.days_partial > 0 {
+                    "partial"
+                } else {
+                    "complete"
+                };
+                self.repository.finish(id, status, None).await?;
+                self.repository.summary(id).await
+            }
+            Err(error) => {
+                self.repository
+                    .finish(id, "failed", Some(&error.to_string()))
+                    .await?;
+                Err(error)
+            }
+        }
+    }
+
+    async fn repair_days(&self, id: i64, range: BackfillRange) -> Result<(), AppError> {
+        let mut date = range.from;
+        while date <= range.to {
+            if !self.repository.day_complete(id, date).await? {
+                match self.repair_day(id, date).await {
+                    Ok(()) => (),
+                    Err(error) => {
+                        self.repository
+                            .save_day(id, date, "failed", 0, 0, Some(&error.to_string()))
+                            .await?;
+                        tracing::warn!(run_id=id, %date, %error, "market repair day failed");
+                        if matches!(error, AppError::Database(_)) {
+                            return Err(error);
+                        }
+                    }
+                }
+            }
+            date = date
+                .succ_opt()
+                .ok_or_else(|| AppError::InvalidRequest("date overflow".into()))?;
+        }
+        Ok(())
+    }
+
+    async fn repair_day(&self, run: i64, date: NaiveDate) -> Result<(), AppError> {
         let start = date.and_hms_opt(0, 0, 0).unwrap().and_utc();
         let end = start + Duration::days(1);
-        let mut events = self
-            .request(|| self.calendar.fetch_events(start, end))
+        let now = Utc::now();
+        let mut ids = Vec::new();
+        for event in self.events.in_range(start, end).await? {
+            // Live rows are still collecting; approximate releases get no intraday reactions.
+            if matches!(
+                event.status,
+                EventStatus::Watching
+                    | EventStatus::Released
+                    | EventStatus::CollectingMarketData
+                    | EventStatus::Analyzing
+            ) || event.actual.is_none()
+                || !event.time_exact
+                || event.event_time + Duration::minutes(60) > now
+            {
+                continue;
+            }
+            match self.analyses.get(event.id).await {
+                // A live report with real reactions is evidence; keep it.
+                Ok(report)
+                    if report.historical.is_none() && !report.observed_reactions.is_empty() =>
+                {
+                    continue;
+                }
+                // Historical evidence is rebuilt on every attempt (a partial day must retry its
+                // missing windows), and an empty live shell is replaced outright.
+                Ok(_) => {}
+                Err(AppError::NotFound) => {}
+                Err(e) => return Err(e),
+            }
+            ids.push(event.id);
+        }
+        let count = ids.len();
+        self.repository
+            .save_day(run, date, "partial", count, 0, None)
             .await?;
+        // Same day+asset fetch window as calendar backfill: pre-release baseline and +60m.
+        let from = start - Duration::minutes(10);
+        let to = end + Duration::minutes(61);
+        let mut bars: HashMap<MarketSymbol, Result<(Interval, Vec<Candle>), String>> =
+            HashMap::new();
+        let mut last_error: Option<String> = None;
+        if !ids.is_empty() {
+            for &symbol in self.market.symbols() {
+                match self.fetch_day(symbol, from, to).await {
+                    Ok(Some(value)) => {
+                        bars.insert(symbol, Ok(value));
+                    }
+                    Ok(None) => {
+                        bars.insert(symbol, Err("retention_limit".into()));
+                    }
+                    Err(e) => {
+                        if matches!(e, AppError::Database(_)) {
+                            return Err(e);
+                        }
+                        tracing::warn!(%symbol, %date, error=%e, "repair market data unavailable");
+                        last_error = Some(e.to_string());
+                        bars.insert(symbol, Err("provider_error".into()));
+                    }
+                }
+                self.repository
+                    .save_day(run, date, "partial", count, 0, last_error.as_deref())
+                    .await?;
+            }
+        }
+        let mut complete = true;
+        let mut analyzed = 0;
+        for id in ids {
+            let event = self.events.get(id).await?;
+            let mut observed = Vec::new();
+            let mut coverage = Vec::new();
+            for &symbol in self.market.symbols() {
+                let entry = match &bars[&symbol] {
+                    Ok((interval, candles)) => {
+                        let (reaction, c) =
+                            reactions::calculate(id, event.event_time, symbol, *interval, candles);
+                        if let Some(r) = reaction {
+                            observed.push(r);
+                        }
+                        c
+                    }
+                    Err(reason) => {
+                        reactions::unavailable(symbol, reason, reason == "provider_error")
+                    }
+                };
+                complete &= entry.status == "complete";
+                coverage.push(entry);
+            }
+            let evidence = HistoricalEvidence {
+                fetched_at: Utc::now(),
+                revised_data_possible: true,
+                coverage,
+            };
+            self.analysis
+                .analyze_historical(id, observed, evidence)
+                .await?;
+            // The evidence is historical from here on, whatever the row was before.
+            self.events.set_status(id, EventStatus::Historical).await?;
+            analyzed += 1;
+            self.repository
+                .save_day(run, date, "partial", count, analyzed, last_error.as_deref())
+                .await?;
+        }
+        self.repository
+            .save_day(
+                run,
+                date,
+                if complete { "complete" } else { "partial" },
+                count,
+                analyzed,
+                last_error.as_deref(),
+            )
+            .await?;
+        tracing::info!(run_id=run, %date, events=count, analyses=analyzed, complete, "local market repair imported");
+        Ok(())
+    }
+
+    async fn run_day(&self, run: i64, date: NaiveDate) -> Result<(), AppError> {
+        let calendar = self.calendar.clone().ok_or_else(|| {
+            AppError::Config("calendar backfill requires [backfill] te_api_key".into())
+        })?;
+        let start = date.and_hms_opt(0, 0, 0).unwrap().and_utc();
+        let end = start + Duration::days(1);
+        let mut events = self.request(|| calendar.fetch_events(start, end)).await?;
         if events
             .iter()
             .any(|e| e.event_time < start || e.event_time >= end)
@@ -351,6 +574,12 @@ impl BackfillService {
                 "historical candle payload has invalid prices, symbols or timestamps; not cached"
                     .into(),
             ));
+        }
+        if bars.is_empty() {
+            // An empty payload is never recorded as a complete fetch: a transiently empty
+            // source would otherwise poison the window and block every retry. Genuine no-data
+            // windows (holidays) are simply re-requested on the next run.
+            return Ok(Some((interval, bars)));
         }
         self.repository
             .cache_candles(source, symbol, interval, from, to, &bars)
