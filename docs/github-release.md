@@ -3,7 +3,7 @@
 工作流：`.github/workflows/android-release.yml`。
 
 - **手动构建**：Actions → Android Release → Run workflow，选择分支或 Tag。成功后从该次运行的 `macro-research-release` Artifact 下载 APK，不创建 GitHub Release。
-- **Tag 构建**：推送任意 Tag 后自动测试、lint、构建签名 APK，并创建同名 GitHub Release，上传 APK 和 SHA-256 校验文件。
+- **Tag 构建**：推送 Tag 不会自动运行；在 Actions → Android Release 对该 Tag 手动 Run workflow 后，测试、lint、构建签名 APK，并创建同名 GitHub Release，上传 APK 和 SHA-256 校验文件。
 - 重跑已发布 Tag 的构建会覆盖同名附件，保留原 Release 说明。正式版本推荐使用新 Tag，避免覆盖已分发的安装包。
 
 ## 首次配置签名
@@ -53,6 +53,8 @@ Windows PowerShell 下编码到剪贴板（避免把私钥内容写入命令日�
 git tag -a v0.3.0 -m "Macro Research 0.3.0"
 git push origin v0.3.0
 ```
+
+推送 Tag 不会触发自动构建；随后到 **Actions → Android Release → Run workflow** 选择刚推送的 Tag 手动运行。
 
 工作流使用 JDK 17、Android SDK 和仓库内的 Gradle Wrapper，执行：
 

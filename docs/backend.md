@@ -583,9 +583,10 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 
 ### GitHub Actions
 
-`.github/workflows/backend-release.yml`：PR / 手动触发只验证 x86_64，推送 `v*` tag 时构建
-完整矩阵并发布 Release。不想依赖 Actions 时本地跑 `./scripts/build-release.sh`（支持
-`--musl`、`--target aarch64-unknown-linux-gnu`），产物在 `backend/dist/`。
+`.github/workflows/backend-release.yml`：PR 与手动触发都会构建验证 x86_64；推送分支或 Tag
+不再自动运行。要发布时在 Actions 对 `v*` tag 手动运行工作流，构建并创建 Release。不想依赖
+Actions 时本地跑 `./scripts/build-release.sh`（支持 `--musl`、`--target aarch64-unknown-linux-gnu`），
+产物在 `backend/dist/`。
 
 ## 验证
 

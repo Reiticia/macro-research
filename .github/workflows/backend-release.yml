@@ -1,9 +1,6 @@
 name: Backend build & release
 
 on:
-  push:
-    branches: [main, master]
-    tags: ["v*"]
   pull_request:
     paths:
       - "backend/**"
@@ -58,7 +55,7 @@ jobs:
 
   release:
     needs: build
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
