@@ -108,7 +108,6 @@ fn fixture_event(hours_from_now: i64) -> EconomicEvent {
 
 struct TestApp {
     state: AppState,
-    events: EventRepository,
 }
 
 async fn app() -> TestApp {
@@ -193,7 +192,7 @@ async fn app() -> TestApp {
         event_bus,
         backfill,
     };
-    TestApp { state, events }
+    TestApp { state }
 }
 
 fn request(method: &str, uri: &str, token: Option<&str>) -> Request<Body> {
@@ -260,6 +259,7 @@ async fn history_accepts_a_country_list() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
+#[tokio::test]
 async fn source_failures_escalate_only_after_the_threshold() {
     let app = app().await;
     let health = app.state.health.clone();
