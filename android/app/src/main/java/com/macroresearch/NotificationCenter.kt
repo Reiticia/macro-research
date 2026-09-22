@@ -12,10 +12,11 @@ import com.macroresearch.data.model.SocketEvent
 import java.util.Locale
 
 /**
- * Local notifications for pushed releases.
+ * Local notifications for followed events that are pushed after release.
  *
- * Only the backend WebSocket feeds this: there is no background service, so a notification
- * arrives while the app is running and the channel exists for that case alone.
+ * The caller filters out unstarred events. Only the backend WebSocket feeds this: there is no
+ * background service, so a notification arrives while the app is running and the channel exists
+ * for that case alone.
  */
 class NotificationCenter(private val context: Context) {
     private val manager = NotificationManagerCompat.from(context)

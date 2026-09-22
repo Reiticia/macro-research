@@ -139,7 +139,9 @@ class MacroApplication : Application() {
         notificationCenter = NotificationCenter(this)
         applicationScope.launch {
             backendSocket.events.collect { event ->
-                if (backendPreferences.settings.value.mode == DataSourceMode.BACKEND) {
+                if (backendPreferences.settings.value.mode == DataSourceMode.BACKEND &&
+                    event.eventId?.let { repository.isFollowed(it) } == true
+                ) {
                     notificationCenter.show(event)
                 }
             }
