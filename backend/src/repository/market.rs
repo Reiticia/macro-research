@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use chrono::Utc;
+use chrono::{Timelike, Utc};
 use sqlx::{Row, SqlitePool};
 
 use crate::{
@@ -21,15 +21,33 @@ impl MarketRepository {
     }
 
     pub async fn save_quote(&self, event_id: i64, quote: &Quote) -> Result<(), AppError> {
+        // Event timelines use one-minute OHLC bars. Keep collecting point quotes at the
+        // scheduler's higher frequency so the live cache remains independent, but merge all
+        // quotes from the same UTC minute into one persisted bar.
+        let timestamp = quote
+            .timestamp
+            .with_second(0)
+            .and_then(|value| value.with_nanosecond(0))
+            .ok_or_else(|| AppError::Internal("invalid quote timestamp".into()))?
+            .to_rfc3339();
         sqlx::query(
-            r#"INSERT INTO market_snapshot (event_id, symbol, timestamp, price, close, source)
-               VALUES (?, ?, ?, ?, ?, 'quote')
+            r#"INSERT INTO market_snapshot (
+                    event_id, symbol, timestamp, price, open, high, low, close, source
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'quote')
                ON CONFLICT(event_id, symbol, timestamp) DO UPDATE SET
-                 price = excluded.price, close = excluded.close, source = 'quote'"#,
+                 price = excluded.price,
+                 open = COALESCE(market_snapshot.open, excluded.open),
+                 high = MAX(COALESCE(market_snapshot.high, excluded.high), excluded.high),
+                 low = MIN(COALESCE(market_snapshot.low, excluded.low), excluded.low),
+                 close = excluded.close,
+                 source = 'quote'"#,
         )
         .bind(event_id)
         .bind(quote.symbol.as_str())
-        .bind(quote.timestamp.to_rfc3339())
+        .bind(timestamp)
+        .bind(quote.price)
+        .bind(quote.price)
+        .bind(quote.price)
         .bind(quote.price)
         .bind(quote.price)
         .execute(&self.pool)

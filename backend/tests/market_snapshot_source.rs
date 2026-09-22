@@ -34,6 +34,38 @@ fn candle(timestamp: chrono::DateTime<Utc>, close: f64) -> Candle {
 }
 
 #[tokio::test]
+async fn live_quotes_are_aggregated_into_one_minute_ohlc_bars() {
+    let repository = repository().await;
+    let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 10).unwrap();
+
+    for (seconds, price) in [(0, 101.0), (10, 99.0), (40, 100.0)] {
+        repository
+            .save_quote(
+                1,
+                &Quote {
+                    symbol: MarketSymbol::Gold,
+                    timestamp: base + chrono::Duration::seconds(seconds),
+                    price,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    let snapshots = repository.snapshots(1).await.unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(
+        snapshots[0].timestamp,
+        Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 0).unwrap()
+    );
+    assert_eq!(snapshots[0].price, 100.0);
+    assert_eq!(snapshots[0].open, Some(101.0));
+    assert_eq!(snapshots[0].high, Some(101.0));
+    assert_eq!(snapshots[0].low, Some(99.0));
+    assert_eq!(snapshots[0].close, Some(100.0));
+}
+
+#[tokio::test]
 async fn candles_do_not_overwrite_a_live_quote_at_the_same_timestamp() {
     let repository = repository().await;
     let time = Utc.with_ymd_and_hms(2026, 1, 1, 0, 1, 0).unwrap();

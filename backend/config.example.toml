@@ -38,6 +38,7 @@ calendar_sync_seconds = 43200
 watch_scan_seconds = 15
 watch_before_minutes = 5
 release_timeout_minutes = 30
+# 事件行情点价采样频率；后端会聚合成 1 分钟 OHLC，客户端实时行情另由 market.live_quote_refresh_seconds 控制。
 market_poll_seconds = 15
 market_collect_after_minutes = 60
 

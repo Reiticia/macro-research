@@ -5,6 +5,7 @@ use serde::Deserialize;
 use crate::error::AppError;
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
@@ -30,6 +31,7 @@ pub struct AppConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
@@ -68,11 +70,13 @@ impl ServerConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
     pub url: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CalendarConfig {
     /// TradingView's keyless economic calendar endpoint (primary source).
     #[serde(default = "default_tradingview_url")]
@@ -100,16 +104,20 @@ fn default_trading_economics_url() -> String {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SchedulerConfig {
     pub calendar_sync_seconds: u64,
     pub watch_scan_seconds: u64,
     pub watch_before_minutes: i64,
     pub release_timeout_minutes: i64,
+    /// Point-quote sampling cadence for event bars; persisted rows are aggregated to one minute.
+    /// This is independent from the client-facing live quote refresh cadence.
     pub market_poll_seconds: u64,
     pub market_collect_after_minutes: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MarketConfig {
     pub yahoo_base_url: String,
     pub binance_base_url: String,
@@ -149,7 +157,7 @@ fn default_live_quote_stale_seconds() -> u64 {
 /// Which upstreams must tunnel through `proxy_url`. Domestic hosts cannot reach the
 /// blocked calendar, rate and Telegram endpoints directly.
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct NetworkConfig {
     /// `http://127.0.0.1:7890` or `socks5://127.0.0.1:1080`. Empty means direct.
     pub proxy_url: String,
@@ -187,7 +195,7 @@ impl NetworkConfig {
 /// Token gate for every `/api/v1` route. The tokens live in this file; the deployment script
 /// writes them with `0640 root:market` permissions.
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct AuthConfig {
     pub enabled: bool,
     /// Access tokens as `name:token,name:token`, one name per device so the audit can tell
@@ -205,7 +213,7 @@ impl Default for AuthConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct TranslationConfig {
     pub enabled: bool,
     /// OpenAI-compatible endpoint. A relay may be written as `https://relay/v1` or as the
@@ -242,10 +250,10 @@ impl Default for TranslationConfig {
     }
 }
 
-/// Server-side AI market briefing. The API key is read from the named environment
-/// variable, never from this file or the database.
+/// Server-side AI market briefing. The API key is read from this configuration file and
+/// never from the database.
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct AiConfig {
     pub enabled: bool,
     /// OpenAI-compatible endpoint; `https://relay/v1` and the full
@@ -313,7 +321,7 @@ pub fn require_secret(value: &str, what: &str) -> Result<String, AppError> {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct TelegramConfig {
     pub enabled: bool,
     pub api_base: String,
@@ -352,7 +360,7 @@ impl TelegramConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct AlertConfig {
     pub failure_threshold: u32,
     pub cooldown_seconds: i64,
@@ -379,7 +387,7 @@ impl Default for AlertConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct LimitConfig {
     pub ai_analysis_per_token_per_day: u32,
     /// Minimum seconds between two generations of the same (event, method). A caller inside the
@@ -402,7 +410,7 @@ impl Default for LimitConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct BackfillConfig {
     pub calendar_api_base_url: String,
     pub request_delay_ms: u64,
@@ -545,7 +553,7 @@ market_collect_after_minutes = 60
         // The rules file is looked up next to the configuration file.
         assert_eq!(config.dir(&path), dir);
 
-        // Credentials resolve from the file, and an environment override wins.
+        // Credentials resolve from the configuration file.
         assert_eq!(
             TokenStore::from_config(&config.auth)
                 .unwrap()
@@ -567,5 +575,19 @@ market_collect_after_minutes = 60
         let config = TranslationConfig::default();
         let error = config.api_key().unwrap_err().to_string();
         assert!(error.contains("translation.api_key"), "{error}");
+    }
+
+    #[test]
+    fn unknown_market_options_are_rejected() {
+        let error = toml::from_str::<MarketConfig>(
+            r#"
+            yahoo_base_url = "https://example.com"
+            binance_base_url = "https://example.com"
+            symbols = ["gold"]
+            live_quote_cache_seconds = 30
+            "#,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("unknown field"), "{error}");
     }
 }
