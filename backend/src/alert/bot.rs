@@ -23,6 +23,9 @@ pub struct BotState {
 }
 
 pub async fn bot_loop(state: BotState) {
+    if let Err(error) = state.telegram.set_admin_commands(&state.chat_ids).await {
+        tracing::warn!(%error, "Telegram command menu registration failed; polling will continue");
+    }
     loop {
         let offset = read_offset(&state.pool).await.unwrap_or(0);
         let updates = match state
@@ -140,7 +143,7 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
         "/status" => status_text(state).await?,
         "/usage" => usage_text(state).await?,
         "/help" | "/start" => {
-            "可用命令：\n/status 数据源健康\n/usage 近 24 小时模型用量\n/help 帮助".to_owned()
+            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
         }
         _ => return Ok(()),
     };

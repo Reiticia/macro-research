@@ -38,6 +38,41 @@ impl TelegramClient {
         format!("{}/bot{}/{}", self.api_base, self.token, method)
     }
 
+    /// Registers the administrator command menu for each whitelisted chat. Telegram clients show
+    /// these commands when an admin types `/`, while non-whitelisted chats receive no menu.
+    pub async fn set_admin_commands(&self, chat_ids: &[i64]) -> Result<(), AppError> {
+        if chat_ids.is_empty() {
+            return Ok(());
+        }
+        let commands = json!([
+            {"command": "status", "description": "查看数据源健康状态"},
+            {"command": "usage", "description": "查看近24小时模型用量"},
+            {"command": "help", "description": "查看管理员帮助"},
+            {"command": "start", "description": "打开管理员菜单"}
+        ]);
+        for chat_id in chat_ids {
+            let response = self
+                .client
+                .post(self.url("setMyCommands"))
+                .json(&json!({
+                    "commands": commands.clone(),
+                    "scope": {"type": "chat", "chat_id": chat_id}
+                }))
+                .send()
+                .await?;
+            let body: Value = response.json().await?;
+            if body.get("ok").and_then(Value::as_bool) != Some(true) {
+                return Err(AppError::Provider(format!(
+                    "Telegram setMyCommands failed: {}",
+                    body.get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown error")
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Sends a message and returns its `message_id` when Telegram accepted it.
     pub async fn send_message(
         &self,
