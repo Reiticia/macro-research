@@ -5,8 +5,6 @@ import com.macroresearch.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -19,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.data.model.currentStatus
@@ -28,7 +27,6 @@ import com.macroresearch.ui.theme.Dovish
 import com.macroresearch.ui.theme.Upcoming
 import com.macroresearch.ui.theme.ResearchLayout
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EventCard(
     event: EconomicEvent,
@@ -48,26 +46,46 @@ fun EventCard(
             modifier = Modifier.padding(ResearchLayout.cardPadding),
             verticalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap),
         ) {
-            FlowRow(
+            Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                maxItemsInEachRow = if (ResearchLayout.stackMetadata) 1 else 2,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Lists that span several days (history) need the date; day views already show it in the header.
                 val timestamp = if (showDate) "${event.localizedShortDate()}  ${event.localTime()}" else event.localTime()
-                Text("$timestamp  ${flag(event.country)}  ${countryLabel(event.country)}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "$timestamp  ${flag(event.country)}  ${countryLabel(event.country)}",
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 Text(statusLabel(status), color = statusColor(status), style = MaterialTheme.typography.labelMedium)
             }
             Text(event.localizedName(LocalConfiguration.current.locales[0]), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             if (event.actual == null) {
-                FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(stringResource(R.string.previous_value, event.localizedValue(event.previous)), style = MaterialTheme.typography.bodyMedium)
-                    Text(stringResource(R.string.consensus_value, event.localizedValue(event.consensus)), style = MaterialTheme.typography.bodyMedium)
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.previous_value, event.localizedValue(event.previous)),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            stringResource(R.string.consensus_value, event.localizedValue(event.consensus)),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                     ImportanceDots(event.importance)
                 }
             } else {

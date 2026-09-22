@@ -38,7 +38,9 @@ fun FollowedEventsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(padding),
+            // TopAppBar consumes the status-bar inset itself; applying the outer top padding too
+            // would leave an empty strip above the toolbar.
+            .padding(bottom = padding.calculateBottomPadding()),
     ) {
         TopAppBar(
             title = { Text(stringResource(R.string.followed_events)) },
