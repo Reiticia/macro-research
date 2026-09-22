@@ -16,8 +16,10 @@
 | `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
 | `ANDROID_KEY_ALIAS` | 签名密钥别名 |
 | `ANDROID_KEY_PASSWORD` | 该别名对应的密钥密码 |
+| `GOOGLE_SERVICES_JSON_BASE64` | `android/app/google-services.json` 的 Base64 编码 |
 
-两种构建方式都需要配置全部四项；缺少任意一项会明确报错，而不是发布无法安装的 unsigned APK。
+两种构建方式都需要配置全部五项；缺少任意一项会明确报错，而不是发布无法安装的 unsigned APK。
+`GOOGLE_SERVICES_JSON_BASE64` 用于在 runner 临时恢复 Firebase 配置，构建结束时自动删除。
 
 如果已有正式签名密钥，请继续使用同一份并安全备份。**不要为每次构建生成新密钥**，否则旧版本无法被新版本覆盖安装。不要把 keystore 或密码提交到仓库。
 
@@ -42,6 +44,21 @@ Windows PowerShell 下编码到剪贴板（避免把私钥内容写入命令日�
 ```
 
 将结果粘贴为 `ANDROID_KEYSTORE_BASE64` Secret，其他三项填写对应值。签名文件在 runner 临时目录创建，构建步骤退出时删除，不上传为附件。
+
+## Firebase 配置
+
+在 Firebase 控制台为包名 `com.macroresearch` 添加 Android 应用并下载
+`google-services.json`。不要提交该文件；将它编码为仓库 Secret：
+
+```powershell
+[Convert]::ToBase64String(
+  [IO.File]::ReadAllBytes("android/app/google-services.json")
+) | Set-Clipboard
+```
+
+将剪贴板内容保存为 `GOOGLE_SERVICES_JSON_BASE64`。工作流会在 `android/app/` 临时恢复该文件，
+启用 Google Services 插件并在构建结束时删除。后端使用的 Firebase service-account JSON 是另一份
+包含私钥的文件，不能放入 Android Secret 或 GitHub 仓库。
 
 ## 发布版本
 
