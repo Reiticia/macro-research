@@ -109,6 +109,15 @@ async fn release(state: &AppState, event: &EconomicEvent) -> Result<(), crate::e
         actual: event.actual.map(|value| value.to_string()),
         consensus: event.consensus.map(|value| value.to_string()),
     });
+    if let Some(fcm) = &state.fcm {
+        let fcm = fcm.clone();
+        let event = event.clone();
+        tokio::spawn(async move {
+            if let Err(error) = fcm.send_release(&event).await {
+                tracing::warn!(event_id = event.id, %error, "FCM release notification failed");
+            }
+        });
+    }
     tracing::info!(event_id = event.id, event = %event.event, "economic event released");
     Ok(())
 }

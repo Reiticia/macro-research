@@ -99,6 +99,9 @@ interface EventDao {
     @Query("SELECT EXISTS(SELECT 1 FROM followed_event WHERE eventId = :eventId)")
     suspend fun isFollowed(eventId: Long): Boolean
 
+    @Query("SELECT eventId FROM followed_event ORDER BY followedAt")
+    suspend fun followedEventIds(): List<Long>
+
     @Upsert
     suspend fun follow(event: FollowedEventEntity)
 

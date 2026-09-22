@@ -18,9 +18,9 @@ import com.macroresearch.data.TranslationPreferences
 import com.macroresearch.data.local.MacroDatabase
 import com.macroresearch.data.remote.AiAnalysisClient
 import com.macroresearch.data.remote.BackendClient
-import com.macroresearch.data.remote.BackendSocket
 import com.macroresearch.data.remote.DirectMarketClient
 import com.macroresearch.data.remote.EconomicCalendarClient
+import com.macroresearch.data.remote.PushTopicManager
 import com.macroresearch.data.remote.TranslationClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,8 +34,6 @@ import java.util.concurrent.TimeUnit
 
 class MacroApplication : Application() {
     lateinit var repository: MacroRepository
-        private set
-    lateinit var backendSocket: BackendSocket
         private set
     lateinit var notificationCenter: NotificationCenter
         private set
@@ -109,6 +107,7 @@ class MacroApplication : Application() {
         )
         val marketClient = DirectMarketClient(http, proxy = networkPreferences::proxy)
         val aiAnalysisClient = AiAnalysisClient(translationHttp, gson)
+        val pushTopicManager = PushTopicManager()
         repository = MacroRepository(
             directSource = DirectDataSource(
                 calendarClient = calendarClient,
@@ -129,34 +128,27 @@ class MacroApplication : Application() {
             countryPreferences = CountryPreferences(this),
             marketPreferences = MarketPreferences(this),
             translationPreferences = translationPreferences,
-        )
-        backendSocket = BackendSocket(
-            client = backendHttp,
-            gson = gson,
-            urlProvider = backendClient::webSocketUrl,
-            tokenProvider = backendPreferences::token,
+            pushTopicManager = pushTopicManager,
         )
         notificationCenter = NotificationCenter(this)
-        applicationScope.launch {
-            backendSocket.events.collect { event ->
-                if (backendPreferences.settings.value.mode == DataSourceMode.BACKEND &&
-                    event.eventId?.let { repository.isFollowed(it) } == true
-                ) {
-                    notificationCenter.show(event)
-                }
-            }
-        }
     }
 
-    /** Opens the push channel; a no-op in direct mode, where no server exists. */
+    /** Reconciles the local star list with FCM topics when backend mode becomes active. */
     fun startBackendPush() {
         if (backendPreferences.settings.value.mode == DataSourceMode.BACKEND) {
-            backendSocket.connect()
+            applicationScope.launch { repository.synchronizePushTopics() }
         }
     }
 
-    fun stopBackendPush() {
-        backendSocket.close()
+    /** FCM subscriptions are process-independent; there is no foreground socket to close. */
+    fun stopBackendPush() = Unit
+
+    fun showPushEventIfFollowed(event: com.macroresearch.data.model.SocketEvent) {
+        applicationScope.launch {
+            if (usesBackend() && event.eventId?.let { repository.isFollowed(it) } == true) {
+                notificationCenter.show(event)
+            }
+        }
     }
 
     /** True when the user selected the self-hosted backend as the data source. */

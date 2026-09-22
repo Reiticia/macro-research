@@ -68,6 +68,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
     implementation("androidx.navigation:navigation-compose:2.9.0")
 
+    implementation(platform("com.google.firebase:firebase-bom:33.15.0"))
+    implementation("com.google.firebase:firebase-messaging")
+
     implementation("com.google.code.gson:gson:2.13.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
@@ -85,5 +88,11 @@ dependencies {
 kapt {
     correctErrorTypes = true
     arguments { arg("room.schemaLocation", "$projectDir/schemas") }
+}
+
+// Keep local builds working before Firebase credentials are provisioned. A real
+// google-services.json enables the plugin and supplies the Firebase app resources.
+if (file("google-services.json").isFile) {
+    apply(plugin = "com.google.gms.google-services")
 }
 

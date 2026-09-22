@@ -151,6 +151,7 @@ class EventReleaseRefreshTest {
         override suspend fun clearFollows() = Unit
         override fun observeFollowed(eventId: Long): Flow<Boolean> = flowOf(false)
         override suspend fun isFollowed(eventId: Long) = false
+        override suspend fun followedEventIds() = emptyList<Long>()
         override suspend fun follow(event: FollowedEventEntity) = Unit
         override suspend fun unfollow(eventId: Long) = Unit
     }

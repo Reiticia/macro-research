@@ -1,6 +1,6 @@
 # Macro Research 后端
 
-自建的统一数据服务：上游抓取、缓存、规则与 AI 分析、事件名翻译、WebSocket 推送，
+自建的统一数据服务：上游抓取、缓存、规则与 AI 分析、事件名翻译、FCM/兼容 WebSocket 推送，
 以及数据源异常时的 Telegram 管理员告警。Android 客户端可以**直连公开数据源**，也可以
 **切到后端模式**只依赖这一个域名。
 
@@ -14,6 +14,7 @@ Android (direct | backend)
 │ AnalysisService         规则引擎 (rules.toml)                        │
 │ AiAnalysisService       服务端生成并缓存 AI 简报（3 种方法）         │
 │ TranslationService      事件名翻译 + 勘正审核                        │
+│ FcmNotifier             关注事件的后台推送                           │
 │ AlertService → Telegram 数据源告警 + 勘正按钮 + /status              │
 │ SQLite                  事件 / 观察 / 行情 / 分析 / 翻译 / 告警 / 配额│
 └─────────┬───────────────────────────────────────────────────────────┘
@@ -63,6 +64,11 @@ api_key = "sk-relay-…"
 [telegram]
 bot_token = "123456:ABC…"
 admin_chat_ids = "123456789"
+
+[fcm]
+enabled = false
+service_account_file = "/etc/market-analyzer/firebase-service-account.json"
+send_timeout_seconds = 10
 
 [backfill]
 te_api_key = ""                      # 仅 --backfill 需要
@@ -190,6 +196,27 @@ WebSocket 消息：
  "eventZhCn":"消费者价格指数同比","eventZhTw":"消費者價格指數同比",
  "actual":"3.2","consensus":"3.1"}
 ```
+
+## FCM 后台通知
+
+Android 后端模式下，事件详情页点击 ⭐ 会订阅 `macro_event_<eventId>` topic，取消关注时取消订阅。
+事件公布后，服务端通过 Firebase Cloud Messaging HTTP v1 向该 topic 发送 data-only 高优先级消息，
+只有关注该事件的设备会收到通知。Android 客户端负责按系统语言选择简体/繁体/英文标题，因此
+服务端消息同时携带 `event`、`eventZhCn` 和 `eventZhTw`。
+
+启用步骤：
+
+1. 在 Firebase 创建项目并添加包名 `com.macroresearch` 的 Android 应用，下载
+   `google-services.json` 到 `android/app/`；该文件不提交 Git。
+2. 在 Firebase/Google Cloud 服务账号页面生成服务账号 JSON 私钥，服务器用
+   `[fcm].service_account_file` 指向它。服务账号需要 Firebase Cloud Messaging API Admin 权限，
+   私钥文件放在仓库外并限制文件权限。
+3. 启用 `[fcm]` 后重启后端。FCM OAuth 与发送失败只产生 `push.fcm` 健康告警，不影响事件状态和
+   WebSocket 广播。
+
+FCM 默认关闭。Android 不再通过 WebSocket 显示通知，避免 FCM 与 WebSocket 重复提醒；后端仍保留
+WebSocket 供其他客户端兼容使用。没有 Google Play Services 的设备不保证 FCM 可用；用户拒绝
+Android 13+ 通知权限时消息可以到达但不会显示。
 
 ## 数据源与降级
 

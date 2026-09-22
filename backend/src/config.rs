@@ -21,6 +21,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub typesafe: TypeSafeConfig,
     #[serde(default)]
+    pub fcm: FcmConfig,
+    #[serde(default)]
     pub ai: AiConfig,
     #[serde(default)]
     pub telegram: TelegramConfig,
@@ -339,6 +341,26 @@ impl Default for TypeSafeConfig {
 impl TypeSafeConfig {
     pub fn api_key(&self) -> Result<String, AppError> {
         require_secret(&self.api_key, "typesafe.api_key")
+    }
+}
+
+/// Optional Firebase Cloud Messaging HTTP v1 sender.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FcmConfig {
+    pub enabled: bool,
+    /// External Google service-account JSON file. Never put the private key in this config.
+    pub service_account_file: String,
+    pub send_timeout_seconds: u64,
+}
+
+impl Default for FcmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            service_account_file: String::new(),
+            send_timeout_seconds: 10,
+        }
     }
 }
 

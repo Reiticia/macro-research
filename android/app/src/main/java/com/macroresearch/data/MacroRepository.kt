@@ -20,6 +20,7 @@ import com.macroresearch.data.remote.BackendException
 import com.macroresearch.data.remote.BackendMeta
 import com.macroresearch.data.remote.BackendUnauthorizedException
 import com.macroresearch.data.remote.EconomicCalendarClient
+import com.macroresearch.data.remote.PushTopicManager
 import com.macroresearch.data.remote.TranslationClient
 import com.macroresearch.data.remote.stableEventId
 import kotlinx.coroutines.CancellationException
@@ -72,6 +73,7 @@ class MacroRepository(
     private val countryPreferences: CountryPreferences,
     private val marketPreferences: MarketPreferences,
     private val translationPreferences: TranslationPreferences,
+    private val pushTopicManager: PushTopicManager,
 ) {
     val selectedCountries: StateFlow<Set<String>> = countryPreferences.selectedCountries
     val selectedMarkets: StateFlow<List<String>> = marketPreferences.selectedMarkets
@@ -109,7 +111,11 @@ class MacroRepository(
      * the event-derived cache is dropped. The caller must confirm this with the user first.
      */
     suspend fun setDataSourceMode(mode: DataSourceMode) {
-        if (mode == dataSourceSettings.value.mode) return
+        val previousMode = dataSourceSettings.value.mode
+        if (mode == previousMode) return
+        if (previousMode == DataSourceMode.BACKEND) {
+            pushTopicManager.unsubscribeAll(dao.followedEventIds())
+        }
         backendPreferences.setMode(mode)
         dao.clearCache()
         analysisDao.clearAll()
@@ -132,7 +138,15 @@ class MacroRepository(
         backendPreferences.clearVerification()
     }
 
-    fun clearBackendSettings() {
+    suspend fun clearBackendSettings() {
+        if (dataSourceSettings.value.mode == DataSourceMode.BACKEND) {
+            pushTopicManager.unsubscribeAll(dao.followedEventIds())
+            dao.clearCache()
+            analysisDao.clearAll()
+            marketCache.clear()
+            historySyncedAt = 0L
+            networkPreferences.clearUpcomingSync()
+        }
         backendPreferences.clear()
         backendPreferences.setMode(DataSourceMode.DIRECT)
     }
@@ -620,7 +634,23 @@ class MacroRepository(
     }
 
     suspend fun setFollowed(id: Long, followed: Boolean) {
-        if (followed) dao.follow(FollowedEventEntity(id)) else dao.unfollow(id)
+        if (followed) {
+            dao.follow(FollowedEventEntity(id))
+            if (dataSourceSettings.value.mode == DataSourceMode.BACKEND) {
+                pushTopicManager.subscribe(id)
+            }
+        } else {
+            dao.unfollow(id)
+            if (dataSourceSettings.value.mode == DataSourceMode.BACKEND) {
+                pushTopicManager.unsubscribe(id)
+            }
+        }
+    }
+
+    suspend fun synchronizePushTopics() {
+        if (dataSourceSettings.value.mode == DataSourceMode.BACKEND) {
+            pushTopicManager.synchronize(dao.followedEventIds())
+        }
     }
 
     fun setCountries(countries: Set<String>) = countryPreferences.setCountries(countries)

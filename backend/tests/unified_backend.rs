@@ -190,6 +190,7 @@ async fn app() -> TestApp {
         auth,
         quota,
         event_bus,
+        fcm: None,
         backfill,
     };
     TestApp { state }

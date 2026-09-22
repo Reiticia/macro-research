@@ -7,6 +7,7 @@ pub mod backfill;
 pub mod calendar;
 pub mod config;
 pub mod error;
+pub mod fcm;
 pub mod llm_usage;
 pub mod market;
 pub mod model;
@@ -47,5 +48,6 @@ pub struct AppState {
     pub auth: AuthState,
     pub quota: Arc<QuotaService>,
     pub event_bus: broadcast::Sender<AppEvent>,
+    pub fcm: Option<Arc<fcm::FcmNotifier>>,
     pub backfill: backfill::repository::BackfillRepository,
 }

@@ -21,6 +21,7 @@ use market_event_analyzer::{
         CalendarService, ForexFactoryProvider, TradingEconomicsApiProvider, TradingViewProvider,
     },
     config::{self, AppConfig},
+    fcm::FcmNotifier,
     llm_usage::LlmUsageRepository,
     market::{BinanceProvider, BiquoteProvider, CnbcProvider, MarketService, YahooProvider},
     model::MarketSymbol,
@@ -171,6 +172,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.alerts.failure_threshold,
         config.alerts.cooldown_seconds,
     ));
+
+    let fcm = if config.fcm.enabled {
+        let configured_path = config.fcm.service_account_file.trim();
+        if configured_path.is_empty() {
+            tracing::warn!("FCM enabled but fcm.service_account_file is empty; FCM disabled");
+            None
+        } else {
+            let path = Path::new(configured_path);
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                config_dir.join(path)
+            };
+            match FcmNotifier::from_file(
+                client_for("fcm"),
+                &path,
+                Duration::from_secs(config.fcm.send_timeout_seconds.max(5)),
+            ) {
+                Ok(notifier) => Some(Arc::new(notifier.with_health(health.clone()))),
+                Err(error) => {
+                    tracing::warn!(%error, "FCM disabled because the service account could not be loaded");
+                    None
+                }
+            }
+        }
+    } else {
+        None
+    };
 
     // Model-call audit log. Built before every model user so both paths can record into it.
     let llm_usage = if config.limits.llm_usage_retention_days > 0 {
@@ -424,6 +453,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth,
         quota,
         event_bus,
+        fcm: fcm.clone(),
         backfill,
     };
 

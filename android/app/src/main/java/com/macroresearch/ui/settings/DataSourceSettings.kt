@@ -185,11 +185,13 @@ fun DataSourceSettings(repository: MacroRepository) {
                     TextButton(
                         enabled = !busy,
                         onClick = {
-                            repository.clearBackendSettings()
-                            baseUrl = ""
-                            token = ""
-                            status = null
-                            error = null
+                            scope.launch {
+                                repository.clearBackendSettings()
+                                baseUrl = ""
+                                token = ""
+                                status = null
+                                error = null
+                            }
                         },
                     ) { Text(stringResource(R.string.backend_clear)) }
                     Button(
