@@ -243,7 +243,9 @@ class MacroRepository(
         // Days follow the device zone so the refresh window matches the times shown on cards.
         val today = LocalDate.now()
         val events = try {
-            fetchCalendar(today.minusDays(1), today.plusDays(days.toLong()))
+            val result = source.upcoming(days)
+            publishWarning(result.warning)
+            result.events
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {

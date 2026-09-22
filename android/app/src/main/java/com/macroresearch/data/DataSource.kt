@@ -41,6 +41,12 @@ interface DataSource {
         countryCodes: Collection<String>? = null,
     ): CalendarFetchResult
 
+    /** Smaller upcoming-only query used by the home screen when the backend can provide it. */
+    suspend fun upcoming(days: Int): CalendarFetchResult {
+        val today = LocalDate.now()
+        return calendar(today, today.plusDays(days.toLong()))
+    }
+
     /** Remote history page. Direct mode reads the local cache instead. */
     suspend fun history(
         countries: Collection<String>,
@@ -100,6 +106,11 @@ class DirectDataSource(
         end: LocalDate,
         countryCodes: Collection<String>?,
     ): CalendarFetchResult = calendarClient.fetch(start, end, countryCodes)
+
+    override suspend fun upcoming(days: Int): CalendarFetchResult {
+        val today = LocalDate.now()
+        return calendarClient.fetch(today, today.plusDays(days.toLong()))
+    }
 
     override suspend fun history(
         countries: Collection<String>,
@@ -184,6 +195,9 @@ class BackendDataSource(
             .filter { countryCodes.isNullOrEmpty() || it.country in countryCodes }
         return CalendarFetchResult(events)
     }
+
+    override suspend fun upcoming(days: Int): CalendarFetchResult =
+        CalendarFetchResult(client.upcoming(days))
 
     override suspend fun history(
         countries: Collection<String>,
