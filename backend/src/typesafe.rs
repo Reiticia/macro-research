@@ -116,7 +116,7 @@ impl TypeSafeVerifier {
         let root: Value = serde_json::from_str(&text).map_err(|error| {
             AppError::Provider(format!("TypeSafe returned invalid JSON: {error}"))
         })?;
-        let usage = TokenUsage::from_response(&root);
+        let usage = typesafe_usage(&root);
         Ok((root, usage))
     }
 }
@@ -170,6 +170,31 @@ fn system_one_endpoint(base_url: &str) -> Result<String, AppError> {
         Ok(format!("{base}/systemone"))
     } else {
         Ok(format!("{base}/v1/systemone"))
+    }
+}
+
+fn typesafe_usage(root: &Value) -> TokenUsage {
+    let standard = TokenUsage::from_response(root);
+    let usage = root.get("usage").unwrap_or(&Value::Null);
+    let input = usage.get("input_tokens").and_then(as_i64);
+    let output = usage.get("output_tokens").and_then(as_i64);
+    TokenUsage {
+        prompt_tokens: standard.prompt_tokens.or(input),
+        completion_tokens: standard.completion_tokens.or(output),
+        total_tokens: standard.total_tokens.or_else(|| match (input, output) {
+            (Some(input), Some(output)) => Some(input + output),
+            _ => None,
+        }),
+        reasoning_tokens: standard.reasoning_tokens,
+        cached_tokens: standard.cached_tokens,
+    }
+}
+
+fn as_i64(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number.as_i64(),
+        Value::String(text) => text.trim().parse().ok(),
+        _ => None,
     }
 }
 
@@ -285,5 +310,22 @@ mod tests {
         let verdicts = parse_verdicts(&root, &[translation()], 0.85).unwrap();
         assert!(verdicts[0].approved);
         assert!(verdicts[0].reason.is_none());
+    }
+
+    #[test]
+    fn parses_typesafe_usage_fields() {
+        let root = json!({
+            "usage": {"input_tokens": 368, "output_tokens": 22}
+        });
+        assert_eq!(
+            typesafe_usage(&root),
+            TokenUsage {
+                prompt_tokens: Some(368),
+                completion_tokens: Some(22),
+                total_tokens: Some(390),
+                reasoning_tokens: None,
+                cached_tokens: None,
+            }
+        );
     }
 }
