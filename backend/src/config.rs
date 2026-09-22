@@ -19,6 +19,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub translation: TranslationConfig,
     #[serde(default)]
+    pub typesafe: TypeSafeConfig,
+    #[serde(default)]
     pub ai: AiConfig,
     #[serde(default)]
     pub telegram: TelegramConfig,
@@ -306,6 +308,37 @@ impl TranslationConfig {
 impl AiConfig {
     pub fn api_key(&self) -> Result<String, AppError> {
         require_secret(&self.api_key, "ai.api_key")
+    }
+}
+
+/// Optional TypeSafe System One verifier used to proofread generated translations.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TypeSafeConfig {
+    pub enabled: bool,
+    /// API root, normally `https://api.typesafe.ai`.
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    /// Minimum Noul probability required to accept a translation.
+    pub review_threshold: f64,
+}
+
+impl Default for TypeSafeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: "https://api.typesafe.ai".into(),
+            api_key: String::new(),
+            model: "jev-latest".into(),
+            review_threshold: 0.85,
+        }
+    }
+}
+
+impl TypeSafeConfig {
+    pub fn api_key(&self) -> Result<String, AppError> {
+        require_secret(&self.api_key, "typesafe.api_key")
     }
 }
 

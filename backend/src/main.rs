@@ -28,6 +28,7 @@ use market_event_analyzer::{
     repository::{AnalysisRepository, EventRepository, MarketRepository},
     scheduler,
     translation::{EventNameTranslator, OpenAiEventNameTranslator, TranslationService},
+    typesafe::TypeSafeVerifier,
 };
 use sqlx::{
     SqlitePool,
@@ -203,15 +204,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     )?
                     .with_audit_opt(llm_usage.clone()),
                 );
-                Some(Arc::new(
-                    TranslationService::new(
-                        events.clone(),
-                        translator,
-                        config.translation.batch_size,
-                    )
-                    .with_max_rounds(config.translation.max_rounds)
-                    .with_health(health.clone()),
-                ))
+                let typesafe_verifier = if config.typesafe.enabled {
+                    match config.typesafe.api_key() {
+                        Ok(typesafe_key) => match TypeSafeVerifier::new(
+                            client_for("typesafe"),
+                            &config.typesafe.base_url,
+                            typesafe_key,
+                            config.typesafe.model.clone(),
+                            config.typesafe.review_threshold,
+                        ) {
+                            Ok(verifier) => Some(Arc::new(
+                                verifier
+                                    .with_audit_opt(llm_usage.clone())
+                                    .with_health(health.clone()),
+                            )),
+                            Err(error) => {
+                                tracing::warn!(%error, "TypeSafe translation verifier disabled");
+                                None
+                            }
+                        },
+                        Err(error) => {
+                            tracing::warn!(%error, "TypeSafe translation verifier disabled");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                let mut service = TranslationService::new(
+                    events.clone(),
+                    translator,
+                    config.translation.batch_size,
+                )
+                .with_max_rounds(config.translation.max_rounds)
+                .with_health(health.clone());
+                if let Some(verifier) = typesafe_verifier {
+                    service = service.with_verifier(verifier);
+                }
+                Some(Arc::new(service))
             }
             Err(error) => {
                 tracing::warn!(%error, "translation disabled");

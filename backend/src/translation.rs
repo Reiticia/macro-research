@@ -46,6 +46,15 @@ pub struct TranslationVerdict {
 }
 
 #[async_trait]
+pub trait TranslationVerifier: Send + Sync {
+    /// Proofreads generated translations and reports which ones are acceptable.
+    async fn verify(
+        &self,
+        translations: &[EventNameTranslation],
+    ) -> Result<Vec<TranslationVerdict>, AppError>;
+}
+
+#[async_trait]
 pub trait EventNameTranslator: Send + Sync {
     /// Translates `event_names`; `revisions` carries the reviewer's notes for a retry round.
     async fn translate(
@@ -560,6 +569,7 @@ pub struct TranslationService {
     max_rounds: usize,
     lock: Arc<Mutex<()>>,
     health: Option<Arc<HealthRegistry>>,
+    verifier: Option<Arc<dyn TranslationVerifier>>,
 }
 
 impl TranslationService {
@@ -575,7 +585,13 @@ impl TranslationService {
             max_rounds: 3,
             lock: Arc::new(Mutex::new(())),
             health: None,
+            verifier: None,
         }
+    }
+
+    pub fn with_verifier(mut self, verifier: Arc<dyn TranslationVerifier>) -> Self {
+        self.verifier = Some(verifier);
+        self
     }
 
     /// Rounds of "translate, review, retry the rejected ones".
@@ -696,7 +712,11 @@ impl TranslationService {
                     return Err(error);
                 }
             };
-            let verdicts = match self.translator.verify(&translated).await {
+            let verification = match &self.verifier {
+                Some(verifier) => verifier.verify(&translated).await,
+                None => self.translator.verify(&translated).await,
+            };
+            let verdicts = match verification {
                 Ok(verdicts) => verdicts,
                 // A reviewer that cannot answer must not block usable translations: keep this
                 // attempt and let the next sync review it again.

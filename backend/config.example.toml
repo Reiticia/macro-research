@@ -89,6 +89,14 @@ backfill_on_startup = true
 # 写 Authorization 会替掉默认的 Bearer 头。
 # extra_headers = { "X-Title" = "macro-research" }
 
+# 可选的 TypeSafe/Jev 翻译校验器。它只负责判断翻译是否合格，翻译文本仍由上面的模型生成。
+[typesafe]
+enabled = false
+base_url = "https://api.typesafe.ai"
+api_key = ""
+model = "jev-latest"
+review_threshold = 0.85
+
 # 服务端 AI 市场简报。可以与翻译用不同的中转站、模型与密钥。
 [ai]
 enabled = false
