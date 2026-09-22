@@ -64,11 +64,11 @@ Windows PowerShell 下编码到剪贴板（避免把私钥内容写入命令日�
 
 先修改 `android/app/build.gradle.kts` 的 `versionCode` 和 `versionName`。**Tag 名不会自动修改 APK 内部版本**，每个新版本应递增 `versionCode`，以允许覆盖升级。
 
-例如，把 `versionName` 改为 `0.3.0` 并递增 `versionCode`，提交并推送后：
+例如，把 `versionName` 改为 `0.4.0` 并递增 `versionCode`，提交并推送后：
 
 ```bash
-git tag -a v0.3.0 -m "Macro Research 0.3.0"
-git push origin v0.3.0
+git tag -a v0.4.0 -m "Macro Research 0.4.0"
+git push origin v0.4.0
 ```
 
 推送 Tag 不会触发自动构建；随后到 **Actions → Android Release → Run workflow** 选择刚推送的 Tag 手动运行。
