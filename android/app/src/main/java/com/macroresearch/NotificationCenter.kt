@@ -3,7 +3,9 @@ package com.macroresearch
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -14,9 +16,8 @@ import java.util.Locale
 /**
  * Local notifications for followed events that are pushed after release.
  *
- * The caller filters out unstarred events. Only the backend WebSocket feeds this: there is no
- * background service, so a notification arrives while the app is running and the channel exists
- * for that case alone.
+ * The caller filters out unstarred events. The FCM messaging service may call this while the
+ * app process is in the background.
  */
 class NotificationCenter(private val context: Context) {
     private val manager = NotificationManagerCompat.from(context)
@@ -61,6 +62,16 @@ class NotificationCenter(private val context: Context) {
             else -> return
         }
         val id = event.eventId?.hashCode() ?: event.hashCode()
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            event.eventId?.let { putExtra(EXTRA_EVENT_ID, it) }
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            id,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         manager.notify(
             id,
             NotificationCompat.Builder(context, RELEASE_CHANNEL)
@@ -68,13 +79,15 @@ class NotificationCenter(private val context: Context) {
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .build(),
         )
     }
 
-    private companion object {
-        const val RELEASE_CHANNEL = "economic_release"
+    companion object {
+        const val EXTRA_EVENT_ID = "com.macroresearch.EXTRA_EVENT_ID"
+        private const val RELEASE_CHANNEL = "economic_release"
     }
 }

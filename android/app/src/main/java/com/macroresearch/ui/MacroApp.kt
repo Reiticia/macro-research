@@ -17,6 +17,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -32,6 +33,7 @@ import com.macroresearch.ui.calendar.CalendarScreen
 import com.macroresearch.ui.event.EventDetailScreen
 import com.macroresearch.ui.history.HistoryScreen
 import com.macroresearch.ui.home.HomeScreen
+import com.macroresearch.ui.followed.FollowedEventsScreen
 import com.macroresearch.ui.market.MarketScreen
 import com.macroresearch.ui.settings.SettingsScreen
 
@@ -50,8 +52,18 @@ private val destinations = listOf(
 )
 
 @Composable
-fun MacroApp(repository: MacroRepository) {
+fun MacroApp(
+    repository: MacroRepository,
+    notificationEventId: Long? = null,
+    onNotificationHandled: () -> Unit = {},
+) {
     val navController = rememberNavController()
+    LaunchedEffect(notificationEventId) {
+        notificationEventId?.let { eventId ->
+            navController.navigate("event/$eventId") { launchSingleTop = true }
+            onNotificationHandled()
+        }
+    }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
     val showBottomBar = destinations.any { destination ->
@@ -102,7 +114,12 @@ fun MacroApp(repository: MacroRepository) {
     ) { padding ->
         NavHost(navController, startDestination = "home") {
             composable("home") {
-                HomeScreen(repository, padding) { navController.navigate("event/$it") }
+                HomeScreen(
+                    repository = repository,
+                    padding = padding,
+                    onEvent = { navController.navigate("event/$it") },
+                    onFollowedEvents = { navController.navigate("followed") },
+                )
             }
             composable("calendar") {
                 CalendarScreen(repository, padding) { navController.navigate("event/$it") }
@@ -112,6 +129,14 @@ fun MacroApp(repository: MacroRepository) {
                 HistoryScreen(repository, padding) { navController.navigate("event/$it") }
             }
             composable("settings") { SettingsScreen(repository, padding) }
+            composable("followed") {
+                FollowedEventsScreen(
+                    repository = repository,
+                    padding = padding,
+                    onBack = navController::popBackStack,
+                    onEvent = { navController.navigate("event/$it") },
+                )
+            }
             composable("event/{eventId}") { entry ->
                 val id = entry.arguments?.getString("eventId")?.toLongOrNull() ?: return@composable
                 EventDetailScreen(

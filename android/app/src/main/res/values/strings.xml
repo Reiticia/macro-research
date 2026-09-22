@@ -8,6 +8,8 @@
     <string name="nav_settings">Settings</string>
     <string name="research_tagline">Macroeconomic research</string>
     <string name="notifications">Notifications</string>
+    <string name="followed_events">Followed events</string>
+    <string name="no_followed_events">No followed events yet</string>
     <string name="today_events">Today’s events</string>
     <string name="event_count">Events: %1$d</string>
     <string name="market_overview">Market overview</string>

@@ -99,6 +99,13 @@ interface EventDao {
     @Query("SELECT EXISTS(SELECT 1 FROM followed_event WHERE eventId = :eventId)")
     suspend fun isFollowed(eventId: Long): Boolean
 
+    @Query(
+        "SELECT cached_event.* FROM cached_event " +
+            "INNER JOIN followed_event ON followed_event.eventId = cached_event.id " +
+            "ORDER BY cached_event.eventTime",
+    )
+    fun observeFollowedEvents(): Flow<List<CachedEventEntity>>
+
     @Query("SELECT eventId FROM followed_event ORDER BY followedAt")
     suspend fun followedEventIds(): List<Long>
 

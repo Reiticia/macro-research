@@ -7,6 +7,8 @@
     <string name="nav_settings">设置</string>
     <string name="research_tagline">宏观事件研究</string>
     <string name="notifications">通知</string>
+    <string name="followed_events">关注的事件</string>
+    <string name="no_followed_events">暂无关注的事件</string>
     <string name="today_events">今日事件</string>
     <string name="event_count">%1$d 个事件</string>
     <string name="market_overview">市场概览</string>

@@ -22,6 +22,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -66,7 +67,12 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 @Composable
-fun HomeScreen(repository: MacroRepository, padding: PaddingValues, onEvent: (Long) -> Unit) {
+fun HomeScreen(
+    repository: MacroRepository,
+    padding: PaddingValues,
+    onEvent: (Long) -> Unit,
+    onFollowedEvents: () -> Unit,
+) {
     val vm: HomeViewModel = viewModel(factory = viewModelFactory { HomeViewModel(repository) })
     val events by vm.events.collectAsStateWithLifecycle()
     val refresh by vm.refresh.collectAsStateWithLifecycle()
@@ -110,7 +116,13 @@ fun HomeScreen(repository: MacroRepository, padding: PaddingValues, onEvent: (Lo
                 )
                 Text(next?.localDate() ?: stringResource(R.string.research_tagline), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Icon(Icons.Outlined.Notifications, stringResource(R.string.notifications), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            IconButton(onClick = onFollowedEvents) {
+                Icon(
+                    Icons.Outlined.Notifications,
+                    stringResource(R.string.followed_events),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         if (next != null) NextEventCard(next) { onEvent(next.id) }

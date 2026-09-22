@@ -149,6 +149,7 @@ class EventReleaseRefreshTest {
         }
 
         override suspend fun clearFollows() = Unit
+        override fun observeFollowedEvents(): Flow<List<CachedEventEntity>> = flowOf(emptyList())
         override fun observeFollowed(eventId: Long): Flow<Boolean> = flowOf(false)
         override suspend fun isFollowed(eventId: Long) = false
         override suspend fun followedEventIds() = emptyList<Long>()

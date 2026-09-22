@@ -633,6 +633,9 @@ class MacroRepository(
         _translationError.value = null
     }
 
+    fun observeFollowedEvents(): Flow<List<EconomicEvent>> =
+        dao.observeFollowedEvents().map { rows -> rows.map { it.asExternalModel() } }
+
     suspend fun setFollowed(id: Long, followed: Boolean) {
         if (followed) {
             dao.follow(FollowedEventEntity(id))
