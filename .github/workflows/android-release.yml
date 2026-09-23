@@ -68,14 +68,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp android/app/build/outputs/apk/release/app-release.apk dist/macro-research-release.apk
+          VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -n 1)"
+          if [[ -z "$VERSION_NAME" ]]; then
+            echo "::error::Unable to read versionName from android/app/build.gradle.kts"
+            exit 1
+          fi
+          APK_NAME="macro-research-${VERSION_NAME}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "dist/${APK_NAME}"
           cd dist
-          sha256sum macro-research-release.apk > SHA256SUMS.txt
+          sha256sum "$APK_NAME" > SHA256SUMS.txt
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macro-research-release
+          name: macro-research-release-${{ github.run_number }}
           path: dist/*
           if-no-files-found: error
           retention-days: 30
@@ -92,7 +98,7 @@ jobs:
       - name: Download release files
         uses: actions/download-artifact@v4
         with:
-          name: macro-research-release
+          name: macro-research-release-${{ github.run_number }}
           path: dist
 
       - name: Create release and upload assets
@@ -104,9 +110,14 @@ jobs:
         run: |
           set -euo pipefail
           # Re-running a tag build updates the attachments without replacing release notes.
+          APK_PATH="$(find dist -maxdepth 1 -type f -name 'macro-research-*.apk' -print -quit)"
+          if [[ -z "$APK_PATH" ]]; then
+            echo "::error::Versioned APK artifact was not found"
+            exit 1
+          fi
           if gh release view "$TAG_NAME" > /dev/null 2>&1; then
-            gh release upload "$TAG_NAME" dist/macro-research-release.apk dist/SHA256SUMS.txt --clobber
+            gh release upload "$TAG_NAME" "$APK_PATH" dist/SHA256SUMS.txt --clobber
           else
-            gh release create "$TAG_NAME" dist/macro-research-release.apk dist/SHA256SUMS.txt \
+            gh release create "$TAG_NAME" "$APK_PATH" dist/SHA256SUMS.txt \
               --verify-tag --title "$TAG_NAME" --generate-notes
           fi

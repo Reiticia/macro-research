@@ -2,7 +2,7 @@
 
 工作流：`.github/workflows/android-release.yml`。
 
-- **手动构建**：Actions → Android Release → Run workflow，选择分支或 Tag。成功后从该次运行的 `macro-research-release` Artifact 下载 APK，不创建 GitHub Release。
+- **手动构建**：Actions → Android Release → Run workflow，选择分支或 Tag。成功后从该次运行的 `macro-research-release-<run_number>` Artifact 下载 APK；APK 文件名也包含 `versionName`，例如 `macro-research-0.6.1.apk`。手动构建不创建 GitHub Release。
 - **Tag 构建**：推送 Tag 不会自动运行；在 Actions → Android Release 对该 Tag 手动 Run workflow 后，测试、lint、构建签名 APK，并创建同名 GitHub Release，上传 APK 和 SHA-256 校验文件。
 - 重跑已发布 Tag 的构建会覆盖同名附件，保留原 Release 说明。正式版本推荐使用新 Tag，避免覆盖已分发的安装包。
 
