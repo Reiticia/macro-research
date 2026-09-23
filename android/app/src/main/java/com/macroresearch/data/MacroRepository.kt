@@ -13,6 +13,7 @@ import com.macroresearch.data.model.AnalysisReport
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.data.model.EventDetailResponse
 import com.macroresearch.data.model.EventObservation
+import com.macroresearch.data.model.hasEventTimeArrived
 import com.macroresearch.data.model.MarketQuotesResponse
 import com.macroresearch.data.model.MarketResponse
 import com.macroresearch.data.remote.AiAnalysisClient
@@ -450,7 +451,7 @@ class MacroRepository(
         }
         val event = dao.event(eventId)?.asExternalModel()
             ?: error("Event is not available in the local cache")
-        require(event.actual != null) { "The release has no published value yet" }
+        require(hasEventTimeArrived(event.eventTime)) { "The event time has not passed yet" }
         // Personal model payloads/results never go through the backend, in either data mode.
         val report = directSource.ruleAnalysis(event) { directSource.eventMarket(event) }
         val nextRevision = (cached?.revision ?: 0) + 1

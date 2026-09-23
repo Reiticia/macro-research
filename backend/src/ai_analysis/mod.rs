@@ -964,16 +964,17 @@ fn system_prompt(language: &str, stage: Stage) -> String {
     prompt.push_str(
         "You are a macro market analyst writing a post-release briefing for one economic event. ",
     );
-    prompt.push_str("Use only the numbers and observations in the payload; never invent data. ");
+    prompt.push_str("Use only the numbers and observations in the payload; never invent data. If actual, consensus, forecast, or market observations are absent, state that they are unavailable and do not infer or fabricate them. When actual is absent, do not describe a data surprise; ground the briefing in event context and any observed market reaction, and label unobserved effects as unknown. ");
     match stage {
         Stage::Expectation => prompt.push_str(
             "No market reaction data is provided and none exists yet in your reading: build the chain \
-             and the outlook from the released numbers and the rule signal only, and never state or \
-             guess what prices did. Frame the outlook as conditional expectations and say what would \
+             and the outlook from available event data and the rule signal only, and never state or \
+             guess what prices did. If actual is missing, analyze the event context without claiming \
+             a measured surprise. Frame the outlook as conditional expectations and say what would \
              confirm or invalidate each link. ",
         ),
         Stage::SinglePass => prompt.push_str(
-            "Explain the causal transmission from the data surprise to asset prices step by step, and \
+            "Explain the causal transmission from the event or measured surprise to asset prices step by step, and \
              treat the observed moves as evidence of which links held. ",
         ),
         Stage::Comparison => prompt.push_str(
@@ -992,13 +993,12 @@ fn system_prompt(language: &str, stage: Stage) -> String {
     prompt.push_str("}],");
     prompt.push_str("\"dataAnalysis\":\"...\",\"marketOutlook\":\"...\",\"risks\":\"...\"}. ");
     prompt.push_str(
-        "chain is ordered from the surprise to the final asset reaction using short node names ",
+        "chain is ordered from the relevant event context or measured surprise to the final asset reaction using short node names ",
     );
     prompt.push_str("(for example \"CPI surprise\", \"real yields\", \"US dollar\", \"gold\"). ");
     prompt.push_str(
-        "dataAnalysis: 2-4 sentences comparing actual with consensus, forecast and previous, ",
+        "dataAnalysis: 2-4 sentences comparing actual with consensus, forecast and previous when those values exist; explicitly say when a value is unavailable and do not claim a surprise without actual and a comparison baseline. Include revisions or caveats only when supported by the payload. ",
     );
-    prompt.push_str("including revisions or caveats. ");
     match stage {
         Stage::Comparison => prompt.push_str(
             "marketOutlook: 3-5 sentences in one paragraph covering, in order, the ex-ante expectation, \
@@ -1042,5 +1042,7 @@ mod tests {
         assert!(prompt.contains("Simplified Chinese"));
         let expectation = system_prompt("en", Stage::Expectation);
         assert!(!expectation.contains("verdict"));
+        assert!(expectation.contains("When actual is absent, do not describe a data surprise"));
+        assert!(expectation.contains("explicitly say when a value is unavailable"));
     }
 }

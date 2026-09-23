@@ -234,6 +234,13 @@ pub async fn ai_analysis_by_provider(
     .await
 }
 
+fn event_time_has_passed(
+    event_time: &chrono::DateTime<Utc>,
+    now: &chrono::DateTime<Utc>,
+) -> bool {
+    event_time <= now
+}
+
 async fn lazy_ai_analysis(
     state: &AppState,
     id: i64,
@@ -255,8 +262,9 @@ async fn lazy_ai_analysis(
         .as_ref()
         .ok_or(AppError::NotFound)?;
     let event = state.events.get(id).await?;
-    // A post-release briefing must never be generated from a future or unpublished event.
-    if event.actual.is_none() {
+    // A post-event briefing may use context and market reactions even when no numeric result
+    // exists, but it must never be generated before the scheduled event time.
+    if !event_time_has_passed(&event.event_time, &chrono::Utc::now()) {
         return Err(AppError::NotFound);
     }
 
@@ -307,4 +315,22 @@ pub async fn analysis_feedback(
 #[allow(dead_code)]
 fn utc(naive: chrono::NaiveDateTime) -> chrono::DateTime<Utc> {
     Utc.from_utc_datetime(&naive)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::event_time_has_passed;
+    use chrono::{TimeZone, Utc};
+
+    #[test]
+    fn post_event_analysis_waits_for_event_time_but_not_published_actual() {
+        let event_time = Utc.with_ymd_and_hms(2026, 9, 11, 12, 30, 0).unwrap();
+        let before = event_time - chrono::Duration::seconds(1);
+        let at = event_time;
+        let after = event_time + chrono::Duration::seconds(1);
+
+        assert!(!event_time_has_passed(&event_time, &before));
+        assert!(event_time_has_passed(&event_time, &at));
+        assert!(event_time_has_passed(&event_time, &after));
+    }
 }

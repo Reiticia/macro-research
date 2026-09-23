@@ -5,6 +5,7 @@ import com.macroresearch.data.local.asExternalModel
 import com.macroresearch.data.local.fillMissingValues
 import com.macroresearch.data.local.mergeCalendarRows
 import com.macroresearch.data.model.currentStatus
+import com.macroresearch.data.model.hasEventTimeArrived
 import com.macroresearch.data.model.releaseStatus
 import com.macroresearch.data.remote.EconomicCalendarClient
 import kotlinx.coroutines.runBlocking
@@ -24,6 +25,14 @@ import java.time.ZoneOffset
 class CalendarRecoveryTest {
     private val time = Instant.parse("2026-09-10T12:30:00Z")
     private val now = Instant.parse("2026-09-11T12:21:00Z") // Less than 24h, but already elapsed.
+
+    @Test fun analysisEligibilityBeginsAtTheScheduledEventTimeEvenWithoutAnActual() {
+        val eventTime = time.toString()
+        assertFalse(hasEventTimeArrived(eventTime, time.minusSeconds(1)))
+        assertTrue(hasEventTimeArrived(eventTime, time))
+        assertTrue(hasEventTimeArrived(eventTime, time.plusSeconds(1)))
+        assertFalse(hasEventTimeArrived("invalid-time", time))
+    }
 
     @Test fun elapsedWithoutActualIsNotScheduledOrReleased() {
         assertEquals("data_unavailable", releaseStatus(null, time, now))

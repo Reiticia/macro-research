@@ -48,6 +48,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.CalendarWarning
 import com.macroresearch.data.model.EconomicEvent
+import com.macroresearch.data.model.hasEventTimeArrived
 import com.macroresearch.data.model.currentStatus
 import com.macroresearch.data.model.MarketReaction
 import com.macroresearch.data.model.MarketResponse
@@ -138,6 +139,8 @@ private fun EventContent(
     releaseError: String?,
     onFetchRelease: () -> Unit,
 ) {
+    var now by remember(event.id) { mutableStateOf(Instant.now()) }
+    LaunchedEffect(event.id) { while (true) { now = Instant.now(); delay(1_000) } }
     LazyColumn(modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -167,9 +170,8 @@ private fun EventContent(
             Button(
                 onClick = onAnalysis,
                 modifier = Modifier.fillMaxWidth(),
-                // A past timestamp alone is not a published data release (for example speeches
-                // never have an actual value). Only events with a result can be analyzed.
-                enabled = event.actual != null,
+                // A missing published value must not block analysis after the scheduled event time.
+                enabled = hasEventTimeArrived(event.eventTime, now),
             ) { Text(stringResource(if (event.status in setOf("completed", "historical")) R.string.view_analysis else R.string.view_analysis_progress)) }
         }
         item {

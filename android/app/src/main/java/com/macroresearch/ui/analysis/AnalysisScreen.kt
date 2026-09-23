@@ -53,6 +53,7 @@ import com.macroresearch.data.model.AiAnalysis
 import com.macroresearch.data.model.TransmissionStep
 import com.macroresearch.ui.AiAnalysisState
 import com.macroresearch.data.model.EconomicEvent
+import com.macroresearch.data.model.hasEventTimeArrived
 import com.macroresearch.data.model.MarketResponse
 import com.macroresearch.data.model.MarketSnapshot
 import com.macroresearch.ui.AnalysisViewModel
@@ -76,6 +77,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import kotlinx.coroutines.delay
 import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -184,6 +186,9 @@ private fun AiAnalysisCard(
     onRefreshShared: () -> Unit,
 ) {
     var feedbackText by remember(ai.analysis?.revision, ai.analysis?.method) { mutableStateOf("") }
+    var now by remember(event.id) { mutableStateOf(Instant.now()) }
+    LaunchedEffect(event.id) { while (true) { now = Instant.now(); delay(1_000) } }
+    val eventTimeReached = hasEventTimeArrived(event.eventTime, now)
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -195,8 +200,11 @@ private fun AiAnalysisCard(
                     TextButton(onClick = onRefreshShared) { Text(stringResource(R.string.retry)) }
                 }
             }
+            if (eventTimeReached && event.actual == null) {
+                AiHint(stringResource(R.string.ai_missing_release_data))
+            }
             when {
-                event.actual == null -> AiHint(stringResource(R.string.ai_needs_release))
+                !eventTimeReached -> AiHint(stringResource(R.string.ai_waiting_for_event))
                 ai.loading -> LoadingHint()
                 ai.analysis == null && !configured -> AiHint(stringResource(R.string.ai_shared_pending))
                 ai.analysis == null -> {

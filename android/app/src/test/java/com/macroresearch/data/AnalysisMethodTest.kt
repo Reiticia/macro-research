@@ -37,7 +37,7 @@ class AnalysisMethodTest {
         assertEquals(1, bodies.size)
         assertFalse(bodies.single().contains("observedReactions"))
         assertFalse(bodies.single().contains("-0.67"))
-        assertTrue(bodies.single().contains("released numbers"))
+        assertTrue(bodies.single().contains("available event data"))
         assertTrue(bodies.single().contains("Core CPI m/m"))
         assertEquals("Core CPI 0.3% vs 0.2% expected.", draft.dataAnalysis)
     }
@@ -82,6 +82,22 @@ class AnalysisMethodTest {
     }
 
     @Test
+    fun missingPublishedValueStillProducesAnEventContextBriefingWithoutInventingNumbers() {
+        val (_, bodies) = run(
+            listOf(expectationJson),
+            AnalysisMethod.NUMBERS_ONLY,
+            actual = null,
+            consensus = null,
+        )
+        val body = bodies.single()
+        // Gson omits absent map values, which makes the missing fields explicit to the model.
+        assertFalse(body.contains("\"actual\""))
+        assertFalse(body.contains("\"consensus\""))
+        assertTrue(body.contains("When actual is absent, do not describe a data surprise"))
+        assertTrue(body.contains("do not infer or fabricate them"))
+    }
+
+    @Test
     fun verdictsAreNormalisedAndOptional() {
         val client = AiAnalysisClient(OkHttpClient(), Gson())
         assertEquals(
@@ -118,6 +134,8 @@ class AnalysisMethodTest {
         replies: List<String>,
         method: AnalysisMethod,
         withMoves: Boolean = true,
+        actual: String? = "0.3",
+        consensus: String? = "0.2",
     ): Pair<AiAnalysisDraft, List<String>> = runBlocking {
         val server = MockWebServer()
         replies.forEach { server.enqueue(MockResponse().setBody(envelope(it))) }
@@ -125,7 +143,7 @@ class AnalysisMethodTest {
         try {
             val client = AiAnalysisClient(OkHttpClient(), Gson())
             val settings = TranslationSettings(true, server.url("/v1").toString().removeSuffix("/"), "test-model")
-            val draft = client.analyze(input(withMoves), settings, "test-key", method)
+            val draft = client.analyze(input(withMoves, actual, consensus), settings, "test-key", method)
             val bodies = generateSequence { server.takeRequest(1, TimeUnit.SECONDS)?.body?.readUtf8() }.toList()
             draft to bodies
         } finally {
@@ -136,12 +154,16 @@ class AnalysisMethodTest {
     private fun envelope(content: String) =
         """{"choices":[{"message":{"content":${Gson().toJson(content)}}}]}"""
 
-    private fun input(withMoves: Boolean = true) = AiAnalysisInput(
+    private fun input(
+        withMoves: Boolean = true,
+        actual: String? = "0.3",
+        consensus: String? = "0.2",
+    ) = AiAnalysisInput(
         event = EconomicEvent(
             id = 1, provider = "trading_view", providerId = "1", releaseGroupId = null,
             country = "United States", currency = "USD", category = "inflation",
             event = "Core CPI m/m", eventTime = "2026-09-11T12:30:00Z", importance = 3,
-            actual = "0.3", previous = "0.2", consensus = "0.2", forecast = "0.2",
+            actual = actual, previous = "0.2", consensus = consensus, forecast = "0.2",
             unit = "%", status = "released",
         ),
         macroSignal = "hawkish",

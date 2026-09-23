@@ -278,7 +278,8 @@
     <string name="ai_reanalyze">Re-analyze</string>
     <string name="ai_analysis_hint">Uses your configured AI endpoint to explain how this release transmits through rates, the dollar and risk assets.</string>
     <string name="ai_requires_key">Add an API key in Settings to generate AI analysis.</string>
-    <string name="ai_needs_release">This release has no published value yet.</string>
+    <string name="ai_waiting_for_event">Analysis is available once the scheduled event time has passed.</string>
+    <string name="ai_missing_release_data">No published value is available. The analysis will use event context and any available market data without inferring missing numbers.</string>
     <string name="ai_chain">Transmission chain</string>
     <string name="ai_data_analysis">Data read</string>
     <string name="ai_market_outlook">Market outlook</string>

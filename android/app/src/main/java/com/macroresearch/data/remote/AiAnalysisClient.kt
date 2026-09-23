@@ -202,17 +202,18 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
 
     private fun systemPrompt(languageTag: String, stage: AnalysisStage): String = buildString {
         append("You are a macro market analyst writing a post-release briefing for one economic event. ")
-        append("Use only the numbers and observations in the payload; never invent data. ")
+        append("Use only the numbers and observations in the payload; never invent data. If actual, consensus, forecast, or market observations are absent, state that they are unavailable and do not infer or fabricate them. When actual is absent, do not describe a data surprise; ground the briefing in event context and any observed market reaction, and label unobserved effects as unknown. ")
         when (stage) {
             AnalysisStage.EXPECTATION -> append(
                 "No market reaction data is provided and none exists yet in your reading: build the chain " +
-                    "and the outlook from the released numbers and the rule signal only, and never state or " +
-                    "guess what prices did. Frame the outlook as conditional expectations and say what would " +
+                    "and the outlook from available event data and the rule signal only, and never state or " +
+                    "guess what prices did. If actual is missing, analyze the event context without claiming " +
+                    "a measured surprise. Frame the outlook as conditional expectations and say what would " +
                     "confirm or invalidate each link. ",
             )
             AnalysisStage.SINGLE_PASS -> append(
-                "Explain the causal transmission from the data surprise to asset prices step by step, and " +
-                    "treat the observed moves as evidence of which links held. ",
+                "Explain the causal transmission from the event or measured surprise to asset prices step by step, and " +
+                    "treat the observed moves as evidence of which links held. "
             )
             AnalysisStage.COMPARISON -> append(
                 "You already produced an ex-ante expectation without seeing any prices; it is supplied as " +
@@ -227,10 +228,9 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
         if (stage == AnalysisStage.COMPARISON) append(",\"verdict\":\"confirmed|contradicted|unobserved\"")
         append("}],")
         append("\"dataAnalysis\":\"...\",\"marketOutlook\":\"...\",\"risks\":\"...\"}. ")
-        append("chain is ordered from the surprise to the final asset reaction using short node names ")
+        append("chain is ordered from the relevant event context or measured surprise to the final asset reaction using short node names ")
         append("(for example \"CPI surprise\", \"real yields\", \"US dollar\", \"gold\"). ")
-        append("dataAnalysis: 2-4 sentences comparing actual with consensus, forecast and previous, ")
-        append("including revisions or caveats. ")
+        append("dataAnalysis: 2-4 sentences comparing actual with consensus, forecast and previous when those values exist; explicitly say when a value is unavailable and do not claim a surprise without actual and a comparison baseline. Include revisions or caveats only when supported by the payload. ")
         when (stage) {
             AnalysisStage.COMPARISON -> append(
                 "marketOutlook: 3-5 sentences in one paragraph covering, in order, the ex-ante expectation, " +

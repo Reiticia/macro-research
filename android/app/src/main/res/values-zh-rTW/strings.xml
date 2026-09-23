@@ -277,7 +277,8 @@
     <string name="ai_reanalyze">重新分析</string>
     <string name="ai_analysis_hint">呼叫你設定的 AI 介面，說明該數據如何經由利率、美元與風險資產傳導。</string>
     <string name="ai_requires_key">請先在設定中填寫 API Key 才能生成 AI 分析。</string>
-    <string name="ai_needs_release">該事件尚未公布數據。</string>
+    <string name="ai_waiting_for_event">事件預定時間到達後即可進行分析。</string>
+    <string name="ai_missing_release_data">目前沒有公布值。分析將依據事件背景及可用行情，不會臆測缺少的數值。</string>
     <string name="ai_chain">傳導鏈路</string>
     <string name="ai_data_analysis">數據分析</string>
     <string name="ai_market_outlook">市場走勢</string>
