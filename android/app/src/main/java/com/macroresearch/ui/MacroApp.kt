@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -73,6 +74,14 @@ fun MacroApp(
         onNotificationHandled()
     }
     val currentDestination = backStackEntry?.destination
+    // A notification-launched event is the start destination and therefore has no nav entry
+    // behind it. Intercept the system Back key and return Home rather than finishing the app.
+    BackHandler(
+        enabled = initialNotificationEventId != null &&
+            currentDestination?.route == "event/{eventId}",
+    ) {
+        navController.navigate("home") { launchSingleTop = true }
+    }
     val showBottomBar = destinations.any { destination ->
         currentDestination?.hierarchy?.any { it.route == destination.route } == true
     }
@@ -154,7 +163,14 @@ fun MacroApp(
                 EventDetailScreen(
                     id = id,
                     repository = repository,
-                    onBack = navController::popBackStack,
+                    onBack = {
+                        // A notification can make the event the graph's initial destination,
+                        // leaving no previous entry. In that case Back should return home
+                        // instead of exiting the app.
+                        if (!navController.popBackStack()) {
+                            navController.navigate("home") { launchSingleTop = true }
+                        }
+                    },
                     onAnalysis = { navController.navigate("analysis/$id") },
                     onHistory = {
                         navController.navigate("history") {
