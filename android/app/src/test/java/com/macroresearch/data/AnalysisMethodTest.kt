@@ -7,6 +7,7 @@ import com.macroresearch.data.model.MarketReaction
 import com.macroresearch.data.remote.AiAnalysisClient
 import com.macroresearch.data.remote.AiAnalysisDraft
 import com.macroresearch.data.remote.AiAnalysisInput
+import com.macroresearch.data.remote.NewsArticle
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -98,6 +99,49 @@ class AnalysisMethodTest {
     }
 
     @Test
+    fun twoStageMethodWithholdsNewsFromExAntePassAndAddsItToComparisonPass() {
+        val (_, bodies) = run(
+            listOf(expectationJson, comparisonJson),
+            AnalysisMethod.EX_ANTE_THEN_COMPARE,
+            newsArticles = listOf(
+                NewsArticle(
+                    title = "Federal Reserve signals steady rates",
+                    url = "https://example.com/fed-story",
+                    source = "Example News",
+                    publishedAt = "2026-09-23T14:00:00Z",
+                    summary = "Policy outlook remains uncertain.",
+                ),
+            ),
+        )
+        assertEquals(2, bodies.size)
+        assertFalse(bodies.first().contains("Federal Reserve signals steady rates"))
+        assertTrue(bodies.last().contains("Federal Reserve signals steady rates"))
+    }
+
+    @Test
+    fun relatedNewsIsIncludedWithItsSourceTimeAndLinkWhenRequested() {
+        val (_, bodies) = run(
+            listOf(expectationJson),
+            AnalysisMethod.NUMBERS_ONLY,
+            newsArticles = listOf(
+                NewsArticle(
+                    title = "Federal Reserve signals steady rates",
+                    url = "https://example.com/fed-story",
+                    source = "Example News",
+                    publishedAt = "2026-09-23T14:00:00Z",
+                    summary = "Policy outlook remains uncertain.",
+                ),
+            ),
+        )
+        val body = bodies.single()
+        assertTrue(body.contains("relatedNews"))
+        assertTrue(body.contains("Federal Reserve signals steady rates"))
+        assertTrue(body.contains("https://example.com/fed-story"))
+        assertTrue(body.contains("2026-09-23T14:00:00Z"))
+        assertTrue(body.contains("cite the exact supplied title"))
+    }
+
+    @Test
     fun verdictsAreNormalisedAndOptional() {
         val client = AiAnalysisClient(OkHttpClient(), Gson())
         assertEquals(
@@ -136,6 +180,7 @@ class AnalysisMethodTest {
         withMoves: Boolean = true,
         actual: String? = "0.3",
         consensus: String? = "0.2",
+        newsArticles: List<NewsArticle> = emptyList(),
     ): Pair<AiAnalysisDraft, List<String>> = runBlocking {
         val server = MockWebServer()
         replies.forEach { server.enqueue(MockResponse().setBody(envelope(it))) }
@@ -143,7 +188,7 @@ class AnalysisMethodTest {
         try {
             val client = AiAnalysisClient(OkHttpClient(), Gson())
             val settings = TranslationSettings(true, server.url("/v1").toString().removeSuffix("/"), "test-model")
-            val draft = client.analyze(input(withMoves, actual, consensus), settings, "test-key", method)
+            val draft = client.analyze(input(withMoves, actual, consensus, newsArticles), settings, "test-key", method)
             val bodies = generateSequence { server.takeRequest(1, TimeUnit.SECONDS)?.body?.readUtf8() }.toList()
             draft to bodies
         } finally {
@@ -158,6 +203,7 @@ class AnalysisMethodTest {
         withMoves: Boolean = true,
         actual: String? = "0.3",
         consensus: String? = "0.2",
+        newsArticles: List<NewsArticle> = emptyList(),
     ) = AiAnalysisInput(
         event = EconomicEvent(
             id = 1, provider = "trading_view", providerId = "1", releaseGroupId = null,
@@ -180,5 +226,8 @@ class AnalysisMethodTest {
             ),
         ),
         languageTag = "zh-CN",
+        newsSearchRequested = newsArticles.isNotEmpty(),
+        newsSearchStatus = if (newsArticles.isNotEmpty()) "articles_found" else null,
+        newsArticles = newsArticles,
     )
 }

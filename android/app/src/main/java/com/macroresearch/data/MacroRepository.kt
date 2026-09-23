@@ -21,6 +21,7 @@ import com.macroresearch.data.remote.BackendException
 import com.macroresearch.data.remote.BackendMeta
 import com.macroresearch.data.remote.BackendUnauthorizedException
 import com.macroresearch.data.remote.EconomicCalendarClient
+import com.macroresearch.data.remote.NewsRssClient
 import com.macroresearch.data.remote.PushTopicManager
 import com.macroresearch.data.remote.TranslationClient
 import com.macroresearch.data.remote.stableEventId
@@ -66,6 +67,8 @@ class MacroRepository(
     private val calendarClient: EconomicCalendarClient,
     private val networkPreferences: NetworkPreferences,
     private val analysisPreferences: AnalysisPreferences,
+    private val newsPreferences: NewsPreferences,
+    private val newsRssClient: NewsRssClient,
     private val backendPreferences: BackendPreferences,
     private val translationClient: TranslationClient,
     private val aiAnalysisClient: AiAnalysisClient,
@@ -84,6 +87,7 @@ class MacroRepository(
     val translationError = _translationError.asStateFlow()
     val proxyAddress = networkPreferences.address
     val analysisMethod: StateFlow<AnalysisMethod> = analysisPreferences.method
+    val newsSettings: StateFlow<NewsSettings> = newsPreferences.settings
 
     /** The active plane. Read per call so a settings change applies immediately. */
     private val source: DataSource
@@ -94,6 +98,8 @@ class MacroRepository(
         }
 
     fun setAnalysisMethod(method: AnalysisMethod) = analysisPreferences.setMethod(method)
+    fun setNewsSearchEnabled(enabled: Boolean) = newsPreferences.setEnabled(enabled)
+    fun setNewsSources(urls: List<String>) = newsPreferences.setSources(urls)
 
     private val _calendarWarning = MutableStateFlow<CalendarWarning?>(null)
     val calendarWarning = _calendarWarning.asStateFlow()
@@ -454,6 +460,10 @@ class MacroRepository(
         require(hasEventTimeArrived(event.eventTime)) { "The event time has not passed yet" }
         // Personal model payloads/results never go through the backend, in either data mode.
         val report = directSource.ruleAnalysis(event) { directSource.eventMarket(event) }
+        val newsSettings = newsPreferences.settings.value
+        val newsResult = if (newsSettings.enabled) {
+            newsRssClient.relevantArticles(event, newsSettings.sourceUrls)
+        } else null
         val nextRevision = (cached?.revision ?: 0) + 1
         val analysis = directSource.aiAnalysis(
             AiAnalysisRequest(
@@ -463,6 +473,9 @@ class MacroRepository(
                 method = method,
                 revision = nextRevision,
                 regenerate = regenerate || cached != null,
+                newsSearchRequested = newsSettings.enabled,
+                newsSearchStatus = newsResult?.status,
+                newsArticles = newsResult?.articles.orEmpty(),
             ),
         )
             .let { fetched ->

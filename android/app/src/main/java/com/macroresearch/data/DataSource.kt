@@ -11,6 +11,7 @@ import com.macroresearch.data.remote.AiAnalysisInput
 import com.macroresearch.data.remote.BackendClient
 import com.macroresearch.data.remote.CalendarFetchResult
 import com.macroresearch.data.remote.DirectMarketClient
+import com.macroresearch.data.remote.NewsArticle
 import com.macroresearch.data.remote.EconomicCalendarClient
 import java.time.Instant
 import java.time.LocalDate
@@ -24,6 +25,9 @@ data class AiAnalysisRequest(
     val method: AnalysisMethod,
     val revision: Int,
     val regenerate: Boolean,
+    val newsSearchRequested: Boolean = false,
+    val newsSearchStatus: String? = null,
+    val newsArticles: List<NewsArticle> = emptyList(),
 )
 
 /**
@@ -142,6 +146,9 @@ class DirectDataSource(
                 expectedReactions = request.report.expectedReactions,
                 observedReactions = request.report.observedReactions,
                 languageTag = request.languageTag,
+                newsSearchRequested = request.newsSearchRequested,
+                newsSearchStatus = request.newsSearchStatus,
+                newsArticles = request.newsArticles,
             ),
             settings = settings,
             apiKey = apiKey,

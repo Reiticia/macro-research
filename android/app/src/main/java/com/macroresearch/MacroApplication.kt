@@ -13,6 +13,7 @@ import com.macroresearch.data.LocalAnalysisEngine
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.MarketPreferences
 import com.macroresearch.data.NetworkPreferences
+import com.macroresearch.data.NewsPreferences
 import com.macroresearch.data.PreferencesBackoffStore
 import com.macroresearch.data.TranslationPreferences
 import com.macroresearch.data.local.MacroDatabase
@@ -20,6 +21,7 @@ import com.macroresearch.data.remote.AiAnalysisClient
 import com.macroresearch.data.remote.BackendClient
 import com.macroresearch.data.remote.DirectMarketClient
 import com.macroresearch.data.remote.EconomicCalendarClient
+import com.macroresearch.data.remote.NewsRssClient
 import com.macroresearch.data.remote.PushTopicManager
 import com.macroresearch.data.remote.TranslationClient
 import kotlinx.coroutines.CoroutineScope
@@ -120,6 +122,8 @@ class MacroApplication : Application() {
             calendarClient = calendarClient,
             networkPreferences = networkPreferences,
             analysisPreferences = analysisPreferences,
+            newsPreferences = NewsPreferences(this),
+            newsRssClient = NewsRssClient(http),
             backendPreferences = backendPreferences,
             translationClient = TranslationClient(translationHttp, gson),
             aiAnalysisClient = aiAnalysisClient,

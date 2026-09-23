@@ -95,6 +95,7 @@ fun SettingsScreen(repository: MacroRepository, padding: PaddingValues) {
             // Personal AI generation is available in either data-source mode.
             item { TranslationApiSettings(repository) }
             item { AnalysisMethodSettings(repository) }
+            item { NewsContextSettings(repository) }
             // Interface localization is independent of event-name translation. Without a
             // translation API, direct mode can still use a Chinese interface while event names
             // remain in their source language.

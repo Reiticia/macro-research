@@ -29,6 +29,9 @@ data class AiAnalysisInput(
     val expectedReactions: List<ExpectedReaction>,
     val observedReactions: List<MarketReaction>,
     val languageTag: String,
+    val newsSearchRequested: Boolean = false,
+    val newsSearchStatus: String? = null,
+    val newsArticles: List<NewsArticle> = emptyList(),
 )
 
 /** Parsed model output before it is persisted. */
@@ -57,17 +60,26 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
         method: AnalysisMethod = AnalysisMethod.DEFAULT,
     ): AiAnalysisDraft = withContext(Dispatchers.IO) {
         val hasMoves = input.observedReactions.any { it.hasAnyChange() }
-        // Without usable moves every method degrades to the numbers-and-rules briefing.
-        if (!hasMoves || method == AnalysisMethod.NUMBERS_ONLY) {
-            return@withContext request(input, settings, apiKey, AnalysisStage.EXPECTATION, includeMoves = false)
+        if (method == AnalysisMethod.NUMBERS_ONLY) {
+            return@withContext request(
+                input, settings, apiKey, AnalysisStage.EXPECTATION,
+                includeMoves = false, includeNews = true,
+            )
         }
-        if (method == AnalysisMethod.SINGLE_PASS) {
-            return@withContext request(input, settings, apiKey, AnalysisStage.SINGLE_PASS, includeMoves = true)
+        if (method == AnalysisMethod.SINGLE_PASS || !hasMoves) {
+            return@withContext request(
+                input, settings, apiKey, AnalysisStage.SINGLE_PASS,
+                includeMoves = hasMoves, includeNews = true,
+            )
         }
-        val expectation = request(input, settings, apiKey, AnalysisStage.EXPECTATION, includeMoves = false)
+        // Keep the first ex-ante pass free of both price observations and post-release news.
+        val expectation = request(
+            input, settings, apiKey, AnalysisStage.EXPECTATION,
+            includeMoves = false, includeNews = false,
+        )
         val comparison = request(
             input, settings, apiKey, AnalysisStage.COMPARISON,
-            includeMoves = true, expectation = expectation,
+            includeMoves = true, expectation = expectation, includeNews = true,
         )
         comparison.copy(
             // The numbers read and the chain were produced before the moves were revealed, so the
@@ -85,10 +97,11 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
         stage: AnalysisStage,
         includeMoves: Boolean,
         expectation: AiAnalysisDraft? = null,
+        includeNews: Boolean,
     ): AiAnalysisDraft {
         val endpoint = chatEndpoint(settings.baseUrl)
         val call = { jsonMode: Boolean ->
-            execute(endpoint, apiKey, payload(input, settings.model, jsonMode, stage, includeMoves, expectation))
+            execute(endpoint, apiKey, payload(input, settings.model, jsonMode, stage, includeMoves, expectation, includeNews))
         }
         val responseText = try {
             call(true)
@@ -131,6 +144,7 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
         stage: AnalysisStage,
         includeMoves: Boolean,
         expectation: AiAnalysisDraft?,
+        includeNews: Boolean,
     ): Map<String, Any?> {
         // The briefing is read next to cards that render device-local time, so hand the model
         // the local clock as well as the precise instant.
@@ -174,6 +188,18 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
             put("rawSurprise", input.rawSurprise)
             put("expectedReactions", expected)
             if (includeMoves) put("observedReactions", observed)
+            if (includeNews && input.newsSearchRequested) {
+                put("newsSearchStatus", input.newsSearchStatus ?: "search_unavailable")
+                put("relatedNews", input.newsArticles.map { article ->
+                    mapOf(
+                        "title" to article.title,
+                        "source" to article.source,
+                        "publishedAt" to article.publishedAt,
+                        "url" to article.url,
+                        "summary" to article.summary,
+                    )
+                })
+            }
             expectation?.let { put("exAnteExpectation", exAnte(it)) }
         }
         return linkedMapOf<String, Any?>(
@@ -202,7 +228,7 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
 
     private fun systemPrompt(languageTag: String, stage: AnalysisStage): String = buildString {
         append("You are a macro market analyst writing a post-release briefing for one economic event. ")
-        append("Use only the numbers and observations in the payload; never invent data. If actual, consensus, forecast, or market observations are absent, state that they are unavailable and do not infer or fabricate them. When actual is absent, do not describe a data surprise; ground the briefing in event context and any observed market reaction, and label unobserved effects as unknown. ")
+        append("Use only the numbers and observations in the payload; never invent data. If actual, consensus, forecast, or market observations are absent, state that they are unavailable and do not infer or fabricate them. When actual is absent, do not describe a data surprise; ground the briefing in event context and any observed market reaction, and label unobserved effects as unknown. If newsSearchStatus is no_relevant_articles_found, state that no matching articles were found. If newsSearchStatus is search_unavailable, state that news could not be retrieved; if it is partial_results, disclose that source coverage was incomplete. If relatedNews is present, use it only as dated context, distinguish reporting from measured event data, and cite the exact supplied title, source and URL; never invent citations or imply an article proves causation. ")
         when (stage) {
             AnalysisStage.EXPECTATION -> append(
                 "No market reaction data is provided and none exists yet in your reading: build the chain " +
@@ -212,8 +238,8 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
                     "confirm or invalidate each link. ",
             )
             AnalysisStage.SINGLE_PASS -> append(
-                "Explain the causal transmission from the event or measured surprise to asset prices step by step, and " +
-                    "treat the observed moves as evidence of which links held. "
+                "Explain the causal transmission from the event or measured surprise to asset prices step by step. " +
+                    "Use observed moves only when supplied; otherwise mark market reaction as unobserved. Treat related news as context, not as measured market data. ",
             )
             AnalysisStage.COMPARISON -> append(
                 "You already produced an ex-ante expectation without seeing any prices; it is supplied as " +
