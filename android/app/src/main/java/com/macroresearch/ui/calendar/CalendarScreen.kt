@@ -18,18 +18,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
-import androidx.compose.material.icons.outlined.FilterAlt
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -66,7 +62,6 @@ fun CalendarScreen(repository: MacroRepository, padding: PaddingValues, onEvent:
     val vm: CalendarViewModel = viewModel(factory = viewModelFactory { CalendarViewModel(repository) })
     val state by vm.state.collectAsStateWithLifecycle()
     val warning by repository.calendarWarning.collectAsStateWithLifecycle()
-    var showFilters by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     // Translations are keyed by event name and can be corrected on the detail screen;
     // re-read them whenever this screen is shown again so corrections appear immediately.
@@ -84,19 +79,29 @@ fun CalendarScreen(repository: MacroRepository, padding: PaddingValues, onEvent:
                 Text(stringResource(R.string.nav_calendar), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(dateLabel(state.date, monthOnly = true), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Row {
-                IconButton(onClick = { showDatePicker = true }) {
-                    Icon(Icons.Outlined.CalendarMonth, stringResource(R.string.choose_date), tint = MaterialTheme.colorScheme.primary)
-                }
-                IconButton(onClick = { showFilters = true }) {
-                    Icon(Icons.Outlined.FilterAlt, stringResource(R.string.filter), tint = MaterialTheme.colorScheme.primary)
-                }
+            IconButton(onClick = { showDatePicker = true }) {
+                Icon(Icons.Outlined.CalendarMonth, stringResource(R.string.choose_date), tint = MaterialTheme.colorScheme.primary)
             }
         }
         DateSelector(state.date, vm::selectDate)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            item { FilterChip(selected = 3 in state.importance, onClick = { showFilters = true }, leadingIcon = { Text("●", color = Upcoming) }, label = { Text(importanceLabel(3)) }) }
-            item { FilterChip(selected = 2 in state.importance, onClick = { showFilters = true }, leadingIcon = { Text("●", color = MaterialTheme.colorScheme.primary) }, label = { Text(importanceLabel(2)) }) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(3, 2, 1).forEach { level ->
+                FilterChip(
+                    selected = level in state.importance,
+                    onClick = { vm.toggleImportance(level) },
+                    leadingIcon = {
+                        Text(
+                            "●",
+                            color = when (level) {
+                                3 -> Upcoming
+                                2 -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    },
+                    label = { Text(importanceLabel(level)) },
+                )
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(dateLabel(state.date), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -124,17 +129,6 @@ fun CalendarScreen(repository: MacroRepository, padding: PaddingValues, onEvent:
             onSelect = {
                 vm.selectDate(it)
                 showDatePicker = false
-            },
-        )
-    }
-
-    if (showFilters) {
-        CalendarFilterSheet(
-            initialImportance = state.importance,
-            onDismiss = { showFilters = false },
-            onApply = { importance ->
-                vm.applyImportanceFilter(importance)
-                showFilters = false
             },
         )
     }
@@ -208,33 +202,5 @@ private fun CalendarDatePicker(
         },
     ) {
         DatePicker(state = pickerState)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun CalendarFilterSheet(
-    initialImportance: Set<Int>,
-    onDismiss: () -> Unit,
-    onApply: (Set<Int>) -> Unit,
-) {
-    var importance by remember { mutableStateOf(initialImportance) }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.filter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            HorizontalDivider()
-            Text(stringResource(R.string.importance), fontWeight = FontWeight.Bold)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(listOf(3, 2, 1)) { level ->
-                    FilterChip(
-                        selected = level in importance,
-                        onClick = { importance = if (level in importance) importance - level else importance + level },
-                        label = { Text(importanceLabel(level)) },
-                    )
-                }
-            }
-            Text(stringResource(R.string.color_legend), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-            Button(onClick = { onApply(importance) }, modifier = Modifier.fillMaxWidth(), enabled = importance.isNotEmpty()) { Text(stringResource(R.string.apply)) }
-        }
     }
 }

@@ -104,7 +104,7 @@ class MarketViewModel(private val repository: MacroRepository) : ViewModel() {
 data class CalendarState(
     val date: LocalDate = LocalDate.now(),
     val events: List<EconomicEvent> = emptyList(),
-    val importance: Set<Int> = setOf(2, 3),
+    val importance: Set<Int> = setOf(1, 2, 3),
     val countries: Set<String> = emptySet(),
     val loading: Boolean = true,
     val error: String? = null,
@@ -154,8 +154,13 @@ class CalendarViewModel(private val repository: MacroRepository) : ViewModel() {
         }
     }
 
-    fun applyImportanceFilter(importance: Set<Int>) {
-        _state.value = _state.value.copy(importance = importance)
+    fun toggleImportance(level: Int) {
+        if (level !in 1..3) return
+        val current = _state.value.importance
+        val updated = if (level in current) current - level else current + level
+        if (updated.isNotEmpty()) {
+            _state.value = _state.value.copy(importance = updated)
+        }
     }
 
     /** Re-reads name-keyed translations after the user corrects one on the detail screen. */
