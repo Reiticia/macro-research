@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use crate::{
     error::AppError,
-    model::{EconomicEvent, EventObservation, EventStatus},
+    market_selection::MarketSelection,
+    model::{EconomicEvent, EventObservation, EventStatus, MarketSymbol},
 };
 
 use super::{datetime_from_row, decimal_from_row, event_from_row};
@@ -266,6 +267,81 @@ impl EventRepository {
             .fetch_optional(&self.pool)
             .await?;
         row.map(event_from_row).transpose()
+    }
+
+    pub async fn market_selection(
+        &self,
+        event_id: i64,
+    ) -> Result<Option<MarketSelection>, AppError> {
+        let row = sqlx::query(
+            "SELECT symbols_json, probabilities_json, source, model FROM event_market_selection WHERE event_id = ?",
+        )
+        .bind(event_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|row| {
+            let symbols_json: String = row.try_get("symbols_json")?;
+            let probabilities_json: String = row.try_get("probabilities_json")?;
+            let symbol_names: Vec<String> =
+                serde_json::from_str(&symbols_json).map_err(|error| {
+                    AppError::Internal(format!("invalid stored market symbols: {error}"))
+                })?;
+            let symbols = symbol_names
+                .into_iter()
+                .map(|value| value.parse::<MarketSymbol>().map_err(AppError::Internal))
+                .collect::<Result<Vec<_>, _>>()?;
+            let probabilities = serde_json::from_str(&probabilities_json).map_err(|error| {
+                AppError::Internal(format!("invalid stored market probabilities: {error}"))
+            })?;
+            let source: String = row.try_get("source")?;
+            let source = match source.as_str() {
+                "jev" => "jev",
+                "category_fallback" => "category_fallback",
+                _ => "all_symbols_fallback",
+            };
+            Ok(MarketSelection {
+                symbols,
+                probabilities,
+                source,
+                model: row.try_get("model")?,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn save_market_selection(
+        &self,
+        event_id: i64,
+        selection: &MarketSelection,
+    ) -> Result<MarketSelection, AppError> {
+        let symbols = selection
+            .symbols
+            .iter()
+            .map(|symbol| symbol.as_str())
+            .collect::<Vec<_>>();
+        sqlx::query(
+            "INSERT OR IGNORE INTO event_market_selection (event_id, symbols_json, probabilities_json, source, model, selected_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(event_id)
+        .bind(serde_json::to_string(&symbols).map_err(|error| AppError::Internal(error.to_string()))?)
+        .bind(serde_json::to_string(&selection.probabilities).map_err(|error| AppError::Internal(error.to_string()))?)
+        .bind(selection.source)
+        .bind(&selection.model)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        self.market_selection(event_id)
+            .await?
+            .ok_or_else(|| AppError::Internal("market selection insert was not visible".into()))
+    }
+
+    pub async fn market_selection_missing_active(&self) -> Result<Vec<EconomicEvent>, AppError> {
+        let rows = sqlx::query(
+            "SELECT e.* FROM economic_event e LEFT JOIN event_market_selection s ON s.event_id = e.id WHERE e.status IN ('watching','released','collecting_market_data','analyzing') AND s.event_id IS NULL ORDER BY e.event_time",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(event_from_row).collect()
     }
 
     pub async fn get(&self, id: i64) -> Result<EconomicEvent, AppError> {

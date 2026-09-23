@@ -14,6 +14,8 @@ pub enum LlmScope {
     AiAnalysis,
     /// Event-name translation batches.
     Translation,
+    /// Jev market-symbol selection for a scheduled event.
+    MarketSelection,
 }
 
 impl LlmScope {
@@ -21,6 +23,7 @@ impl LlmScope {
         match self {
             Self::AiAnalysis => "ai_analysis",
             Self::Translation => "translation",
+            Self::MarketSelection => "market_selection",
         }
     }
 }
@@ -37,6 +40,8 @@ pub enum LlmKind {
     SinglePass,
     /// One translation batch.
     Translation,
+    /// One Jev market-symbol selection request.
+    MarketSelection,
 }
 
 impl LlmKind {
@@ -46,6 +51,7 @@ impl LlmKind {
             Self::Comparison => "comparison",
             Self::SinglePass => "single_pass",
             Self::Translation => "translation",
+            Self::MarketSelection => "market_selection",
         }
     }
 }

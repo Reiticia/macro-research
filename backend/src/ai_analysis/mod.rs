@@ -632,7 +632,7 @@ impl AiAnalysisService {
         entry.method = Some(match kind {
             LlmKind::ExAnte | LlmKind::Comparison => 2,
             LlmKind::SinglePass => 3,
-            LlmKind::Translation => 0,
+            LlmKind::Translation | LlmKind::MarketSelection => 0,
         });
         entry.usage = TokenUsage::from_body(body);
         entry.latency_ms = started.elapsed().as_millis() as i64;

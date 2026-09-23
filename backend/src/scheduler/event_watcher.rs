@@ -44,6 +44,15 @@ async fn watch_once(
             .set_status(event.id, EventStatus::Watching)
             .await?;
         tracing::info!(event_id = event.id, event = %event.event, "event entered watching state");
+        if let Some(selector) = &state.market_selector {
+            let selector = selector.clone();
+            let event = event.clone();
+            tokio::spawn(async move {
+                if let Err(error) = selector.selection_for(&event).await {
+                    tracing::warn!(event_id = event.id, %error, "event market selection failed; collector will apply fallback");
+                }
+            });
+        }
         if event.has_release() {
             release(state, &event).await?;
         }

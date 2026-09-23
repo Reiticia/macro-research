@@ -21,6 +21,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub typesafe: TypeSafeConfig,
     #[serde(default)]
+    pub market_selection: MarketSelectionConfig,
+    #[serde(default)]
     pub fcm: FcmConfig,
     #[serde(default)]
     pub ai: AiConfig,
@@ -179,6 +181,7 @@ impl Default for NetworkConfig {
                 "cnbc".into(),
                 "yahoo".into(),
                 "telegram".into(),
+                "typesafe".into(),
             ],
             request_timeout_seconds: 20,
         }
@@ -341,6 +344,37 @@ impl Default for TypeSafeConfig {
 impl TypeSafeConfig {
     pub fn api_key(&self) -> Result<String, AppError> {
         require_secret(&self.api_key, "typesafe.api_key")
+    }
+}
+
+/// Optional Jev-driven event-to-market selection. It is independent of the translation reviewer.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MarketSelectionConfig {
+    pub enabled: bool,
+    pub threshold: f64,
+    /// Conservatively capture every configured asset when Jev is unavailable.
+    pub fallback_to_all_on_jev_error: bool,
+}
+
+impl Default for MarketSelectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            threshold: 0.65,
+            fallback_to_all_on_jev_error: true,
+        }
+    }
+}
+
+impl MarketSelectionConfig {
+    pub fn validate(&self) -> Result<(), AppError> {
+        if !self.threshold.is_finite() || !(0.0..=1.0).contains(&self.threshold) {
+            return Err(AppError::Config(
+                "market_selection.threshold must be between 0 and 1".into(),
+            ));
+        }
+        Ok(())
     }
 }
 

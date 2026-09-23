@@ -289,9 +289,25 @@ impl MarketService {
         Ok(quote)
     }
 
-    pub async fn collect_for_event(&self, event_id: i64) -> Result<usize, AppError> {
+    pub async fn collect_for_event(
+        &self,
+        event_id: i64,
+        selected_symbols: &[MarketSymbol],
+    ) -> Result<usize, AppError> {
+        let symbols: Vec<_> = selected_symbols
+            .iter()
+            .copied()
+            .filter(|symbol| self.symbols.contains(symbol))
+            .collect();
+        if symbols.is_empty() {
+            tracing::error!(
+                event_id,
+                "event market selection was empty or invalid; skipping quote collection"
+            );
+            return Ok(0);
+        }
         let mut saved = 0;
-        for symbol in &self.symbols {
+        for symbol in &symbols {
             match self.quote(*symbol).await {
                 Ok(quote) => {
                     self.repository.save_quote(event_id, &quote).await?;
@@ -372,6 +388,57 @@ mod tests {
             vec![MarketSymbol::Bitcoin],
         )
         .with_live_quote_refresh(ttl, stale_ttl)
+    }
+
+    #[tokio::test]
+    async fn event_collection_only_requests_selected_configured_symbols() {
+        let provider = Arc::new(CountingProvider {
+            calls: AtomicUsize::new(0),
+            fail: AtomicBool::new(false),
+        });
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let event_repository = crate::repository::EventRepository::new(pool.clone());
+        let event_id = event_repository
+            .save_events(&[crate::model::EconomicEvent {
+                id: 0,
+                provider: "fixture".into(),
+                provider_id: "selected-collection".into(),
+                release_group_id: None,
+                country: "United States".into(),
+                currency: Some("USD".into()),
+                category: "employment".into(),
+                event: "Nonfarm Payrolls".into(),
+                event_zh_cn: None,
+                event_zh_tw: None,
+                event_time: Utc::now(),
+                importance: 3,
+                actual: None,
+                previous: None,
+                consensus: None,
+                forecast: None,
+                unit: None,
+                status: crate::model::EventStatus::Watching,
+                time_exact: true,
+            }])
+            .await
+            .unwrap()[0];
+        let service = MarketService::new(
+            provider.clone(),
+            provider.clone(),
+            MarketRepository::new(pool),
+            vec![MarketSymbol::Bitcoin, MarketSymbol::Gold],
+        );
+        let saved = service
+            .collect_for_event(event_id, &[MarketSymbol::Gold])
+            .await
+            .unwrap();
+        assert_eq!(saved, 1);
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

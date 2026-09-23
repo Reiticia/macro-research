@@ -28,7 +28,28 @@ async fn collect_once(
         let collection_end =
             event.event_time + Duration::minutes(config.market_collect_after_minutes);
         if now <= collection_end {
-            let saved = state.market_service.collect_for_event(event.id).await?;
+            let mut symbols = if let Some(selector) = &state.market_selector {
+                match selector.selection_for(&event).await {
+                    Ok(selection) => selection.symbols,
+                    Err(error) => {
+                        tracing::warn!(event_id = event.id, %error, "market selection unavailable; collecting all configured symbols for this sample");
+                        state.market_service.symbols().to_vec()
+                    }
+                }
+            } else {
+                state.market_service.symbols().to_vec()
+            };
+            if symbols.is_empty() {
+                tracing::error!(
+                    event_id = event.id,
+                    "empty event market selection; falling back to all configured symbols"
+                );
+                symbols = state.market_service.symbols().to_vec();
+            }
+            let saved = state
+                .market_service
+                .collect_for_event(event.id, &symbols)
+                .await?;
             if saved > 0 {
                 let _ = state
                     .event_bus

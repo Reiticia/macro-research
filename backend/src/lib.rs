@@ -10,6 +10,7 @@ pub mod error;
 pub mod fcm;
 pub mod llm_usage;
 pub mod market;
+pub mod market_selection;
 pub mod model;
 pub mod openai_compat;
 pub mod quota;
@@ -49,5 +50,6 @@ pub struct AppState {
     pub quota: Arc<QuotaService>,
     pub event_bus: broadcast::Sender<AppEvent>,
     pub fcm: Option<Arc<fcm::FcmNotifier>>,
+    pub market_selector: Option<Arc<market_selection::MarketSelector>>,
     pub backfill: backfill::repository::BackfillRepository,
 }

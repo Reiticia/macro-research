@@ -24,6 +24,7 @@ use market_event_analyzer::{
     fcm::FcmNotifier,
     llm_usage::LlmUsageRepository,
     market::{BinanceProvider, BiquoteProvider, CnbcProvider, MarketService, YahooProvider},
+    market_selection::MarketSelector,
     model::MarketSymbol,
     quota::QuotaService,
     repository::{AnalysisRepository, EventRepository, MarketRepository},
@@ -309,6 +310,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|symbol| MarketSymbol::from_str(symbol))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("invalid market symbol configuration: {error}"))?;
+    let market_candidates = symbols.clone();
     let market_service = Arc::new(
         MarketService::new(
             Arc::new(YahooProvider::new(
@@ -350,6 +352,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         analyses.clone(),
         rules,
     ));
+
+    config.market_selection.validate()?;
+    let market_selector = if config.market_selection.enabled {
+        let api_key = if !config.typesafe.enabled {
+            tracing::warn!(
+                "market selection is enabled but typesafe.enabled is false; safe fallback will be used"
+            );
+            None
+        } else {
+            match config.typesafe.api_key() {
+                Ok(key) => Some(key),
+                Err(error) => {
+                    tracing::warn!(%error, "market selection enabled without TypeSafe credentials; safe fallback will be used");
+                    None
+                }
+            }
+        };
+        match MarketSelector::new(
+            client_for("typesafe"),
+            &config.typesafe,
+            config.market_selection.clone(),
+            market_candidates,
+            events.clone(),
+            llm_usage.clone(),
+            Some(health.clone()),
+            api_key,
+        ) {
+            Ok(selector) => Some(Arc::new(selector)),
+            Err(error) => {
+                tracing::warn!(%error, "Jev market selector unavailable; all-symbol fallback will be used");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let ai_analysis_service = if config.ai.enabled {
         match AiAnalysisService::new(
@@ -454,8 +492,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         quota,
         event_bus,
         fcm: fcm.clone(),
+        market_selector: market_selector.clone(),
         backfill,
     };
+
+    if let Some(selector) = market_selector.clone() {
+        let events = events.clone();
+        tokio::spawn(async move {
+            match events.market_selection_missing_active().await {
+                Ok(active_events) => {
+                    for event in active_events {
+                        if let Err(error) = selector.selection_for(&event).await {
+                            tracing::warn!(event_id = event.id, %error, "could not restore missing event market selection");
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "could not scan for missing event market selections")
+                }
+            }
+        });
+    }
 
     if config.translation.backfill_on_startup
         && let Some(translation) = translation_service

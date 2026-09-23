@@ -191,6 +191,7 @@ async fn app() -> TestApp {
         quota,
         event_bus,
         fcm: None,
+        market_selector: None,
         backfill,
     };
     TestApp { state }

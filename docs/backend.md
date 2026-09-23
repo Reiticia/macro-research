@@ -65,6 +65,18 @@ api_key = "sk-relay-…"
 bot_token = "123456:ABC…"
 admin_chat_ids = "123456789"
 
+[typesafe]
+enabled = false
+base_url = "https://api.typesafe.ai"
+api_key = ""
+model = "jev-latest"
+review_threshold = 0.85
+
+[market_selection]
+enabled = false
+threshold = 0.65
+fallback_to_all_on_jev_error = true
+
 [fcm]
 enabled = false
 service_account_file = "/etc/market-analyzer/firebase-service-account.json"
@@ -84,7 +96,7 @@ te_api_key = ""                      # 仅 --backfill 需要
   `0640 root:market`。
 
 缺少令牌/密钥时的行为：`[auth]` 自动关闭并在日志与部署脚本中告警；Telegram 未配置时告警
-只写日志；翻译与 AI 未配置密钥则拒绝启动该子系统（服务本身仍能起来）。
+只写日志；翻译与 AI 未配置密钥则拒绝启动该子系统（服务本身仍能起来）。市场选择依赖 `[typesafe]`；配置不完整时记录警告并按类别或全标的兜底。
 
 ## 出网代理
 
@@ -93,12 +105,12 @@ te_api_key = ""                      # 仅 --backfill 需要
 ```toml
 [network]
 proxy_url = "http://127.0.0.1:7890"    # 或 socks5://127.0.0.1:1080
-proxied = ["tradingview", "forexfactory", "cnbc", "yahoo", "telegram"]
+proxied = ["tradingview", "forexfactory", "cnbc", "yahoo", "telegram", "typesafe"]
 request_timeout_seconds = 20
 ```
 
 - 留空即全部直连；`proxied` 里没列出的源（BiQuote、Binance、模型接口）走直连，
-  这样代理故障不会连带拖垮局域网内可达的源。
+  这样代理故障不会连带拖垮局域网内可达的源。需要代理 TypeSafe/Jev 时，把 `typesafe` 加入列表。
 - 每个源的失败独立计数并独立告警，见下文。
 - 部署脚本可用 `--proxy http://127.0.0.1:7890` 写入该配置。
 
@@ -217,6 +229,27 @@ Android 后端模式下，事件详情页点击 ⭐ 会订阅 `macro_event_<even
 FCM 默认关闭。Android 不再通过 WebSocket 显示通知，避免 FCM 与 WebSocket 重复提醒；后端仍保留
 WebSocket 供其他客户端兼容使用。没有 Google Play Services 的设备不保证 FCM 可用；用户拒绝
 Android 13+ 通知权限时消息可以到达但不会显示。
+
+## Jev 事件相关行情采集
+
+默认不启用。开启后，事件首次进入行情采集时，后端用 `[typesafe]` 的 Jev 对配置的 `[market].symbols` 一次性并行判断，结果写入 `event_market_selection`，该事件后续采样和服务重启都会复用，不会每 15 秒重复调用模型。
+
+```toml
+[typesafe]
+enabled = true
+base_url = "https://api.typesafe.ai"
+api_key = "<TypeSafe API key>"
+model = "jev-latest"
+
+[market_selection]
+enabled = true
+threshold = 0.65
+fallback_to_all_on_jev_error = true
+```
+
+每个候选标的对应一个 Noul 问题；例如 `dxy`、`us2y`、`gold` 会作为 `questions` 的 key，概率不低于阈值的标的进入候选采集清单。就业、通胀、GDP、利率等类别会并入保守的宏观标的；能源/原油类并入 WTI/Brent。无法识别类别时回退到所有 `[market].symbols`。Jev 错误时默认全标的兜底，可将 `fallback_to_all_on_jev_error=false` 改为类别兜底优先。持久化失败时本轮临时采集所有配置标的。
+
+选择器读取事件名称、国家、货币、类别、重要性、前值和预期值；不依赖尚未公布的 Actual。不会改变客户端每 5 秒实时行情刷新、事件行情每 15 秒采样、分钟 OHLC 聚合或 AI 报告接口。模型请求按 `market_selection` 类别记录到 `/api/v1/usage`，健康键为 `market_selection.typesafe`。需要代理 TypeSafe 时在 `[network].proxied` 加上 `typesafe`。
 
 ## 数据源与降级
 

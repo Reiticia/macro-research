@@ -1,5 +1,7 @@
 use chrono::{Duration, Utc};
 use market_event_analyzer::{
+    market_selection::MarketSelection,
+    model::MarketSymbol,
     model::{EconomicEvent, EventStatus},
     repository::EventRepository,
 };
@@ -56,6 +58,74 @@ async fn event_upsert_preserves_state_and_records_revisions() {
     assert_eq!(observations.len(), 2);
     assert_eq!(observations[0].actual, None);
     assert_eq!(observations[1].actual, Some(Decimal::new(32, 1)));
+}
+
+#[tokio::test]
+async fn market_selection_is_persisted_once_and_read_back() {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    let repository = EventRepository::new(pool);
+    let event = EconomicEvent {
+        id: 0,
+        provider: "fixture".into(),
+        provider_id: "selection-test".into(),
+        release_group_id: None,
+        country: "United States".into(),
+        currency: Some("USD".into()),
+        category: "employment".into(),
+        event: "Nonfarm Payrolls".into(),
+        event_zh_cn: None,
+        event_zh_tw: None,
+        event_time: Utc::now() + Duration::minutes(5),
+        importance: 3,
+        actual: None,
+        previous: None,
+        consensus: None,
+        forecast: None,
+        unit: None,
+        status: EventStatus::Watching,
+        time_exact: true,
+    };
+    let event_id = repository.save_events(&[event]).await.unwrap()[0];
+    let first = MarketSelection {
+        symbols: vec![MarketSymbol::Dxy, MarketSymbol::Us2y],
+        probabilities: [("dxy".to_owned(), 0.91)].into_iter().collect(),
+        source: "jev",
+        model: "jev-latest".into(),
+    };
+    let saved = repository
+        .save_market_selection(event_id, &first)
+        .await
+        .unwrap();
+    let ignored_duplicate = repository
+        .save_market_selection(
+            event_id,
+            &MarketSelection {
+                symbols: vec![MarketSymbol::Gold],
+                probabilities: Default::default(),
+                source: "category_fallback",
+                model: "fallback".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(saved, first);
+    assert_eq!(ignored_duplicate, first);
+    assert_eq!(
+        repository.market_selection(event_id).await.unwrap(),
+        Some(first)
+    );
+    assert!(
+        repository
+            .market_selection_missing_active()
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]

@@ -22,8 +22,8 @@ url = "sqlite://data/market.db"
 # 哪些上游必须走代理。主机本身能直连日历、行情与 Telegram 时留空即可。
 [network]
 proxy_url = ""
-proxied = ["tradingview", "forexfactory", "cnbc", "yahoo", "telegram"]
-# 中转站本身也被墙时，把 "translation" / "ai" 也加进来（默认直连）。
+proxied = ["tradingview", "forexfactory", "cnbc", "yahoo", "telegram", "typesafe"]
+# TypeSafe/Jev 或模型中转站需要代理时，可加入 "typesafe" / "translation" / "ai"。
 request_timeout_seconds = 20
 
 [calendar]
@@ -96,6 +96,12 @@ base_url = "https://api.typesafe.ai"
 api_key = ""
 model = "jev-latest"
 review_threshold = 0.85
+
+# 可选的 Jev 事件行情标的选择，与翻译审核开关相互独立。
+[market_selection]
+enabled = false
+threshold = 0.65
+fallback_to_all_on_jev_error = true
 
 # 可选的 Firebase Cloud Messaging HTTP v1 推送。服务账号 JSON 放在仓库外。
 [fcm]
