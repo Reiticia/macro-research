@@ -154,9 +154,8 @@ class CalendarViewModel(private val repository: MacroRepository) : ViewModel() {
         }
     }
 
-    fun applyFilters(importance: Set<Int>, countries: Set<String>) {
-        _state.value = _state.value.copy(importance = importance, countries = countries)
-        repository.setCountries(countries)
+    fun applyImportanceFilter(importance: Set<Int>) {
+        _state.value = _state.value.copy(importance = importance)
     }
 
     /** Re-reads name-keyed translations after the user corrects one on the detail screen. */

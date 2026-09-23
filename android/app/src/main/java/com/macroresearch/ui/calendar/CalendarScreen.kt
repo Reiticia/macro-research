@@ -46,14 +46,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.macroresearch.data.CountryPreferences
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.ui.CalendarViewModel
 import com.macroresearch.ui.common.EventCard
 import com.macroresearch.ui.common.LoadingHint
 import com.macroresearch.ui.common.calendarWarningMessage
-import com.macroresearch.ui.common.countryLabel
-import com.macroresearch.ui.common.flag
 import com.macroresearch.ui.common.importanceLabel
 import com.macroresearch.ui.theme.Upcoming
 import com.macroresearch.ui.theme.ResearchLayout
@@ -100,8 +97,6 @@ fun CalendarScreen(repository: MacroRepository, padding: PaddingValues, onEvent:
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             item { FilterChip(selected = 3 in state.importance, onClick = { showFilters = true }, leadingIcon = { Text("●", color = Upcoming) }, label = { Text(importanceLabel(3)) }) }
             item { FilterChip(selected = 2 in state.importance, onClick = { showFilters = true }, leadingIcon = { Text("●", color = MaterialTheme.colorScheme.primary) }, label = { Text(importanceLabel(2)) }) }
-            item { FilterChip(selected = "United States" in state.countries, onClick = { showFilters = true }, label = { Text("🇺🇸 ${countryLabel("United States")}") }) }
-            item { FilterChip(selected = "Euro Area" in state.countries, onClick = { showFilters = true }, label = { Text("🇪🇺 ${countryLabel("Euro Area")}") }) }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(dateLabel(state.date), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
@@ -136,10 +131,9 @@ fun CalendarScreen(repository: MacroRepository, padding: PaddingValues, onEvent:
     if (showFilters) {
         CalendarFilterSheet(
             initialImportance = state.importance,
-            initialCountries = state.countries,
             onDismiss = { showFilters = false },
-            onApply = { importance, countries ->
-                vm.applyFilters(importance, countries)
+            onApply = { importance ->
+                vm.applyImportanceFilter(importance)
                 showFilters = false
             },
         )
@@ -221,13 +215,10 @@ private fun CalendarDatePicker(
 @Composable
 private fun CalendarFilterSheet(
     initialImportance: Set<Int>,
-    initialCountries: Set<String>,
     onDismiss: () -> Unit,
-    onApply: (Set<Int>, Set<String>) -> Unit,
+    onApply: (Set<Int>) -> Unit,
 ) {
     var importance by remember { mutableStateOf(initialImportance) }
-    var countries by remember { mutableStateOf(initialCountries) }
-    val countryOptions = CountryPreferences.SUPPORTED_COUNTRIES
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.filter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -242,18 +233,8 @@ private fun CalendarFilterSheet(
                     )
                 }
             }
-            Text(stringResource(R.string.countries_regions), fontWeight = FontWeight.Bold)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(countryOptions) { country ->
-                    FilterChip(
-                        selected = country in countries,
-                        onClick = { countries = if (country in countries) countries - country else countries + country },
-                        label = { Text("${flag(country)} ${countryLabel(country)}") },
-                    )
-                }
-            }
             Text(stringResource(R.string.color_legend), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-            Button(onClick = { onApply(importance, countries) }, modifier = Modifier.fillMaxWidth(), enabled = importance.isNotEmpty()) { Text(stringResource(R.string.apply)) }
+            Button(onClick = { onApply(importance) }, modifier = Modifier.fillMaxWidth(), enabled = importance.isNotEmpty()) { Text(stringResource(R.string.apply)) }
         }
     }
 }
