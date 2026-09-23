@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -58,13 +59,19 @@ fun MacroApp(
     onNotificationHandled: () -> Unit = {},
 ) {
     val navController = rememberNavController()
-    LaunchedEffect(notificationEventId) {
-        notificationEventId?.let { eventId ->
-            navController.navigate("event/$eventId") { launchSingleTop = true }
-            onNotificationHandled()
-        }
-    }
+    val initialNotificationEventId = remember { notificationEventId }
     val backStackEntry by navController.currentBackStackEntryAsState()
+    // Wait until NavHost has installed its graph and produced a back-stack entry. On a cold
+    // start the notification intent can arrive before navigation is ready; navigating earlier
+    // can be dropped or fail because the destination is not registered yet.
+    LaunchedEffect(notificationEventId, backStackEntry?.destination?.route) {
+        val eventId = notificationEventId ?: return@LaunchedEffect
+        val entry = backStackEntry ?: return@LaunchedEffect
+        if (entry.arguments?.getString("eventId") != eventId.toString()) {
+            navController.navigate("event/$eventId") { launchSingleTop = true }
+        }
+        onNotificationHandled()
+    }
     val currentDestination = backStackEntry?.destination
     val showBottomBar = destinations.any { destination ->
         currentDestination?.hierarchy?.any { it.route == destination.route } == true
@@ -112,7 +119,12 @@ fun MacroApp(
             }
         },
     ) { padding ->
-        NavHost(navController, startDestination = "home") {
+        // Use the notification destination as the graph's initial route on cold start. This
+        // avoids racing an early navigate() against NavHost graph installation.
+        NavHost(
+            navController,
+            startDestination = initialNotificationEventId?.let { "event/$it" } ?: "home",
+        ) {
             composable("home") {
                 HomeScreen(
                     repository = repository,
