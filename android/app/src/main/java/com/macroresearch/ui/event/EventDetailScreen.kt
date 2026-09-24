@@ -47,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.CalendarWarning
+import com.macroresearch.data.model.EventDescription
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.data.model.hasEventTimeArrived
 import com.macroresearch.data.model.currentStatus
@@ -112,6 +113,7 @@ fun EventDetailScreen(
                 EventContent(
                     event = event,
                     market = state.market,
+                    description = state.detail?.description,
                     modifier = Modifier.padding(padding),
                     onAnalysis = onAnalysis,
                     onHistory = onHistory,
@@ -130,6 +132,7 @@ fun EventDetailScreen(
 private fun EventContent(
     event: EconomicEvent,
     market: MarketResponse?,
+    description: EventDescription?,
     modifier: Modifier,
     onAnalysis: () -> Unit,
     onHistory: () -> Unit,
@@ -164,7 +167,7 @@ private fun EventContent(
             }
         }
         item { ReleaseDataCard(event) }
-        item { EventIntroduction(event) }
+        item { EventIntroduction(event, stateDescription = description) }
         item { MarketTrackingCard(event, market) }
         item {
             Button(
@@ -289,11 +292,18 @@ private fun DataValue(label: String, value: String, highlight: Boolean = false) 
 }
 
 @Composable
-private fun EventIntroduction(event: EconomicEvent) {
+private fun EventIntroduction(event: EconomicEvent, stateDescription: EventDescription?) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.event_intro), fontWeight = FontWeight.Bold)
-            val introText = if (event.category.equals("calendar", ignoreCase = true)) {
+            val introText = stateDescription?.let { description ->
+                val locale = LocalConfiguration.current.locales[0]
+                when {
+                    locale.language == java.util.Locale.CHINESE.language && locale.country in setOf("TW", "HK", "MO") -> description.zhTw
+                    locale.language == java.util.Locale.CHINESE.language -> description.zhCn
+                    else -> description.en
+                }
+            } ?: if (event.category.equals("calendar", ignoreCase = true)) {
                 stringResource(
                     R.string.event_intro_nonnumeric,
                     countryLabel(event.country),

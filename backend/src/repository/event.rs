@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::{
     error::AppError,
+    event_description::EventDescription,
     market_selection::MarketSelection,
     model::{EconomicEvent, EventObservation, EventStatus, MarketSymbol},
 };
@@ -342,6 +343,41 @@ impl EventRepository {
         .fetch_all(&self.pool)
         .await?;
         rows.into_iter().map(event_from_row).collect()
+    }
+
+    pub async fn description(&self, event_id: i64) -> Result<Option<EventDescription>, AppError> {
+        let row = sqlx::query("SELECT en, zh_cn, zh_tw FROM event_description WHERE event_id = ?")
+            .bind(event_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(|row| {
+            Ok(EventDescription {
+                en: row.try_get("en")?,
+                zh_cn: row.try_get("zh_cn")?,
+                zh_tw: row.try_get("zh_tw")?,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn save_description(
+        &self,
+        event_id: i64,
+        description: &EventDescription,
+    ) -> Result<(), AppError> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO event_description (event_id, en, zh_cn, zh_tw, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(event_id) DO UPDATE SET en = excluded.en, zh_cn = excluded.zh_cn, zh_tw = excluded.zh_tw, updated_at = excluded.updated_at",
+        )
+        .bind(event_id)
+        .bind(&description.en)
+        .bind(&description.zh_cn)
+        .bind(&description.zh_tw)
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn get(&self, id: i64) -> Result<EconomicEvent, AppError> {

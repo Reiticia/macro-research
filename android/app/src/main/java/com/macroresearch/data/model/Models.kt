@@ -31,9 +31,16 @@ data class EventObservation(
     val forecast: String?,
 )
 
+data class EventDescription(
+    val en: String,
+    val zhCn: String,
+    val zhTw: String,
+)
+
 data class EventDetailResponse(
     val event: EconomicEvent,
     val observations: List<EventObservation>,
+    val description: EventDescription? = null,
 )
 
 data class ExpectedReaction(

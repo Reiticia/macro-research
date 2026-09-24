@@ -7,6 +7,7 @@ pub mod backfill;
 pub mod calendar;
 pub mod config;
 pub mod error;
+pub mod event_description;
 pub mod fcm;
 pub mod llm_usage;
 pub mod market;

@@ -10,6 +10,7 @@ use crate::{
     ai_analysis::AiAnalysisResponse,
     auth::TokenId,
     error::AppError,
+    event_description::{self, EventDescription},
     model::{AnalysisReport, EconomicEvent, EventObservation},
 };
 
@@ -37,14 +38,24 @@ pub async fn by_provider(
 pub struct EventDetail {
     event: EconomicEvent,
     observations: Vec<EventObservation>,
+    description: Option<EventDescription>,
 }
 
 async fn detail_for(state: &AppState, id: i64) -> Result<EventDetail, AppError> {
     let event = state.events.get(id).await?;
     let observations = state.events.observations(id).await?;
+    let description = match state.events.description(id).await? {
+        Some(description) => Some(description),
+        None => {
+            let description = event_description::for_event(&event);
+            state.events.save_description(id, &description).await?;
+            Some(description)
+        }
+    };
     Ok(EventDetail {
         event,
         observations,
+        description,
     })
 }
 
@@ -234,10 +245,7 @@ pub async fn ai_analysis_by_provider(
     .await
 }
 
-fn event_time_has_passed(
-    event_time: &chrono::DateTime<Utc>,
-    now: &chrono::DateTime<Utc>,
-) -> bool {
+fn event_time_has_passed(event_time: &chrono::DateTime<Utc>, now: &chrono::DateTime<Utc>) -> bool {
     event_time <= now
 }
 
