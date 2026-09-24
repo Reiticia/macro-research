@@ -293,7 +293,10 @@ private fun DataValue(label: String, value: String, highlight: Boolean = false) 
 
 @Composable
 private fun EventIntroduction(event: EconomicEvent, stateDescription: EventDescription?) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.event_intro), fontWeight = FontWeight.Bold)
             val introText = stateDescription?.let { description ->
