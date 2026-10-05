@@ -137,6 +137,8 @@ impl TypeSafeVerifier {
                         {
                             tracing::info!(
                                 source = %verdict.source,
+                                zh_cn = %translations[id].zh_cn,
+                                zh_tw = %translations[id].zh_tw,
                                 model = %self.model,
                                 review_scope = if translations.len() == 1 { "single" } else { "batch" },
                                 probability,
