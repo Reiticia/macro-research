@@ -130,6 +130,23 @@ impl TypeSafeVerifier {
         let result = match self.request(&payload).await {
             Ok((root, usage)) => {
                 let parsed = parse_verdicts(&root, translations, self.threshold);
+                if let Ok(verdicts) = &parsed {
+                    for (id, verdict) in verdicts.iter().enumerate() {
+                        if let Some(probability) =
+                            root["answers"][format!("item_{id}")]["noul"].as_f64()
+                        {
+                            tracing::info!(
+                                source = %verdict.source,
+                                model = %self.model,
+                                review_scope = if translations.len() == 1 { "single" } else { "batch" },
+                                probability,
+                                threshold = self.threshold,
+                                approved = verdict.approved,
+                                "TypeSafe translation review verdict"
+                            );
+                        }
+                    }
+                }
                 match &parsed {
                     Ok(_) => self.audit_call(started, usage, Ok(())).await,
                     Err(error) => self.audit_call(started, usage, Err(error)).await,
@@ -160,7 +177,7 @@ impl TranslationVerifier for TypeSafeVerifier {
         let result: Result<Vec<TranslationVerdict>, AppError> = async {
             let mut verdicts = self.review_once(translations).await?;
             for index in 0..verdicts.len() {
-                if !verdicts[index].approved {
+                if translations.len() > 1 && !verdicts[index].approved {
                     verdicts[index] = self
                         .review_once(&translations[index..index + 1])
                         .await?
