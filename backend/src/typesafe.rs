@@ -150,7 +150,11 @@ impl TranslationVerifier for TypeSafeVerifier {
         if let Some(health) = &self.health {
             match &result {
                 Ok(_) => health.record_success(HEALTH_KEY).await,
-                Err(error) => health.record_failure(HEALTH_KEY, error.to_string()).await,
+                Err(error) => {
+                    health
+                        .record_ai_failure(HEALTH_KEY, error.to_string())
+                        .await
+                }
             }
         }
         result

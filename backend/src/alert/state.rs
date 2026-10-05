@@ -58,6 +58,7 @@ struct PendingAlert {
     key: String,
     status: String,
     message: String,
+    unsuppressed: bool,
 }
 
 /// Tracks consecutive failures per source and notifies the admin on state transitions.
@@ -96,15 +97,26 @@ impl HealthRegistry {
         self.record(key, Outcome::Failure(error.into())).await;
     }
 
+    /// Records an AI failure and immediately notifies Telegram, independent of the generic
+    /// consecutive-failure threshold and quiet hours.
+    pub async fn record_ai_failure(&self, key: &str, error: impl Into<String>) {
+        self.record_with_mode(key, Outcome::Failure(error.into()), true)
+            .await;
+    }
+
     /// The source answered through a degraded path (for example the calendar fallback feed).
     pub async fn record_degraded(&self, key: &str, error: impl Into<String>) {
         self.record(key, Outcome::Degraded(error.into())).await;
     }
 
     async fn record(&self, key: &str, outcome: Outcome) {
+        self.record_with_mode(key, outcome, false).await;
+    }
+
+    async fn record_with_mode(&self, key: &str, outcome: Outcome, immediate: bool) {
         let pending = {
             let _guard = self.lock.lock().await;
-            match self.record_locked(key, outcome).await {
+            match self.record_locked(key, outcome, immediate).await {
                 Ok(pending) => pending,
                 Err(error) => {
                     tracing::warn!(key, %error, "source health update failed");
@@ -114,14 +126,25 @@ impl HealthRegistry {
         };
         if let Some(pending) = pending
             && let Some(alerts) = &self.alerts
-            && let Err(error) = alerts
-                .notify(
-                    pending.severity,
-                    &pending.key,
-                    &pending.status,
-                    pending.message,
-                )
-                .await
+            && let Err(error) = if pending.unsuppressed {
+                alerts
+                    .notify_unsuppressed(
+                        pending.severity,
+                        &pending.key,
+                        &pending.status,
+                        pending.message,
+                    )
+                    .await
+            } else {
+                alerts
+                    .notify(
+                        pending.severity,
+                        &pending.key,
+                        &pending.status,
+                        pending.message,
+                    )
+                    .await
+            }
         {
             tracing::warn!(key, %error, "source health notification failed");
         }
@@ -131,6 +154,7 @@ impl HealthRegistry {
         &self,
         key: &str,
         outcome: Outcome,
+        immediate: bool,
     ) -> Result<Option<PendingAlert>, AppError> {
         let now = Utc::now();
         let current = self.load(key).await?;
@@ -173,12 +197,13 @@ impl HealthRegistry {
                 now - parsed.with_timezone(&Utc) < Duration::seconds(self.cooldown_seconds)
             })
             .unwrap_or(false);
-        let should_notify = if changed {
-            // A first-time healthy observation needs no announcement.
-            !(status == Status::Healthy && current.is_none())
-        } else {
-            status != Status::Healthy && !notified_recently
-        };
+        let should_notify = immediate
+            || if changed {
+                // A first-time healthy observation needs no announcement.
+                !(status == Status::Healthy && current.is_none())
+            } else {
+                status != Status::Healthy && !notified_recently
+            };
         let last_notified_at = if should_notify {
             Some(now.to_rfc3339())
         } else {
@@ -210,27 +235,40 @@ impl HealthRegistry {
         if !should_notify || self.alerts.is_none() {
             return Ok(None);
         }
-        let severity = match status {
-            Status::Healthy => Severity::Info,
-            Status::Degraded => Severity::Warning,
-            Status::Down => Severity::Warning,
+        let severity = if immediate {
+            Severity::Warning
+        } else {
+            match status {
+                Status::Healthy => Severity::Info,
+                Status::Degraded | Status::Down => Severity::Warning,
+            }
         };
-        let message = match status {
-            Status::Healthy => format!("数据源 {key} 已恢复。"),
-            Status::Degraded => format!(
-                "数据源 {key} 已降级，正在使用回退路径。{}",
-                last_error.as_deref().unwrap_or_default()
-            ),
-            Status::Down => format!(
-                "数据源 {key} 连续失败 {failures} 次，已判定不可用。{}",
-                last_error.as_deref().unwrap_or_default()
-            ),
+        let message = if immediate {
+            format!("AI 调用失败：{}", last_error.as_deref().unwrap_or_default())
+        } else {
+            match status {
+                Status::Healthy => format!("数据源 {key} 已恢复。"),
+                Status::Degraded => format!(
+                    "数据源 {key} 已降级，正在使用回退路径。{}",
+                    last_error.as_deref().unwrap_or_default()
+                ),
+                Status::Down => format!(
+                    "数据源 {key} 连续失败 {failures} 次，已判定不可用。{}",
+                    last_error.as_deref().unwrap_or_default()
+                ),
+            }
         };
         Ok(Some(PendingAlert {
             severity,
             key: key.to_owned(),
-            status: status.as_str().to_owned(),
+            status: if immediate {
+                "ai_failure"
+            } else {
+                status.as_str()
+            }
+            .to_owned(),
             message,
+            unsuppressed: immediate,
         }))
     }
 

@@ -244,7 +244,9 @@ impl MarketSelector {
                 health.record_success(HEALTH_KEY).await;
             }
         } else if let (Some(health), Err(error)) = (&self.health, &outcome) {
-            health.record_failure(HEALTH_KEY, error.to_string()).await;
+            health
+                .record_ai_failure(HEALTH_KEY, error.to_string())
+                .await;
         }
         let answers = outcome.map(|_| answers.expect("successful parse contains answers"))?;
         let mut selected = threshold_symbols(

@@ -706,7 +706,7 @@ impl TranslationService {
                 Err(error) => {
                     if let Some(health) = &self.health {
                         health
-                            .record_failure(RELAY_HEALTH_KEY, error.to_string())
+                            .record_ai_failure(RELAY_HEALTH_KEY, error.to_string())
                             .await;
                     }
                     return Err(error);
@@ -723,7 +723,7 @@ impl TranslationService {
                 Err(error) => {
                     if let Some(health) = &self.health {
                         health
-                            .record_failure(RELAY_HEALTH_KEY, error.to_string())
+                            .record_ai_failure(RELAY_HEALTH_KEY, error.to_string())
                             .await;
                     }
                     tracing::warn!(
