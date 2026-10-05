@@ -133,9 +133,8 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
                     if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
                         state
                             .telegram
-                            .close_keyboard(chat_id, message_id, &text)
+                            .edit_message(chat_id, message_id, &text, None)
                             .await?;
-                        state.telegram.send_message(chat_id, &text, None).await?;
                     }
                     return Ok(());
                 }
@@ -143,16 +142,15 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
                     .telegram
                     .answer_callback(callback_id, "请选择测试标的")
                     .await?;
-                if let Some(chat_id) = chat_id {
-                    if let Some(message_id) = message_id {
-                        state
-                            .telegram
-                            .close_keyboard(chat_id, message_id, "请选择测试标的")
-                            .await?;
-                    }
+                if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
                     state
                         .telegram
-                        .send_message(chat_id, "请选择用于连通性测试的标的：", Some(buttons))
+                        .edit_message(
+                            chat_id,
+                            message_id,
+                            "请选择用于连通性测试的标的：",
+                            Some(buttons),
+                        )
                         .await?;
                 }
                 return Ok(());
@@ -162,9 +160,11 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
                 let result = test_market_api(state, provider, symbol).await;
                 let label = api_label(provider);
                 let text = match result {
-                    Ok(()) => format!("✅ {label} API 连通正常（{symbol} 行情请求成功）。"),
+                    Ok(price) => format!(
+                        "✅ {label} 连通正常\n标的：{symbol}\n当前价格：<code>{price}</code>"
+                    ),
                     Err(error) => format!(
-                        "❌ {label} API 连通失败（{symbol}）：{}",
+                        "❌ {label} 测试失败（{symbol}）：{}",
                         crate::alert::telegram::escape(&error)
                     ),
                 };
@@ -172,9 +172,8 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
                 if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
                     state
                         .telegram
-                        .close_keyboard(chat_id, message_id, &text)
+                        .edit_message(chat_id, message_id, &text, None)
                         .await?;
-                    state.telegram.send_message(chat_id, &text, None).await?;
                 }
                 return Ok(());
             }
@@ -369,7 +368,7 @@ fn api_symbol_buttons(provider: &str) -> Vec<Vec<InlineButton>> {
         .collect()
 }
 
-async fn test_market_api(state: &BotState, provider: &str, symbol: &str) -> Result<(), String> {
+async fn test_market_api(state: &BotState, provider: &str, symbol: &str) -> Result<f64, String> {
     use std::str::FromStr;
     let symbol = crate::model::MarketSymbol::from_str(symbol)?;
     let client = if state.config.network.proxies(provider) {
@@ -381,17 +380,17 @@ async fn test_market_api(state: &BotState, provider: &str, symbol: &str) -> Resu
         "yahoo" => YahooProvider::new(client, &state.config.market.yahoo_base_url)
             .quote(symbol)
             .await
-            .map(|_| ())
+            .map(|quote| quote.price)
             .map_err(|error| error.to_string()),
         "biquote" => BiquoteProvider::new(client, &state.config.market.biquote_base_url)
             .quote(symbol)
             .await
-            .map(|_| ())
+            .map(|quote| quote.price)
             .map_err(|error| error.to_string()),
         "binance" => BinanceProvider::new(client, &state.config.market.binance_base_url)
             .quote(symbol)
             .await
-            .map(|_| ())
+            .map(|quote| quote.price)
             .map_err(|error| error.to_string()),
         "cnbc" => CnbcProvider::new(
             client,
@@ -400,7 +399,7 @@ async fn test_market_api(state: &BotState, provider: &str, symbol: &str) -> Resu
         )
         .quote(symbol)
         .await
-        .map(|_| ())
+        .map(|quote| quote.price)
         .map_err(|error| error.to_string()),
         _ => Err("未知 API 接口".into()),
     }

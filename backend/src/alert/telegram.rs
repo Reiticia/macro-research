@@ -124,6 +124,49 @@ impl TelegramClient {
             .and_then(Value::as_i64))
     }
 
+    /// Updates an existing message and its inline keyboard in place.
+    pub async fn edit_message(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        text: &str,
+        keyboard: Option<Vec<Vec<InlineButton>>>,
+    ) -> Result<(), AppError> {
+        let mut payload = json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": true,
+        });
+        let rows = keyboard.unwrap_or_default();
+        let inline: Vec<Vec<Value>> = rows
+            .into_iter()
+            .map(|row| {
+                row.into_iter().map(|button| {
+            json!({"text": button.text, "callback_data": button.callback_data})
+        }).collect()
+            })
+            .collect();
+        payload["reply_markup"] = json!({"inline_keyboard": inline});
+        let response = self
+            .client
+            .post(self.url("editMessageText"))
+            .json(&payload)
+            .send()
+            .await?;
+        let body: Value = response.json().await?;
+        if body.get("ok").and_then(Value::as_bool) != Some(true) {
+            return Err(AppError::Provider(format!(
+                "Telegram editMessageText failed: {}",
+                body.get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown error")
+            )));
+        }
+        Ok(())
+    }
+
     /// Replaces the buttons of an already-sent message, so a decided request cannot be
     /// applied twice and the admin sees the outcome inline.
     pub async fn close_keyboard(
