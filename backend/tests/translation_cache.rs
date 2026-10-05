@@ -465,6 +465,76 @@ async fn extra_headers_are_sent_and_can_replace_the_bearer_header() {
     task.abort();
 }
 
+#[tokio::test]
+async fn translation_options_are_sent_to_the_relay() {
+    use market_event_analyzer::openai_compat::ExtraHeaders;
+    use std::collections::BTreeMap;
+
+    let capture = RelayCapture::default();
+    let (base, task) = spawn_relay(capture.clone(), |_: &Value| Some(relay_response_body())).await;
+    let mut extra = BTreeMap::new();
+    extra.insert("thinking".into(), serde_json::json!({"type": "disabled"}));
+    let translator = OpenAiEventNameTranslator::with_options(
+        reqwest::Client::new(),
+        &format!("{base}/v1"),
+        "test-model",
+        "key",
+        ExtraHeaders::default(),
+        extra,
+    )
+    .unwrap();
+    translator
+        .translate(&["CPI YoY".into()], &[])
+        .await
+        .unwrap();
+    assert_eq!(capture.body(0).await["thinking"]["type"], "disabled");
+    task.abort();
+}
+
+#[tokio::test]
+async fn body_read_timeout_is_reported_as_timeout() {
+    use axum::{
+        body::{Body, Bytes},
+        response::Response,
+    };
+    use futures_util::stream;
+    use std::time::Duration as StdDuration;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            Router::new().route(
+                "/chat/completions",
+                post(|| async {
+                    let chunks = stream::once(async {
+                        tokio::time::sleep(StdDuration::from_millis(250)).await;
+                        Ok::<_, std::io::Error>(Bytes::from_static(b"{}"))
+                    });
+                    Response::builder()
+                        .status(200)
+                        .body(Body::from_stream(chunks))
+                        .unwrap()
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+    });
+    let http = reqwest::Client::builder()
+        .timeout(StdDuration::from_millis(100))
+        .build()
+        .unwrap();
+    let translator = OpenAiEventNameTranslator::new(http, &base, "test-model", "key").unwrap();
+    let error = translator
+        .translate(&["CPI YoY".into()], &[])
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("timed out"), "{error}");
+    server.abort();
+}
+
 fn relay_response_body() -> Value {
     serde_json::json!({
         "choices": [{

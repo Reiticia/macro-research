@@ -108,6 +108,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .proxy(reqwest::Proxy::all(config.network.proxy_url.trim())?)
             .build()?
     };
+    // Translation can take longer than calendars/quotes; do not enlarge their timeouts.
+    let mut translation_builder = reqwest::Client::builder()
+        .user_agent("market-event-analyzer/0.2 (personal research tool)")
+        .timeout(Duration::from_secs(
+            config.translation.request_timeout_seconds.max(5),
+        ));
+    if config.network.proxies("translation") {
+        translation_builder =
+            translation_builder.proxy(reqwest::Proxy::all(config.network.proxy_url.trim())?);
+    }
+    let translation_http = translation_builder.build()?;
     let client_for = |source: &str| -> reqwest::Client {
         if config.network.proxies(source) {
             proxied_http.clone()
@@ -117,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if check_ai {
-        check_ai_relays(&config, &client_for).await?;
+        check_ai_relays(&config, &client_for, &translation_http).await?;
         return Ok(());
     }
 
@@ -223,7 +234,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(api_key) => {
                 let translator = Arc::new(
                     OpenAiEventNameTranslator::with_options(
-                        client_for("translation"),
+                        translation_http.clone(),
                         &config.translation.base_url,
                         config.translation.model.clone(),
                         api_key,
@@ -234,7 +245,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     )?
                     .with_audit_opt(llm_usage.clone()),
                 );
-                let typesafe_verifier = if config.typesafe.enabled {
+                let typesafe_verifier = if config.use_typesafe_for_translation() {
                     match config.typesafe.api_key() {
                         Ok(typesafe_key) => match TypeSafeVerifier::new(
                             client_for("typesafe"),
@@ -633,6 +644,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn check_ai_relays(
     config: &AppConfig,
     client_for: &impl Fn(&str) -> reqwest::Client,
+    translation_http: &reqwest::Client,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("== 中转站自检 ==");
     println!(
@@ -651,14 +663,15 @@ async fn check_ai_relays(
         );
         match config.translation.api_key() {
             Ok(api_key) => {
-                match OpenAiEventNameTranslator::with_headers(
-                    client_for("translation"),
+                match OpenAiEventNameTranslator::with_options(
+                    translation_http.clone(),
                     &config.translation.base_url,
                     config.translation.model.clone(),
                     api_key,
                     market_event_analyzer::openai_compat::ExtraHeaders::from_map(
                         &config.translation.extra_headers,
                     ),
+                    config.translation.extra_body.clone(),
                 ) {
                     Ok(translator) => {
                         let sample = ["Nonfarm Payrolls".to_owned(), "Core CPI m/m".to_owned()];

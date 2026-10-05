@@ -231,7 +231,7 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
 }
 
 async fn test_ai_module(state: &BotState, module: &str) -> Result<(), String> {
-    let (url, model, api_key, headers, payload) = match module {
+    let (url, model, api_key, headers, mut payload) = match module {
         "translation" => {
             let config = &state.config.translation;
             if !config.enabled {
@@ -297,6 +297,16 @@ async fn test_ai_module(state: &BotState, module: &str) -> Result<(), String> {
     if model.trim().is_empty() {
         return Err("模型名称为空".into());
     }
+    match module {
+        "translation" => crate::openai_compat::merge_extra_body(
+            &mut payload,
+            &state.config.translation.extra_body,
+        ),
+        "analysis" => {
+            crate::openai_compat::merge_extra_body(&mut payload, &state.config.ai.extra_body)
+        }
+        _ => {}
+    }
     let route = match module {
         "translation" => "translation",
         "analysis" => "ai",
@@ -308,6 +318,11 @@ async fn test_ai_module(state: &BotState, module: &str) -> Result<(), String> {
         &state.direct_http
     };
     let mut request = client.post(url).bearer_auth(api_key).json(&payload);
+    if module == "translation" {
+        request = request.timeout(std::time::Duration::from_secs(
+            state.config.translation.request_timeout_seconds.max(5),
+        ));
+    }
     for (name, value) in headers {
         request = request.header(name, value);
     }

@@ -272,14 +272,21 @@ impl OpenAiEventNameTranslator {
                 Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
                 Ok(None) => break,
                 Err(error) => {
+                    let timed_out = error.is_timeout();
                     tracing::warn!(
                         %status,
                         content_type = %content_type,
                         content_encoding = %content_encoding,
                         body = %response_preview(&bytes),
+                        timed_out,
                         %error,
                         "translation relay response body read failed"
                     );
+                    if timed_out {
+                        return Err(AppError::Provider(format!(
+                            "translation relay response body timed out: {error}"
+                        )));
+                    }
                     return Err(error.into());
                 }
             }

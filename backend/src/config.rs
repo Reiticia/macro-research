@@ -235,6 +235,11 @@ pub struct TranslationConfig {
     /// Free-form JSON merged into every request body; `messages` is protected.
     pub extra_body: BTreeMap<String, serde_json::Value>,
     pub batch_size: usize,
+    /// Timeout for each translation relay request, including reading its response body.
+    pub request_timeout_seconds: u64,
+    /// Use TypeSafe to proofread names when typesafe.enabled is true. Otherwise use the
+    /// translation model's own verifier; market selection is unaffected.
+    pub use_typesafe_verifier: bool,
     /// Rounds of "translate, review, retry the rejected ones" per batch. A name that keeps
     /// failing review is left untranslated and retried by the next sync.
     pub max_rounds: usize,
@@ -251,6 +256,8 @@ impl Default for TranslationConfig {
             extra_headers: BTreeMap::new(),
             extra_body: BTreeMap::new(),
             batch_size: 20,
+            request_timeout_seconds: 90,
+            use_typesafe_verifier: true,
             max_rounds: 3,
             backfill_on_startup: true,
         }
@@ -301,6 +308,12 @@ impl Default for AiConfig {
             default_method: 2,
             max_tokens: 4096,
         }
+    }
+}
+
+impl AppConfig {
+    pub fn use_typesafe_for_translation(&self) -> bool {
+        self.typesafe.enabled && self.translation.use_typesafe_verifier
     }
 }
 
@@ -657,6 +670,22 @@ market_collect_after_minutes = 60
         assert_eq!(config.telegram.bot_token().as_deref(), Some("123456:ABC"));
         assert_eq!(config.telegram.admin_chat_ids(), vec![111, 222]);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn disabling_typesafe_translation_does_not_disable_market_selection() {
+        let config: AppConfig = toml::from_str(include_str!("../config.example.toml"))
+            .expect("example config is valid");
+        assert_eq!(config.translation.request_timeout_seconds, 90);
+        assert_eq!(config.typesafe.review_threshold, 0.85);
+        let mut config = config;
+        config.typesafe.enabled = true;
+        config.market_selection.enabled = true;
+        config.translation.use_typesafe_verifier = false;
+        assert!(!config.use_typesafe_for_translation());
+        assert!(config.market_selection.enabled && config.typesafe.enabled);
+        config.translation.use_typesafe_verifier = true;
+        assert!(config.use_typesafe_for_translation());
     }
 
     #[test]

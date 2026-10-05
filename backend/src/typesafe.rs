@@ -120,17 +120,11 @@ impl TypeSafeVerifier {
         let usage = typesafe_usage(&root);
         Ok((root, usage))
     }
-}
 
-#[async_trait]
-impl TranslationVerifier for TypeSafeVerifier {
-    async fn verify(
+    async fn review_once(
         &self,
         translations: &[EventNameTranslation],
     ) -> Result<Vec<TranslationVerdict>, AppError> {
-        if translations.is_empty() {
-            return Ok(Vec::new());
-        }
         let started = Instant::now();
         let payload = build_payload(&self.model, translations);
         let result = match self.request(&payload).await {
@@ -148,6 +142,34 @@ impl TranslationVerifier for TypeSafeVerifier {
                 Err(error)
             }
         };
+        result
+    }
+}
+
+#[async_trait]
+impl TranslationVerifier for TypeSafeVerifier {
+    async fn verify(
+        &self,
+        translations: &[EventNameTranslation],
+    ) -> Result<Vec<TranslationVerdict>, AppError> {
+        if translations.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Jev scores can be influenced by other rows in the same batch. Only recheck
+        // rejected rows in isolation: uncontested batches still cost a single request.
+        let result: Result<Vec<TranslationVerdict>, AppError> = async {
+            let mut verdicts = self.review_once(translations).await?;
+            for index in 0..verdicts.len() {
+                if !verdicts[index].approved {
+                    verdicts[index] = self
+                        .review_once(&translations[index..index + 1])
+                        .await?
+                        .remove(0);
+                }
+            }
+            Ok(verdicts)
+        }
+        .await;
         if let Some(health) = &self.health {
             match &result {
                 Ok(_) => health.record_success(HEALTH_KEY).await,
@@ -315,6 +337,64 @@ mod tests {
         let verdicts = parse_verdicts(&root, &[translation()], 0.85).unwrap();
         assert!(verdicts[0].approved);
         assert!(verdicts[0].reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn rejected_batch_is_rechecked_one_name_at_a_time() {
+        use axum::{Json, Router, routing::post};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        let requests = Arc::new(AtomicUsize::new(0));
+        let captured = requests.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                Router::new().route(
+                    "/v1/systemone",
+                    post(move |Json(body): Json<Value>| {
+                        let count = captured.clone();
+                        async move {
+                            count.fetch_add(1, Ordering::SeqCst);
+                            let rows = body["state"].as_array().unwrap();
+                            let answers: serde_json::Map<String, Value> = rows
+                                .iter()
+                                .enumerate()
+                                .map(|(id, row)| {
+                                    let score = if rows.len() > 1 {
+                                        0.2
+                                    } else if row["source"] == "Nonfarm Payrolls" {
+                                        0.91
+                                    } else {
+                                        0.1
+                                    };
+                                    (format!("item_{id}"), json!({"noul": score}))
+                                })
+                                .collect();
+                            Json(json!({"answers": answers}))
+                        }
+                    }),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        let verifier =
+            TypeSafeVerifier::new(reqwest::Client::new(), &base, "key", "jev", 0.85).unwrap();
+        let bad = EventNameTranslation {
+            source: "CPI".into(),
+            zh_cn: "香蕉".into(),
+            zh_tw: "香蕉".into(),
+        };
+        let verdicts = verifier.verify(&[translation(), bad]).await.unwrap();
+        assert!(verdicts[0].approved);
+        assert!(!verdicts[1].approved);
+        assert_eq!(requests.load(Ordering::SeqCst), 3);
+        server.abort();
     }
 
     #[test]

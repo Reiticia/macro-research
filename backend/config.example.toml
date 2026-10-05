@@ -79,6 +79,10 @@ base_url = "https://relay.example.com/v1"
 model = "deepseek-flash"
 api_key = ""
 batch_size = 20
+# 每次翻译模型请求的总超时（包括读取响应体），不影响日历/行情。
+request_timeout_seconds = 90
+# 关闭时改用翻译模型自身的逐条校验，不影响 market_selection。
+use_typesafe_verifier = true
 # 每批的“翻译 → AI 校验 → 不通过带反馈重译”轮数。校验始终开启；
 # 超过轮数仍未通过的名称不写缓存，下次同步会重新尝试。
 max_rounds = 3
@@ -89,7 +93,8 @@ backfill_on_startup = true
 # 写 Authorization 会替掉默认的 Bearer 头。
 # extra_headers = { "X-Title" = "macro-research" }
 
-# 可选的 TypeSafe/Jev 翻译校验器。它只负责判断翻译是否合格，翻译文本仍由上面的模型生成。
+# TypeSafe/Jev 服务开关，供翻译校验和市场选择共用；翻译校验可单独用
+# translation.use_typesafe_verifier 关闭，此时 market_selection 仍可使用 Jev。
 [typesafe]
 enabled = false
 base_url = "https://api.typesafe.ai"
