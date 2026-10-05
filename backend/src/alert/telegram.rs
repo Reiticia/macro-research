@@ -48,6 +48,8 @@ impl TelegramClient {
             {"command": "status", "description": "查看数据源健康状态"},
             {"command": "usage", "description": "查看近24小时模型用量"},
             {"command": "test_ai", "description": "测试 AI 接口可用性"},
+            {"command": "test_market_api", "description": "测试行情 API 连通性"},
+            {"command": "test_calendar_api", "description": "测试日历源连通性"},
             {"command": "translation_failed", "description": "查询翻译失败事件名"},
             {"command": "help", "description": "查看管理员帮助"},
             {"command": "start", "description": "打开管理员菜单"}

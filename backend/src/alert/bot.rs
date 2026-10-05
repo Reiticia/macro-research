@@ -8,8 +8,13 @@ use crate::{
         state::HealthRegistry,
         telegram::{InlineButton, TelegramClient},
     },
+    calendar::{
+        CalendarProvider, ForexFactoryProvider, TradingEconomicsApiProvider,
+        TradingEconomicsProvider, TradingViewProvider,
+    },
     config::AppConfig,
     llm_usage::LlmUsageRepository,
+    market::{BinanceProvider, BiquoteProvider, CnbcProvider, MarketDataProvider, YahooProvider},
     translation::TranslationService,
 };
 
@@ -99,6 +104,80 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
     };
     if let Some((action, module)) = data.split_once(':') {
         match action {
+            "apitest" => {
+                let buttons = api_symbol_buttons(module);
+                if buttons.is_empty() {
+                    if !matches!(
+                        module,
+                        "tradingview" | "forexfactory" | "tradingeconomics" | "te_api"
+                    ) {
+                        state
+                            .telegram
+                            .answer_callback(callback_id, "不支持的 API")
+                            .await?;
+                        return Ok(());
+                    }
+                    state
+                        .telegram
+                        .answer_callback(callback_id, "正在测试日历 API…")
+                        .await?;
+                    let result = test_calendar_api(state, module).await;
+                    let label = api_label(module);
+                    let text = match result {
+                        Ok(()) => format!("✅ {label} 连通正常，日历请求成功。"),
+                        Err(error) => format!(
+                            "❌ {label} 测试失败：{}",
+                            crate::alert::telegram::escape(&error)
+                        ),
+                    };
+                    if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
+                        state
+                            .telegram
+                            .close_keyboard(chat_id, message_id, &text)
+                            .await?;
+                        state.telegram.send_message(chat_id, &text, None).await?;
+                    }
+                    return Ok(());
+                }
+                state
+                    .telegram
+                    .answer_callback(callback_id, "请选择测试标的")
+                    .await?;
+                if let Some(chat_id) = chat_id {
+                    if let Some(message_id) = message_id {
+                        state
+                            .telegram
+                            .close_keyboard(chat_id, message_id, "请选择测试标的")
+                            .await?;
+                    }
+                    state
+                        .telegram
+                        .send_message(chat_id, "请选择用于连通性测试的标的：", Some(buttons))
+                        .await?;
+                }
+                return Ok(());
+            }
+            "apiprobe" => {
+                let (provider, symbol) = module.split_once(':').unwrap_or((module, ""));
+                let result = test_market_api(state, provider, symbol).await;
+                let label = api_label(provider);
+                let text = match result {
+                    Ok(()) => format!("✅ {label} API 连通正常（{symbol} 行情请求成功）。"),
+                    Err(error) => format!(
+                        "❌ {label} API 连通失败（{symbol}）：{}",
+                        crate::alert::telegram::escape(&error)
+                    ),
+                };
+                state.telegram.answer_callback(callback_id, &text).await?;
+                if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
+                    state
+                        .telegram
+                        .close_keyboard(chat_id, message_id, &text)
+                        .await?;
+                    state.telegram.send_message(chat_id, &text, None).await?;
+                }
+                return Ok(());
+            }
             "aitest" => {
                 let result = test_ai_module(state, module).await;
                 let text = match result {
@@ -199,6 +278,20 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
     let reply = match command {
         "/status" => status_text(state).await?,
         "/usage" => usage_text(state).await?,
+        "/test_market_api" => {
+            state.telegram.send_message(chat_id, "请选择要测试的行情 API：", Some(vec![
+                vec![InlineButton { text: "Yahoo Finance".into(), callback_data: "apitest:yahoo".into() }, InlineButton { text: "BiQuote".into(), callback_data: "apitest:biquote".into() }],
+                vec![InlineButton { text: "Binance".into(), callback_data: "apitest:binance".into() }, InlineButton { text: "CNBC".into(), callback_data: "apitest:cnbc".into() }],
+            ])).await?;
+            return Ok(());
+        }
+        "/test_calendar_api" => {
+            state.telegram.send_message(chat_id, "请选择要测试的日历源：", Some(vec![
+                vec![InlineButton { text: "TradingView".into(), callback_data: "apitest:tradingview".into() }, InlineButton { text: "Forex Factory".into(), callback_data: "apitest:forexfactory".into() }],
+                vec![InlineButton { text: "Trading Economics 页面".into(), callback_data: "apitest:tradingeconomics".into() }, InlineButton { text: "Trading Economics API".into(), callback_data: "apitest:te_api".into() }],
+            ])).await?;
+            return Ok(());
+        }
         "/test_ai" => {
             state.telegram.send_message(chat_id, "请选择要测试的 AI 模块：", Some(vec![
                 vec![InlineButton { text: "事件名翻译".into(), callback_data: "aitest:translation".into() }, InlineButton { text: "AI 分析".into(), callback_data: "aitest:analysis".into() }],
@@ -222,12 +315,135 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
             return Ok(());
         }
         "/help" | "/start" => {
-            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/test_ai — 测试 AI 接口可用性\n/translation_failed — 查询失败事件名并选择是否重译\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
+            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试日历源连通性\n/translation_failed — 查询失败事件名并选择是否重译\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
         }
         _ => return Ok(()),
     };
     state.telegram.send_message(chat_id, &reply, None).await?;
     Ok(())
+}
+
+fn api_label(provider: &str) -> &'static str {
+    match provider {
+        "yahoo" => "Yahoo Finance",
+        "biquote" => "BiQuote",
+        "binance" => "Binance",
+        "cnbc" => "CNBC",
+        "tradingview" => "TradingView 日历",
+        "forexfactory" => "Forex Factory 日历",
+        "tradingeconomics" => "Trading Economics 页面",
+        "te_api" => "Trading Economics API",
+        _ => "第三方 API",
+    }
+}
+
+fn api_symbol_buttons(provider: &str) -> Vec<Vec<InlineButton>> {
+    let symbols: &[(&str, &str)] = match provider {
+        "yahoo" => &[
+            ("黄金", "gold"),
+            ("标普500", "sp500"),
+            ("欧元/美元", "eur_usd"),
+            ("美元/日元", "usd_jpy"),
+        ],
+        "binance" => &[("Bitcoin", "bitcoin"), ("Ethereum", "ethereum")],
+        "cnbc" => &[("美国2年期国债", "us2y"), ("美国10年期国债", "us10y")],
+        "biquote" => &[
+            ("黄金", "gold"),
+            ("白银", "silver"),
+            ("欧元/美元", "eur_usd"),
+            ("美元指数", "dxy"),
+            ("WTI 原油", "wti"),
+        ],
+        _ => return Vec::new(),
+    };
+    symbols
+        .chunks(2)
+        .map(|row| {
+            row.iter()
+                .map(|(label, symbol)| InlineButton {
+                    text: (*label).into(),
+                    callback_data: format!("apiprobe:{provider}:{symbol}"),
+                })
+                .collect()
+        })
+        .collect()
+}
+
+async fn test_market_api(state: &BotState, provider: &str, symbol: &str) -> Result<(), String> {
+    use std::str::FromStr;
+    let symbol = crate::model::MarketSymbol::from_str(symbol)?;
+    let client = if state.config.network.proxies(provider) {
+        state.proxied_http.clone()
+    } else {
+        state.direct_http.clone()
+    };
+    match provider {
+        "yahoo" => YahooProvider::new(client, &state.config.market.yahoo_base_url)
+            .quote(symbol)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "biquote" => BiquoteProvider::new(client, &state.config.market.biquote_base_url)
+            .quote(symbol)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "binance" => BinanceProvider::new(client, &state.config.market.binance_base_url)
+            .quote(symbol)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "cnbc" => CnbcProvider::new(
+            client,
+            &state.config.market.cnbc_quote_url,
+            &state.config.market.cnbc_chart_url,
+        )
+        .quote(symbol)
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string()),
+        _ => Err("未知 API 接口".into()),
+    }
+}
+
+async fn test_calendar_api(state: &BotState, provider: &str) -> Result<(), String> {
+    use chrono::{Duration, Utc};
+    let client = if state.config.network.proxies(provider) {
+        state.proxied_http.clone()
+    } else {
+        state.direct_http.clone()
+    };
+    let end = Utc::now();
+    let start = end - Duration::days(1);
+    let result = match provider {
+        "tradingview" => TradingViewProvider::new(client, &state.config.calendar.primary_url)
+            .fetch_events(start, end)
+            .await
+            .map(|_| ()),
+        "forexfactory" => {
+            ForexFactoryProvider::new(client.clone(), &state.config.calendar.fallback_url)
+                .fetch_events(start, end)
+                .await
+                .map(|_| ())
+        }
+        "tradingeconomics" => {
+            TradingEconomicsProvider::new(client, &state.config.calendar.base_url)
+                .fetch_events(start, end)
+                .await
+                .map(|_| ())
+        }
+        "te_api" => {
+            let api = TradingEconomicsApiProvider::new(
+                client,
+                &state.config.backfill.calendar_api_base_url,
+                state.config.backfill.te_api_key.clone(),
+            )
+            .map_err(|error| error.to_string())?;
+            api.fetch_events(start, end).await.map(|_| ())
+        }
+        _ => return Err("未知日历 API".into()),
+    };
+    result.map_err(|error| error.to_string())
 }
 
 async fn test_ai_module(state: &BotState, module: &str) -> Result<(), String> {
