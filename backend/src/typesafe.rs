@@ -108,6 +108,7 @@ impl TypeSafeVerifier {
         let status = response.status();
         let text = response.text().await?;
         if !status.is_success() {
+            tracing::error!(%status, body = %text, "TypeSafe AI returned an error response");
             return Err(AppError::Relay {
                 status: status.as_u16(),
                 detail: crate::openai_compat::error_detail(status, &text),

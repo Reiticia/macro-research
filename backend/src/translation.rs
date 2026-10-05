@@ -83,15 +83,8 @@ pub struct OpenAiEventNameTranslator {
     json_mode: AtomicBool,
 }
 
-const RESPONSE_LOG_LIMIT: usize = 8 * 1024;
-
 fn response_preview(body: &[u8]) -> String {
-    let text = String::from_utf8_lossy(body);
-    let mut preview: String = text.chars().take(RESPONSE_LOG_LIMIT).collect();
-    if text.chars().count() > RESPONSE_LOG_LIMIT {
-        preview.push('…');
-    }
-    preview
+    String::from_utf8_lossy(body).into_owned()
 }
 
 impl OpenAiEventNameTranslator {
@@ -293,7 +286,7 @@ impl OpenAiEventNameTranslator {
         }
         let text = String::from_utf8_lossy(&bytes).into_owned();
         if !status.is_success() {
-            tracing::warn!(
+            tracing::error!(
                 %status,
                 content_type = %content_type,
                 content_encoding = %content_encoding,

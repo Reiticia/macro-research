@@ -660,6 +660,7 @@ impl AiAnalysisService {
         let status = response.status();
         let text = response.text().await?;
         if !status.is_success() {
+            tracing::error!(%status, body = %text, "AI analysis relay returned an error response");
             // Keep the relay's own message: it names the real cause (bad key, quota, model).
             return Err(AppError::Relay {
                 status: status.as_u16(),
@@ -884,6 +885,7 @@ pub async fn probe(http: &reqwest::Client, config: &AiConfig) -> Result<String, 
     let status = response.status();
     let text = response.text().await?;
     if !status.is_success() {
+        tracing::error!(%status, body = %text, "AI analysis probe returned an error response");
         return Err(AppError::Relay {
             status: status.as_u16(),
             detail: crate::openai_compat::error_detail(status, &text),

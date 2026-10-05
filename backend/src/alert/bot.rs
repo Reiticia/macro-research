@@ -315,6 +315,7 @@ async fn test_ai_module(state: &BotState, module: &str) -> Result<(), String> {
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
+        tracing::error!(%status, body = %body, module, "Telegram-triggered AI probe returned an error response");
         return Err(crate::openai_compat::error_detail(status, &body));
     }
     Ok(())

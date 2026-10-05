@@ -195,13 +195,16 @@ impl MarketSelector {
                             "TypeSafe response body could not be read: {error}"
                         ))),
                     ),
-                    Ok(body) if !status.is_success() => (
-                        None,
-                        Err(AppError::Relay {
-                            status: status.as_u16(),
-                            detail: crate::openai_compat::error_detail(status, &body),
-                        }),
-                    ),
+                    Ok(body) if !status.is_success() => {
+                        tracing::error!(%status, body = %body, "market-selection AI returned an error response");
+                        (
+                            None,
+                            Err(AppError::Relay {
+                                status: status.as_u16(),
+                                detail: crate::openai_compat::error_detail(status, &body),
+                            }),
+                        )
+                    }
                     Ok(body) => match serde_json::from_str::<Value>(&body) {
                         Ok(root) => match parse_answers(&root, &self.candidates) {
                             Ok(parsed) => (Some(parsed), Ok(())),
