@@ -4,8 +4,13 @@ use serde_json::Value;
 use sqlx::SqlitePool;
 
 use crate::{
-    alert::{state::HealthRegistry, telegram::TelegramClient},
+    alert::{
+        state::HealthRegistry,
+        telegram::{InlineButton, TelegramClient},
+    },
+    config::AppConfig,
     llm_usage::LlmUsageRepository,
+    translation::TranslationService,
 };
 
 /// Telegram long-polling loop: the admin console for the server.
@@ -19,6 +24,10 @@ pub struct BotState {
     /// Model-call audit log, backing the `/usage` command.
     pub llm_usage: Option<Arc<LlmUsageRepository>>,
     pub pool: SqlitePool,
+    pub config: AppConfig,
+    pub translation: Option<Arc<TranslationService>>,
+    pub direct_http: reqwest::Client,
+    pub proxied_http: reqwest::Client,
     pub poll_timeout_seconds: u64,
 }
 
@@ -88,6 +97,54 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
     let Some((action, raw_id)) = data.split_once(':') else {
         return Ok(());
     };
+    if let Some((action, module)) = data.split_once(':') {
+        match action {
+            "aitest" => {
+                let result = test_ai_module(state, module).await;
+                let text = match result {
+                    Ok(()) => format!("✅ {module} AI 接口可用，测试请求成功。"),
+                    Err(error) => format!(
+                        "❌ {module} AI 接口不可用：{}",
+                        crate::alert::telegram::escape(&error)
+                    ),
+                };
+                state.telegram.answer_callback(callback_id, &text).await?;
+                if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
+                    state
+                        .telegram
+                        .close_keyboard(chat_id, message_id, &text)
+                        .await?;
+                    state.telegram.send_message(chat_id, &text, None).await?;
+                }
+                return Ok(());
+            }
+            "trretry" | "trcancel" => {
+                let text = if action == "trcancel" {
+                    "已取消重新翻译。".to_owned()
+                } else if let Some(service) = &state.translation {
+                    match service.backfill_existing().await {
+                        Ok(count) => format!("✅ 已提交 {count} 个未翻译事件名重新翻译。"),
+                        Err(error) => format!(
+                            "❌ 重新翻译失败：{}",
+                            crate::alert::telegram::escape(&error.to_string())
+                        ),
+                    }
+                } else {
+                    "❌ 事件名翻译模块未启用。".to_owned()
+                };
+                state.telegram.answer_callback(callback_id, &text).await?;
+                if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
+                    state
+                        .telegram
+                        .close_keyboard(chat_id, message_id, &text)
+                        .await?;
+                    state.telegram.send_message(chat_id, &text, None).await?;
+                }
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
     let Ok(id) = raw_id.parse::<i64>() else {
         return Ok(());
     };
@@ -142,12 +199,124 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
     let reply = match command {
         "/status" => status_text(state).await?,
         "/usage" => usage_text(state).await?,
+        "/test_ai" => {
+            state.telegram.send_message(chat_id, "请选择要测试的 AI 模块：", Some(vec![
+                vec![InlineButton { text: "事件名翻译".into(), callback_data: "aitest:translation".into() }, InlineButton { text: "AI 分析".into(), callback_data: "aitest:analysis".into() }],
+                vec![InlineButton { text: "市场选择".into(), callback_data: "aitest:market_selection".into() }, InlineButton { text: "翻译校对".into(), callback_data: "aitest:typesafe".into() }],
+            ])).await?;
+            return Ok(());
+        }
+        "/translation_failed" | "/failed_translations" => {
+            let names = crate::repository::EventRepository::new(state.pool.clone()).untranslated_event_names().await?;
+            if names.is_empty() {
+                state.telegram.send_message(chat_id, "没有待翻译/翻译失败的事件名。", None).await?;
+            } else {
+                let mut display = names.iter().take(50).map(|name| format!("• {}", crate::alert::telegram::escape(name))).collect::<Vec<_>>().join("\n");
+                if names.len() > 50 { display.push_str(&format!("\n…另有 {} 个", names.len() - 50)); }
+                let text = format!("<b>待翻译事件名（{} 个）</b>\n{}\n\n是否重新翻译？", names.len(), display);
+                state.telegram.send_message(chat_id, &text, Some(vec![vec![
+                    InlineButton { text: "重新翻译".into(), callback_data: "trretry:yes".into() },
+                    InlineButton { text: "取消".into(), callback_data: "trcancel:no".into() },
+                ]])).await?;
+            }
+            return Ok(());
+        }
         "/help" | "/start" => {
-            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
+            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/test_ai — 测试 AI 接口可用性\n/translation_failed — 查询失败事件名并选择是否重译\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
         }
         _ => return Ok(()),
     };
     state.telegram.send_message(chat_id, &reply, None).await?;
+    Ok(())
+}
+
+async fn test_ai_module(state: &BotState, module: &str) -> Result<(), String> {
+    let (url, model, api_key, headers, payload) = match module {
+        "translation" => {
+            let config = &state.config.translation;
+            if !config.enabled {
+                return Err("翻译 AI 未启用".into());
+            }
+            let key = config.api_key().map_err(|error| error.to_string())?;
+            let url = crate::openai_compat::chat_endpoint(&config.base_url)
+                .map_err(|error| error.to_string())?;
+            (
+                url,
+                config.model.clone(),
+                key,
+                config.extra_headers.clone(),
+                serde_json::json!({
+                    "model": config.model, "messages": [{"role":"user","content":"Reply with OK."}], "max_tokens": 8
+                }),
+            )
+        }
+        "analysis" => {
+            let config = &state.config.ai;
+            if !config.enabled {
+                return Err("AI 分析未启用".into());
+            }
+            let key = config.api_key().map_err(|error| error.to_string())?;
+            let url = crate::openai_compat::chat_endpoint(&config.base_url)
+                .map_err(|error| error.to_string())?;
+            (
+                url,
+                config.model.clone(),
+                key,
+                config.extra_headers.clone(),
+                serde_json::json!({
+                    "model": config.model, "messages": [{"role":"user","content":"Reply with OK."}], "max_tokens": 8
+                }),
+            )
+        }
+        "market_selection" | "typesafe" => {
+            if module == "market_selection" && !state.config.market_selection.enabled {
+                return Err("市场选择 AI 未启用".into());
+            }
+            if module == "typesafe" && !state.config.typesafe.enabled {
+                return Err("翻译校对 AI 未启用".into());
+            }
+            let config = &state.config.typesafe;
+            let key = config.api_key().map_err(|error| error.to_string())?;
+            let base = config.base_url.trim().trim_end_matches('/');
+            let url = if base.ends_with("/systemone") {
+                base.to_owned()
+            } else if base.ends_with("/v1") {
+                format!("{base}/systemone")
+            } else {
+                format!("{base}/v1/systemone")
+            };
+            let payload = if module == "market_selection" {
+                serde_json::json!({"model":config.model,"state":[],"questions":{}})
+            } else {
+                serde_json::json!({"model":config.model,"state":[{"id":0,"source":"CPI","zhCn":"消费者价格指数","zhTw":"消費者物價指數"}],"questions":{"item_0":{"type":"noul","instructions":"Are these translations accurate?","criteria":{"true":"yes","false":"no"}}}})
+            };
+            (url, config.model.clone(), key, Default::default(), payload)
+        }
+        _ => return Err("未知 AI 模块".into()),
+    };
+    if model.trim().is_empty() {
+        return Err("模型名称为空".into());
+    }
+    let route = match module {
+        "translation" => "translation",
+        "analysis" => "ai",
+        _ => "typesafe",
+    };
+    let client = if state.config.network.proxies(route) {
+        &state.proxied_http
+    } else {
+        &state.direct_http
+    };
+    let mut request = client.post(url).bearer_auth(api_key).json(&payload);
+    for (name, value) in headers {
+        request = request.header(name, value);
+    }
+    let response = request.send().await.map_err(|error| error.to_string())?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(crate::openai_compat::error_detail(status, &body));
+    }
     Ok(())
 }
 

@@ -515,7 +515,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if config.translation.backfill_on_startup
-        && let Some(translation) = translation_service
+        && let Some(translation) = translation_service.clone()
     {
         tokio::spawn(async move {
             match translation.backfill_existing().await {
@@ -587,6 +587,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 health,
                 llm_usage,
                 pool: pool.clone(),
+                config: config.clone(),
+                translation: translation_service.clone(),
+                direct_http: direct_http.clone(),
+                proxied_http: proxied_http.clone(),
                 poll_timeout_seconds: config.telegram.poll_timeout_seconds,
             }));
         }
