@@ -294,6 +294,14 @@ async fn history_filters_exact_importance_before_pagination() {
         ("&importance=2", vec!["fixture--3"]),
         ("&importance=1", vec!["fixture--1"]),
         ("&importance=0", vec!["fixture--7"]),
+        ("&importance=1,3&limit=2", vec!["fixture--1", "fixture--2"]),
+        ("&importance=3,1&limit=2&offset=2", vec!["fixture--4"]),
+        ("&importance=1,3&limit=2&offset=3", vec![]),
+        ("&importance=3,3", vec!["fixture--2", "fixture--4"]),
+        (
+            "&importance=1,2,3",
+            vec!["fixture--1", "fixture--2", "fixture--3", "fixture--4"],
+        ),
         (
             "",
             vec![
@@ -326,15 +334,18 @@ async fn history_filters_exact_importance_before_pagination() {
             expected
         );
     }
-    let invalid = router
-        .oneshot(request(
-            "GET",
-            &format!("{base}&importance=4"),
-            Some("secret-token"),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    for invalid_levels in ["4", "1,4", "", "1,", "-1", "high"] {
+        let invalid = router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{base}&importance={invalid_levels}"),
+                Some("secret-token"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    }
 }
 
 #[tokio::test]

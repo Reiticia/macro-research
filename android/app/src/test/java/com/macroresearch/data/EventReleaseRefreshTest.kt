@@ -129,7 +129,7 @@ class EventReleaseRefreshTest {
         override fun observeUpcoming(from: String): Flow<List<CachedEventEntity>> = flowOf(emptyList())
         override fun observeEvent(id: Long): Flow<CachedEventEntity?> = flowOf(rows[id])
         override suspend fun event(id: Long): CachedEventEntity? = rows[id]
-        override suspend fun history(before: String, countries: List<String>, category: String?, limit: Int, offset: Int, importance: Int?) =
+        override suspend fun history(before: String, countries: List<String>, category: String?, limit: Int, offset: Int, importance: List<Int>) =
             emptyList<CachedEventEntity>()
         override suspend fun cachedRange(from: String, to: String) =
             rows.values.filter { it.eventTime in from..to }

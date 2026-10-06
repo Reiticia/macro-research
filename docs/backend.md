@@ -175,7 +175,7 @@ request_timeout_seconds = 20
 | GET | `/api/v1/status` | 各数据源健康状态 + 本令牌今日配额用量 |
 | GET | `/api/v1/events/upcoming?days=7` | 近期事件 |
 | GET | `/api/v1/calendar?from&to&country&minimum_importance` | 单日区间 ≤90 天 |
-| GET | `/api/v1/events/history?country=a,b&category&importance&limit&offset&from&to` | 历史分页，`country` 支持逗号分隔多值；`importance` 精确筛选 0–3，省略则包含全部等级，筛选在分页前执行 |
+| GET | `/api/v1/events/history?country=a,b&category&importance&limit&offset&from&to` | 历史分页，`country` 支持逗号分隔多值；`importance` 精确筛选 0–3，支持逗号分隔多值（如 `1,3`），省略则包含全部等级，筛选在分页前执行 |
 | GET | `/api/v1/events/{id}` | `{event, observations}` |
 | POST | `/api/v1/events/{id}/refresh` | 绕过同步间隔按事件当日重取公布值 |
 | GET | `/api/v1/events/{id}/analysis` | 规则报告 |

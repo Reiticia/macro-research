@@ -130,7 +130,7 @@ class BackendClientTest {
         val source = BackendDataSource(client())
         for (level in listOf(3, 2, 1, 0)) {
             server.enqueue(MockResponse().setBody("[]"))
-            source.history(listOf("United States"), "inflation", 8, 8, importance = level)
+            source.history(listOf("United States"), "inflation", 8, 8, importance = listOf(level))
             val url = requireNotNull(server.takeRequest().requestUrl)
             assertEquals(level.toString(), url.queryParameter("importance"))
             assertEquals("inflation", url.queryParameter("category"))
@@ -139,6 +139,20 @@ class BackendClientTest {
             assertEquals("8", url.queryParameter("offset"))
             assertNull(url.queryParameter("minimum_importance"))
         }
+    }
+
+    @Test
+    fun historyAdapterSendsMultipleLevelsAsOneFilter() = runBlocking {
+        server.enqueue(MockResponse().setBody("[]"))
+        BackendDataSource(client()).history(
+            listOf("United States", "China"), "employment", 8, 16,
+            importance = setOf(3, 1),
+        )
+        val url = requireNotNull(server.takeRequest().requestUrl)
+        assertEquals("1,3", url.queryParameter("importance"))
+        assertEquals("employment", url.queryParameter("category"))
+        assertEquals("United States,China", url.queryParameter("country"))
+        assertEquals("16", url.queryParameter("offset"))
     }
 
     @Test

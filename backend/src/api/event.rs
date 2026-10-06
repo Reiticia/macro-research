@@ -98,8 +98,8 @@ pub struct HistoryQuery {
     /// One country, or several joined with commas (the client filters by a country set).
     country: Option<String>,
     category: Option<String>,
-    /// Exact importance level; omitted means all levels, including unrated.
-    importance: Option<u8>,
+    /// Exact importance levels joined with commas; omitted includes all levels, even unrated.
+    importance: Option<String>,
     limit: Option<u32>,
     offset: Option<u32>,
     from: Option<NaiveDate>,
@@ -110,11 +110,26 @@ pub async fn history(
     State(state): State<AppState>,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<Vec<EconomicEvent>>, AppError> {
-    if query.importance.is_some_and(|level| level > 3) {
-        return Err(AppError::InvalidRequest(
-            "importance must be between 0 and 3".into(),
-        ));
-    }
+    let importance = query
+        .importance
+        .as_deref()
+        .map(|value| {
+            value
+                .split(',')
+                .map(|part| {
+                    part.trim()
+                        .parse::<u8>()
+                        .ok()
+                        .filter(|level| *level <= 3)
+                        .ok_or_else(|| {
+                            AppError::InvalidRequest(
+                                "importance must be one or more levels between 0 and 3".into(),
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
     if matches!((query.from, query.to), (Some(from), Some(to)) if to < from || to - from >= Duration::days(93))
     {
         return Err(AppError::InvalidRequest(
@@ -150,7 +165,7 @@ pub async fn history(
                 query.offset.unwrap_or(0),
                 from,
                 to,
-                query.importance,
+                importance,
             )
             .await?,
     ))

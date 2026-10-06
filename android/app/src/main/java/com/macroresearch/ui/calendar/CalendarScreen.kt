@@ -47,8 +47,7 @@ import com.macroresearch.ui.CalendarViewModel
 import com.macroresearch.ui.common.EventCard
 import com.macroresearch.ui.common.LoadingHint
 import com.macroresearch.ui.common.calendarWarningMessage
-import com.macroresearch.ui.common.importanceLabel
-import com.macroresearch.ui.theme.Upcoming
+import com.macroresearch.ui.common.ImportanceFilters
 import com.macroresearch.ui.theme.ResearchLayout
 import com.macroresearch.ui.viewModelFactory
 import java.time.Instant
@@ -84,25 +83,7 @@ fun CalendarScreen(repository: MacroRepository, padding: PaddingValues, onEvent:
             }
         }
         DateSelector(state.date, vm::selectDate)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(3, 2, 1).forEach { level ->
-                FilterChip(
-                    selected = level in state.importance,
-                    onClick = { vm.toggleImportance(level) },
-                    leadingIcon = {
-                        Text(
-                            "●",
-                            color = when (level) {
-                                3 -> Upcoming
-                                2 -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    },
-                    label = { Text(importanceLabel(level)) },
-                )
-            }
-        }
+        ImportanceFilters(state.importance, vm::toggleImportance)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(dateLabel(state.date), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             Text(stringResource(R.string.event_count, state.filtered.size), color = MaterialTheme.colorScheme.onSurfaceVariant)

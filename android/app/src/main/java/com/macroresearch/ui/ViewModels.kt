@@ -10,6 +10,7 @@ import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.data.model.EventDetailResponse
 import com.macroresearch.data.model.MarketResponse
 import com.macroresearch.data.model.MarketQuotesResponse
+import com.macroresearch.ui.common.toggleImportanceSelection
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -155,12 +156,8 @@ class CalendarViewModel(private val repository: MacroRepository) : ViewModel() {
     }
 
     fun toggleImportance(level: Int) {
-        if (level !in 1..3) return
-        val current = _state.value.importance
-        val updated = if (level in current) current - level else current + level
-        if (updated.isNotEmpty()) {
-            _state.value = _state.value.copy(importance = updated)
-        }
+        val updated = toggleImportanceSelection(_state.value.importance, level)
+        _state.value = _state.value.copy(importance = updated)
     }
 
     /** Re-reads name-keyed translations after the user corrects one on the detail screen. */
@@ -361,7 +358,7 @@ class HistoryViewModel(private val repository: MacroRepository) : ViewModel() {
     val state = _state.asStateFlow()
     private val _category = MutableStateFlow<String?>(null)
     val category = _category.asStateFlow()
-    private val _importance = MutableStateFlow<Int?>(null)
+    private val _importance = MutableStateFlow(setOf(1, 2, 3))
     val importance = _importance.asStateFlow()
     private val _hasMore = MutableStateFlow(true)
     val hasMore = _hasMore.asStateFlow()
@@ -385,7 +382,7 @@ class HistoryViewModel(private val repository: MacroRepository) : ViewModel() {
     fun refresh(
         category: String? = _category.value,
         forceNetwork: Boolean = false,
-        importance: Int? = _importance.value,
+        importance: Set<Int> = _importance.value,
     ) {
         request?.cancel()
         val retained = if (category == _category.value && importance == _importance.value) {
@@ -401,6 +398,11 @@ class HistoryViewModel(private val repository: MacroRepository) : ViewModel() {
         if (selectedCountries.isNotEmpty()) {
             loadPage(forceRefresh = forceNetwork, replaceExisting = true)
         }
+    }
+
+    fun toggleImportance(level: Int) {
+        val updated = toggleImportanceSelection(_importance.value, level)
+        if (updated != _importance.value) refresh(importance = updated)
     }
 
     fun loadMore() = loadPage(replaceExisting = false)
@@ -419,7 +421,7 @@ class HistoryViewModel(private val repository: MacroRepository) : ViewModel() {
                     limit = MacroRepository.HISTORY_PAGE_SIZE,
                     offset = sourceOffset,
                     forceRefresh = forceRefresh,
-                    importance = importance,
+                    importance = importance.toList(),
                 )
                 sourceOffset += page.size
                 val merged = (if (replaceExisting) page else existing + page)

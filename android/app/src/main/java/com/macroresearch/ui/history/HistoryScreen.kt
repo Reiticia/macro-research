@@ -35,7 +35,7 @@ import com.macroresearch.ui.HistoryViewModel
 import com.macroresearch.ui.common.EventCard
 import com.macroresearch.ui.common.LoadingHint
 import com.macroresearch.ui.common.calendarWarningMessage
-import com.macroresearch.ui.common.importanceLabel
+import com.macroresearch.ui.common.ImportanceFilters
 import com.macroresearch.ui.common.surprise
 import com.macroresearch.ui.theme.AssetDown
 import com.macroresearch.ui.theme.AssetUp
@@ -104,20 +104,7 @@ fun HistoryScreen(repository: MacroRepository, padding: PaddingValues, onEvent: 
                     )
                 }
             }
-            Text(
-                stringResource(R.string.importance),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(null, 3, 2, 1).forEach { level ->
-                    FilterChip(
-                        selected = selectedImportance == level,
-                        onClick = { if (selectedImportance != level) vm.refresh(importance = level) },
-                        label = { Text(if (level == null) stringResource(R.string.all) else importanceLabel(level)) },
-                    )
-                }
-            }
+            ImportanceFilters(selectedImportance, vm::toggleImportance)
         }
         TextButton(onClick = { vm.refresh(forceNetwork = true) }, enabled = !state.loading) {
             Text(stringResource(R.string.history_refresh))

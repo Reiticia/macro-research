@@ -481,8 +481,17 @@ impl EventRepository {
         offset: u32,
         from: Option<DateTime<Utc>>,
         to: Option<DateTime<Utc>>,
-        importance: Option<u8>,
+        importance: Option<Vec<u8>>,
     ) -> Result<Vec<EconomicEvent>, AppError> {
+        if importance.as_ref().is_some_and(Vec::is_empty) {
+            return Ok(Vec::new());
+        }
+        let levels = importance.unwrap_or_default();
+        let importance_clause = if levels.is_empty() {
+            String::new()
+        } else {
+            format!("AND importance IN ({})", vec!["?"; levels.len()].join(","))
+        };
         let lower: Vec<String> = countries
             .into_iter()
             .map(|value| value.trim().to_lowercase())
@@ -500,7 +509,7 @@ impl EventRepository {
                  AND (? IS NULL OR lower(category) LIKE '%' || lower(?) || '%')
                  AND (? IS NULL OR event_time >= ?)
                  AND (? IS NULL OR event_time < ?)
-                 AND (? IS NULL OR importance = ?)
+                 {importance_clause}
                  {country_clause}
                ORDER BY event_time DESC, id DESC LIMIT ? OFFSET ?"#
         );
@@ -511,9 +520,10 @@ impl EventRepository {
             .bind(from.map(|v| v.to_rfc3339()))
             .bind(from.map(|v| v.to_rfc3339()))
             .bind(to.map(|v| v.to_rfc3339()))
-            .bind(to.map(|v| v.to_rfc3339()))
-            .bind(importance.map(i64::from))
-            .bind(importance.map(i64::from));
+            .bind(to.map(|v| v.to_rfc3339()));
+        for level in &levels {
+            query = query.bind(i64::from(*level));
+        }
         for country in &lower {
             query = query.bind(country);
         }
