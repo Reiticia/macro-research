@@ -122,6 +122,23 @@ class BackendClientTest {
         assertTrue(path, path.contains("country=United%20States%2CChina"))
         assertTrue(path, path.contains("limit=8"))
         assertTrue(path, path.contains("offset=16"))
+        assertTrue(path, !path.contains("importance="))
+    }
+
+    @Test
+    fun historyAdapterSendsExactImportanceWithCategoryAndPaging() = runBlocking {
+        val source = BackendDataSource(client())
+        for (level in listOf(3, 2, 1, 0)) {
+            server.enqueue(MockResponse().setBody("[]"))
+            source.history(listOf("United States"), "inflation", 8, 8, importance = level)
+            val url = requireNotNull(server.takeRequest().requestUrl)
+            assertEquals(level.toString(), url.queryParameter("importance"))
+            assertEquals("inflation", url.queryParameter("category"))
+            assertEquals("United States", url.queryParameter("country"))
+            assertEquals("8", url.queryParameter("limit"))
+            assertEquals("8", url.queryParameter("offset"))
+            assertNull(url.queryParameter("minimum_importance"))
+        }
     }
 
     @Test

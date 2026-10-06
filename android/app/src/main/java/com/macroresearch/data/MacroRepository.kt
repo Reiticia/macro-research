@@ -560,13 +560,14 @@ class MacroRepository(
         limit: Int = HISTORY_PAGE_SIZE,
         offset: Int = 0,
         forceRefresh: Boolean = false,
+        importance: Int? = null,
     ): List<EconomicEvent> {
         val selected = countries.distinct()
         if (selected.isEmpty()) return emptyList()
         if (source.mode == DataSourceMode.BACKEND) {
-            return backendHistory(selected, category, limit, offset, forceRefresh)
+            return backendHistory(selected, category, limit, offset, importance)
         }
-        var page = dao.history(Instant.now().toString(), selected, category, limit, offset)
+        var page = dao.history(Instant.now().toString(), selected, category, limit, offset, importance)
             .map { it.asExternalModel() }
         // Room is the source of truth. Only backfill the first page when it cannot provide a full
         // page, or when the user explicitly asks to refresh. Entering History no longer blocks on
@@ -579,7 +580,7 @@ class MacroRepository(
             } catch (error: Exception) {
                 publishWarning(warningFor(error))
             }
-            page = dao.history(Instant.now().toString(), selected, category, limit, offset)
+            page = dao.history(Instant.now().toString(), selected, category, limit, offset, importance)
                 .map { it.asExternalModel() }
         }
         // Network failure never hides or invalidates locally stored history, including an empty
@@ -599,20 +600,18 @@ class MacroRepository(
         category: String?,
         limit: Int,
         offset: Int,
-        forceRefresh: Boolean,
+        importance: Int?,
     ): List<EconomicEvent> {
-        if (!forceRefresh && offset == 0 && !historySyncDue()) {
-            val cached = dao.history(Instant.now().toString(), countries, category, limit, offset)
-                .map { it.asExternalModel() }
-            if (cached.size >= limit) return cached
-        }
+        // Room may contain only pages from a narrower filter, even when it fills a page.
+        // Always ask the server first, including when switching back to "all", so offsets
+        // refer to the complete filtered dataset. Room remains the offline fallback.
         val page = try {
-            source.history(countries, category, limit, offset)
+            source.history(countries, category, limit, offset, importance)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
             publishWarning(warningFor(error))
-            return dao.history(Instant.now().toString(), countries, category, limit, offset)
+            return dao.history(Instant.now().toString(), countries, category, limit, offset, importance)
                 .map { it.asExternalModel() }
         }
         if (page.isNotEmpty()) {

@@ -76,6 +76,7 @@
     <string name="history_subtitle">从历史中发现规律</string>
     <string name="all">全部</string>
     <string name="history_records">历史记录</string>
+    <string name="history_empty">当前筛选条件下暂无历史记录。</string>
     <string name="recent_count">最近 %1$d 次</string>
     <string name="above_consensus">高于预期</string>
     <string name="below_consensus">低于预期</string>

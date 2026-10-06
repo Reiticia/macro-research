@@ -118,12 +118,14 @@ class BackendClient(
         category: String?,
         limit: Int,
         offset: Int,
+        importance: Int? = null,
     ): List<EconomicEvent> = withContext(Dispatchers.IO) {
         getJson("/api/v1/events/history") { url ->
             if (countries.isNotEmpty()) url.addQueryParameter("country", countries.joinToString(","))
             category?.takeIf { it.isNotBlank() }?.let { url.addQueryParameter("category", it) }
             url.addQueryParameter("limit", limit.toString())
             url.addQueryParameter("offset", offset.toString())
+            importance?.let { url.addQueryParameter("importance", it.toString()) }
         }.let(::events)
     }
 

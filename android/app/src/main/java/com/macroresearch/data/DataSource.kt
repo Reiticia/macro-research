@@ -57,6 +57,7 @@ interface DataSource {
         category: String?,
         limit: Int,
         offset: Int,
+        importance: Int? = null,
     ): List<EconomicEvent>
 
     /** Full detail from the remote, or null when the local cache is authoritative. */
@@ -121,6 +122,7 @@ class DirectDataSource(
         category: String?,
         limit: Int,
         offset: Int,
+        importance: Int?,
     ): List<EconomicEvent> = emptyList()
 
     override suspend fun eventDetail(id: Long): EventDetailResponse? = null
@@ -211,7 +213,8 @@ class BackendDataSource(
         category: String?,
         limit: Int,
         offset: Int,
-    ): List<EconomicEvent> = client.history(countries, category, limit, offset)
+        importance: Int?,
+    ): List<EconomicEvent> = client.history(countries, category, limit, offset, importance)
 
     override suspend fun eventDetail(id: Long): EventDetailResponse = client.event(id)
 

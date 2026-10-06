@@ -361,6 +361,8 @@ class HistoryViewModel(private val repository: MacroRepository) : ViewModel() {
     val state = _state.asStateFlow()
     private val _category = MutableStateFlow<String?>(null)
     val category = _category.asStateFlow()
+    private val _importance = MutableStateFlow<Int?>(null)
+    val importance = _importance.asStateFlow()
     private val _hasMore = MutableStateFlow(true)
     val hasMore = _hasMore.asStateFlow()
     private var selectedCountries = repository.selectedCountries.value
@@ -380,12 +382,17 @@ class HistoryViewModel(private val repository: MacroRepository) : ViewModel() {
         }
     }
 
-    fun refresh(category: String? = _category.value, forceNetwork: Boolean = false) {
+    fun refresh(
+        category: String? = _category.value,
+        forceNetwork: Boolean = false,
+        importance: Int? = _importance.value,
+    ) {
         request?.cancel()
-        val retained = if (category == _category.value) {
+        val retained = if (category == _category.value && importance == _importance.value) {
             _state.value.value.orEmpty().filter { it.country in selectedCountries }
         } else emptyList()
         _category.value = category
+        _importance.value = importance
         sourceOffset = 0
         _hasMore.value = selectedCountries.isNotEmpty()
         // Keep visible history during a retry and on network failure, not a blank screen. A
@@ -402,6 +409,7 @@ class HistoryViewModel(private val repository: MacroRepository) : ViewModel() {
         if (_state.value.loading || !_hasMore.value) return
         val existing = _state.value.value.orEmpty()
         val category = _category.value
+        val importance = _importance.value
         _state.value = LoadState(existing, loading = true)
         request = viewModelScope.launch {
             try {
@@ -411,6 +419,7 @@ class HistoryViewModel(private val repository: MacroRepository) : ViewModel() {
                     limit = MacroRepository.HISTORY_PAGE_SIZE,
                     offset = sourceOffset,
                     forceRefresh = forceRefresh,
+                    importance = importance,
                 )
                 sourceOffset += page.size
                 val merged = (if (replaceExisting) page else existing + page)

@@ -4,6 +4,8 @@ import androidx.compose.ui.res.stringResource
 import com.macroresearch.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +35,7 @@ import com.macroresearch.ui.HistoryViewModel
 import com.macroresearch.ui.common.EventCard
 import com.macroresearch.ui.common.LoadingHint
 import com.macroresearch.ui.common.calendarWarningMessage
+import com.macroresearch.ui.common.importanceLabel
 import com.macroresearch.ui.common.surprise
 import com.macroresearch.ui.theme.AssetDown
 import com.macroresearch.ui.theme.AssetUp
@@ -41,11 +44,13 @@ import com.macroresearch.ui.viewModelFactory
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HistoryScreen(repository: MacroRepository, padding: PaddingValues, onEvent: (Long) -> Unit) {
     val vm: HistoryViewModel = viewModel(factory = viewModelFactory { HistoryViewModel(repository) })
     val state by vm.state.collectAsStateWithLifecycle()
     val selected by vm.category.collectAsStateWithLifecycle()
+    val selectedImportance by vm.importance.collectAsStateWithLifecycle()
     val hasMore by vm.hasMore.collectAsStateWithLifecycle()
     val warning by repository.calendarWarning.collectAsStateWithLifecycle()
     val events = state.value.orEmpty()
@@ -56,6 +61,9 @@ fun HistoryScreen(repository: MacroRepository, padding: PaddingValues, onEvent: 
         listState.scrollToItem(0)
         vm.refresh()
         vm.refreshTranslations()
+    }
+    LaunchedEffect(selected, selectedImportance) {
+        listState.scrollToItem(0)
     }
     // Loading is driven by actual viewport position, not a button: once the final rendered row
     // reaches the viewport, request the next eight rows from Room.
@@ -86,13 +94,29 @@ fun HistoryScreen(repository: MacroRepository, padding: PaddingValues, onEvent: 
             Text(stringResource(R.string.history_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text(stringResource(R.string.history_subtitle), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(null to stringResource(R.string.all), "inflation" to stringResource(R.string.category_inflation), "employment" to stringResource(R.string.category_employment)).forEach { (category, label) ->
-                FilterChip(
-                    selected = selected == category,
-                    onClick = { vm.refresh(category) },
-                    label = { Text(label) },
-                )
+        Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(null to stringResource(R.string.all), "inflation" to stringResource(R.string.category_inflation), "employment" to stringResource(R.string.category_employment)).forEach { (category, label) ->
+                    FilterChip(
+                        selected = selected == category,
+                        onClick = { if (selected != category) vm.refresh(category) },
+                        label = { Text(label) },
+                    )
+                }
+            }
+            Text(
+                stringResource(R.string.importance),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(null, 3, 2, 1).forEach { level ->
+                    FilterChip(
+                        selected = selectedImportance == level,
+                        onClick = { if (selectedImportance != level) vm.refresh(importance = level) },
+                        label = { Text(if (level == null) stringResource(R.string.all) else importanceLabel(level)) },
+                    )
+                }
             }
         }
         TextButton(onClick = { vm.refresh(forceNetwork = true) }, enabled = !state.loading) {
@@ -111,6 +135,9 @@ fun HistoryScreen(repository: MacroRepository, padding: PaddingValues, onEvent: 
         ) {
             warning?.let { item { Text(calendarWarningMessage(it), color = MaterialTheme.colorScheme.error) } }
             state.error?.let { item { Text(stringResource(R.string.load_failed, it), color = MaterialTheme.colorScheme.error) } }
+            if (events.isEmpty() && !state.loading && state.error == null) item {
+                Text(stringResource(R.string.history_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             items(events, key = { it.id }) { event -> EventCard(event, { onEvent(event.id) }, showDate = true) }
             if (state.loading) item { LoadingHint() }
             // Normal pagination is automatic. Keep an explicit action only after a failed page,

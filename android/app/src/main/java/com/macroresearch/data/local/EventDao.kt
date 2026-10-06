@@ -29,6 +29,7 @@ interface EventDao {
            WHERE eventTime < :before
              AND country IN (:countries)
              AND (:category IS NULL OR LOWER(category) LIKE '%' || LOWER(:category) || '%')
+             AND (:importance IS NULL OR importance = :importance)
            ORDER BY eventTime DESC, importance DESC
            LIMIT :limit OFFSET :offset""",
     )
@@ -38,6 +39,7 @@ interface EventDao {
         category: String?,
         limit: Int,
         offset: Int,
+        importance: Int? = null,
     ): List<CachedEventEntity>
 
     @Query(

@@ -467,11 +467,12 @@ impl EventRepository {
         let countries: Vec<String> = country
             .map(|value| vec![value.to_owned()])
             .unwrap_or_default();
-        self.history_page_multi(countries, category, limit, offset, from, to)
+        self.history_page_multi(countries, category, limit, offset, from, to, None)
             .await
     }
 
-    /// History page filtered by any number of countries, matching the client's country set.
+    /// History page filtered before pagination, matching the client's country set and importance.
+    #[allow(clippy::too_many_arguments)]
     pub async fn history_page_multi(
         &self,
         countries: Vec<String>,
@@ -480,6 +481,7 @@ impl EventRepository {
         offset: u32,
         from: Option<DateTime<Utc>>,
         to: Option<DateTime<Utc>>,
+        importance: Option<u8>,
     ) -> Result<Vec<EconomicEvent>, AppError> {
         let lower: Vec<String> = countries
             .into_iter()
@@ -498,6 +500,7 @@ impl EventRepository {
                  AND (? IS NULL OR lower(category) LIKE '%' || lower(?) || '%')
                  AND (? IS NULL OR event_time >= ?)
                  AND (? IS NULL OR event_time < ?)
+                 AND (? IS NULL OR importance = ?)
                  {country_clause}
                ORDER BY event_time DESC, id DESC LIMIT ? OFFSET ?"#
         );
@@ -508,7 +511,9 @@ impl EventRepository {
             .bind(from.map(|v| v.to_rfc3339()))
             .bind(from.map(|v| v.to_rfc3339()))
             .bind(to.map(|v| v.to_rfc3339()))
-            .bind(to.map(|v| v.to_rfc3339()));
+            .bind(to.map(|v| v.to_rfc3339()))
+            .bind(importance.map(i64::from))
+            .bind(importance.map(i64::from));
         for country in &lower {
             query = query.bind(country);
         }

@@ -262,6 +262,82 @@ async fn history_accepts_a_country_list() {
 }
 
 #[tokio::test]
+async fn history_filters_exact_importance_before_pagination() {
+    let app = app().await;
+    let mut events = Vec::new();
+    for (hours, importance) in [
+        (-1, 1),
+        (-2, 3),
+        (-3, 2),
+        (-4, 3),
+        (-5, 3),
+        (-6, 3),
+        (-7, 0),
+    ] {
+        let mut event = fixture_event(hours);
+        event.importance = importance;
+        if hours == -5 {
+            event.category = "employment".into();
+        }
+        if hours == -6 {
+            event.country = "China".into();
+        }
+        events.push(event);
+    }
+    app.state.events.save_events(&events).await.unwrap();
+    let router = api::router(app.state.clone());
+    let base = "/api/v1/events/history?country=United%20States&category=inflation";
+    for (suffix, expected) in [
+        ("&importance=3&limit=1&offset=0", vec!["fixture--2"]),
+        ("&importance=3&limit=1&offset=1", vec!["fixture--4"]),
+        ("&importance=3&limit=1&offset=2", vec![]),
+        ("&importance=2", vec!["fixture--3"]),
+        ("&importance=1", vec!["fixture--1"]),
+        ("&importance=0", vec!["fixture--7"]),
+        (
+            "",
+            vec![
+                "fixture--1",
+                "fixture--2",
+                "fixture--3",
+                "fixture--4",
+                "fixture--7",
+            ],
+        ),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{base}{suffix}"),
+                Some("secret-token"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let page: Vec<EconomicEvent> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            page.iter()
+                .map(|event| event.provider_id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let invalid = router
+        .oneshot(request(
+            "GET",
+            &format!("{base}&importance=4"),
+            Some("secret-token"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn source_failures_escalate_only_after_the_threshold() {
     let app = app().await;
     let health = app.state.health.clone();
