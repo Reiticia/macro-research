@@ -41,6 +41,12 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // axum-server enables aws-lc-rs while reqwest/sqlx enable ring; select one
+    // explicitly so rustls does not panic when loading the server certificate.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls ring CryptoProvider");
+
     // The config decides the log filter too, so it must be loaded before tracing is installed.
     // RUST_LOG still wins when the operator sets it.
     let config = AppConfig::load()?;
