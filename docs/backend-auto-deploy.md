@@ -127,6 +127,8 @@ chmod 600 .deploy-config-example.sha256 .deploy-revision
 9. 校验新 PID、实际可执行文件路径及 tmux 归属，持续观察默认 60 秒，并用 `/proc` 的启动时间防止 PID 重用造成误判。旧进程仍存活、没有启动新进程、启动后立即退出或观察期间退出，都会使 **「停止旧后端、备份、替换并验证新后端持续运行」节点报错**。
 10. 成功后更新 `.deploy-revision` 和配置基线；失败不记录为成功。临时上传文件会被清理，备份与本次服务器日志保留。
 
+Telegram 启动通知会显示 `Git 提交 <完整 hash>`。该值在编译时从本次 GitHub Actions 的提交中嵌入二进制，可直接核对是否运行了本次构建；不再显示不会随每次提交变化的 Cargo 版本号。
+
 这里验证的是指定新二进制**进程持续存活**，并不是长期服务监控，也不替代 HTTP/TLS 健康检查。观察窗口结束后仍建议用 Telegram 启动通知、API 或外部监控确认业务功能。
 
 日志只保留在服务器，不上传含有运行时信息的日志到 Actions。失败时可通过 `tmux a -t macro-research` 查看控制台，或读取对应的 `.deploy-run-*/backend.log`。每次替换也在该目录保留 `previous-binary`。

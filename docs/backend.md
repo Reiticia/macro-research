@@ -511,10 +511,14 @@ quiet_hours_timezone = "Asia/Shanghai"
 静默时段只抑制非 critical 通知；所有发送尝试写入 `alert_event` 审计表，因此“机器人不出声”
 与“数据源真的没问题”可以区分。Telegram 用 long polling（`offset` 落库），无需公网回调。
 
-**启动通知**：服务每次启动都会给管理员发一条，包含监听地址与协议（http/https）、数据库路径、
+**启动通知**：服务每次启动都会给管理员发一条，包含监听地址与协议（http/https）、构建时的完整 Git 提交 hash、数据库路径、
 鉴权/翻译/AI 的启用状态与所用模型、出网代理，以及最近一次模型调用时间。它**不受静默时段
 抑制**（夜间重启也值得关注，且第一次启动必须证明 bot 配置可用）；崩溃循环（systemd 自动拉起）
 时会每个重启各发一条，这也是预期行为——那是真出了问题。
+
+提交 hash 在编译时嵌入二进制，不依赖服务器上的 Git 仓库或 `.deploy-revision` 文件。
+构建时优先读取 `BACKEND_GIT_COMMIT`，其次是 GitHub Actions 的 `GITHUB_SHA`，本地构建则使用
+`git rev-parse HEAD`；无 Git 元数据时显示 `unknown`，不会用固定版本号冒充部署版本。
 
 ## 启动时刷新最近 7 天
 

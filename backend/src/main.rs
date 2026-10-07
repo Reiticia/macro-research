@@ -728,7 +728,7 @@ async fn startup_notice(config: &AppConfig, llm_usage: Option<&Arc<LlmUsageRepos
             "服务已启动，监听 {}:{}（{}）",
             config.server.host, config.server.port, scheme
         ),
-        format!("后端版本 {}", env!("CARGO_PKG_VERSION")),
+        format!("Git 提交 {}", env!("BACKEND_GIT_COMMIT")),
         format!("数据库 {}", config.database.url),
     ];
     lines.push(format!(
@@ -796,10 +796,11 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn startup_notice_includes_backend_version() {
+    async fn startup_notice_includes_build_commit_instead_of_static_version() {
         let config = AppConfig::from_path("config.example.toml").unwrap();
         let notice = startup_notice(&config, None).await;
-        assert!(notice.contains(&format!("后端版本 {}", env!("CARGO_PKG_VERSION"))));
+        assert!(notice.contains(&format!("Git 提交 {}", env!("BACKEND_GIT_COMMIT"))));
+        assert!(!notice.contains("后端版本"));
         assert!(notice.contains("服务已启动"));
     }
 }
