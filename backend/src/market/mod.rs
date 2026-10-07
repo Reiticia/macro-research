@@ -371,6 +371,111 @@ mod tests {
         }
     }
 
+    struct FailingProvider(&'static str);
+
+    #[async_trait]
+    impl MarketDataProvider for FailingProvider {
+        async fn quote(&self, symbol: MarketSymbol) -> Result<Quote, AppError> {
+            Err(AppError::Provider(format!(
+                "{} failed for {symbol}",
+                self.0
+            )))
+        }
+
+        async fn candles(
+            &self,
+            symbol: MarketSymbol,
+            _: chrono::DateTime<Utc>,
+            _: chrono::DateTime<Utc>,
+            _: crate::model::Interval,
+        ) -> Result<Vec<Candle>, AppError> {
+            Err(AppError::Provider(format!(
+                "{} failed for {symbol}",
+                self.0
+            )))
+        }
+    }
+
+    #[tokio::test]
+    async fn all_symbol_routes_attribute_failures_to_the_correct_sources() {
+        let routes = [
+            (MarketSymbol::Gold, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::Silver, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::Sp500, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::Nasdaq100, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::DowJones, YAHOO_KEY, None),
+            (MarketSymbol::Us2y, CNBC_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::Us10y, CNBC_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::Dxy, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::EurUsd, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::GbpUsd, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::UsdJpy, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::AudUsd, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::Wti, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::Brent, YAHOO_KEY, None),
+            (MarketSymbol::NaturalGas, BIQUOTE_KEY, Some(YAHOO_KEY)),
+            (MarketSymbol::Bitcoin, BINANCE_KEY, None),
+            (MarketSymbol::Ethereum, BINANCE_KEY, None),
+        ];
+        assert_eq!(routes.map(|route| route.0), MarketSymbol::ALL);
+        for (symbol, primary, fallback) in routes {
+            for operation in ["quote", "live_quote", "candles"] {
+                let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                    .max_connections(1)
+                    .connect("sqlite::memory:")
+                    .await
+                    .unwrap();
+                sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+                let health = Arc::new(HealthRegistry::new(pool.clone(), None, 3, 3600));
+                let service = MarketService::new(
+                    Arc::new(FailingProvider(YAHOO_KEY)),
+                    Arc::new(FailingProvider(BINANCE_KEY)),
+                    MarketRepository::new(pool),
+                    vec![symbol],
+                )
+                .with_health(health.clone())
+                .with_biquote(Arc::new(FailingProvider(BIQUOTE_KEY)))
+                .with_cnbc(Arc::new(FailingProvider(CNBC_KEY)));
+                let start = Utc::now();
+                for _ in 0..3 {
+                    let error = match operation {
+                        "quote" => service.quote(symbol).await.unwrap_err(),
+                        "live_quote" => service.live_quote(symbol).await.unwrap_err(),
+                        _ => service
+                            .historical_candles(
+                                symbol,
+                                start,
+                                start + chrono::Duration::hours(1),
+                                crate::model::Interval::OneMinute,
+                            )
+                            .await
+                            .unwrap_err(),
+                    };
+                    assert_eq!(
+                        error.to_string(),
+                        format!(
+                            "provider data error: {} failed for {symbol}",
+                            fallback.unwrap_or(primary)
+                        ),
+                        "{symbol}: {operation}",
+                    );
+                }
+                let snapshot = health.snapshot().await.unwrap();
+                assert_eq!(snapshot.len(), if fallback.is_some() { 2 } else { 1 });
+                for key in std::iter::once(primary).chain(fallback) {
+                    let source = snapshot.iter().find(|source| source.key == key).unwrap();
+                    assert_eq!(source.status, "down");
+                    assert_eq!(source.consecutive_failures, 3);
+                    assert_eq!(
+                        source.last_error.as_deref(),
+                        Some(format!("provider data error: {key} failed for {symbol}").as_str()),
+                        "{symbol}: {operation}: {key}",
+                    );
+                }
+            }
+        }
+    }
+
     async fn service(
         provider: Arc<CountingProvider>,
         ttl: Duration,

@@ -67,9 +67,9 @@ impl MarketDataProvider for MonitoredProvider {
                         self.record_success(key).await;
                         Ok(quote)
                     }
-                    Err(_) => {
-                        self.record_failure(key, &error).await;
-                        Err(error)
+                    Err(fallback_error) => {
+                        self.record_failure(key, &fallback_error).await;
+                        Err(fallback_error)
                     }
                 }
             }
@@ -92,9 +92,9 @@ impl MarketDataProvider for MonitoredProvider {
                         self.record_success(key).await;
                         Ok(quote)
                     }
-                    Err(_) => {
-                        self.record_failure(key, &error).await;
-                        Err(error)
+                    Err(fallback_error) => {
+                        self.record_failure(key, &fallback_error).await;
+                        Err(fallback_error)
                     }
                 }
             }
@@ -145,9 +145,9 @@ impl MarketDataProvider for MonitoredProvider {
                         self.record_success(key).await;
                         Ok(candles)
                     }
-                    Err(_) => {
-                        self.record_failure(key, &error).await;
-                        Err(error)
+                    Err(fallback_error) => {
+                        self.record_failure(key, &fallback_error).await;
+                        Err(fallback_error)
                     }
                 }
             }
@@ -189,6 +189,88 @@ mod tests {
                     volume: None,
                 })
                 .collect())
+        }
+    }
+
+    struct FailingSource(&'static str);
+
+    #[async_trait]
+    impl MarketDataProvider for FailingSource {
+        async fn quote(&self, _: MarketSymbol) -> Result<Quote, AppError> {
+            Err(AppError::Provider(self.0.into()))
+        }
+
+        async fn candles(
+            &self,
+            _: MarketSymbol,
+            _: DateTime<Utc>,
+            _: DateTime<Utc>,
+            _: Interval,
+        ) -> Result<Vec<Candle>, AppError> {
+            Err(AppError::Provider(self.0.into()))
+        }
+    }
+
+    async fn test_health() -> Arc<HealthRegistry> {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        Arc::new(HealthRegistry::new(pool, None, 3, 3600))
+    }
+
+    #[tokio::test]
+    async fn failed_fallback_records_and_returns_its_own_error() {
+        let primary_error = "CNBC returned no price for us2y";
+        let fallback_error = "Yahoo ^UST2YR: Not Found";
+        for operation in ["quote", "live_quote", "candles"] {
+            let health = test_health().await;
+            let provider = MonitoredProvider::new(
+                Arc::new(FailingSource(primary_error)),
+                crate::market::CNBC_KEY,
+                Some((
+                    Arc::new(FailingSource(fallback_error)),
+                    crate::market::YAHOO_KEY,
+                )),
+                Some(health.clone()),
+            );
+            let start = Utc::now();
+            for _ in 0..3 {
+                let error = match operation {
+                    "quote" => provider.quote(MarketSymbol::Us2y).await.unwrap_err(),
+                    "live_quote" => provider.live_quote(MarketSymbol::Us2y).await.unwrap_err(),
+                    _ => provider
+                        .candles(
+                            MarketSymbol::Us2y,
+                            start,
+                            start + chrono::Duration::hours(1),
+                            Interval::OneMinute,
+                        )
+                        .await
+                        .unwrap_err(),
+                };
+                assert_eq!(
+                    error.to_string(),
+                    format!("provider data error: {fallback_error}")
+                );
+            }
+            let snapshot = health.snapshot().await.unwrap();
+            assert_eq!(snapshot.len(), 2);
+            for (key, expected_error) in [
+                (crate::market::CNBC_KEY, primary_error),
+                (crate::market::YAHOO_KEY, fallback_error),
+            ] {
+                let source = snapshot.iter().find(|source| source.key == key).unwrap();
+                assert_eq!(source.status, "down", "{operation}: {key}");
+                assert_eq!(source.consecutive_failures, 3);
+                assert_eq!(
+                    source.last_error.as_deref(),
+                    Some(format!("provider data error: {expected_error}").as_str()),
+                    "{operation}: {key}",
+                );
+            }
         }
     }
 
