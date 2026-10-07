@@ -12,6 +12,8 @@ START_TIMEOUT=20
 STOP_TIMEOUT=30
 ARCHIVE=""; ARCHIVE_HASH=""; CONFIG_HASH=""; REVISION=""
 STAGE=""; NEXT_BINARY=""
+BACKEND_STOPPED=0
+BINARY_REPLACED=0
 
 log() { printf '[auto-deploy] %s\n' "$*"; }
 die() { printf '[auto-deploy] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -53,15 +55,15 @@ check_runtime() {
     [[ "$(uname -s)" == Linux ]] || die 'This script requires Linux /proc'
     [[ "$EUID" -eq 0 ]] || die 'Use the root SSH account for /root/macro-research'
     local command
-    for command in tmux sqlite3 sha256sum tar install flock ps readlink tee; do
+    for command in tmux sqlite3 sha256sum tar install flock ps readlink tee cmp; do
         command -v "$command" >/dev/null || die "Required command is missing: $command"
     done
     for file in backup.sh config.toml rules.toml "$BIN_NAME"; do
         [[ -f "$APP_DIR/$file" ]] || die "Required installation file is missing: $file"
     done
     [[ -f "$APP_DIR/data/market.db" ]] || die 'Database is missing'
-    # The existing backup.sh only knows systemd. sqlite3 is mandatory so its online .backup
-    # remains consistent while the tmux process is still running; never fall back to cp.
+    # tmux is stopped explicitly before backup.sh, which itself only manages systemd.
+    # Keep sqlite3 mandatory for consistent snapshots and database integrity checks.
     exec 9> "$APP_DIR/.auto-deploy.lock"
     flock -n 9 || die 'Another deployment is running'
 }
@@ -114,6 +116,35 @@ cleanup() {
     [[ -z "$NEXT_BINARY" ]] || rm -f -- "$NEXT_BINARY"
 }
 
+handle_exit() {
+    local status=$? recovery_status
+    trap - EXIT
+    # Before replacement there have been no migrations by the new program. Restarting the
+    # unchanged old binary is safe; never auto-rollback after the new binary is installed.
+    if [[ "$BACKEND_STOPPED" -eq 1 && "$BINARY_REPLACED" -eq 0 ]] \
+        && cmp -s "$APP_DIR/$BIN_NAME" "$RUN_DIR/previous-binary"; then
+        log 'Deployment aborted before replacement; attempting to restart the unchanged old backend'
+        # A separate, strictly checked subshell lets recovery fail without swallowing the
+        # original backup/deployment failure. Do not run this subshell in an if condition:
+        # that would disable errexit inside its functions.
+        set +e
+        (
+            set -Eeuo pipefail
+            start_backend
+            observe_backend
+        )
+        recovery_status=$?
+        set -e
+        if [[ "$recovery_status" -eq 0 ]]; then
+            log 'Old backend restarted and verified; the deployment is still unsuccessful'
+        else
+            log "Old backend recovery failed; manual intervention required. Inspect $RUN_DIR/backend.log"
+        fi
+    fi
+    cleanup || true
+    exit "$status"
+}
+
 stage_release() {
     local actual member listing
     actual="$(sha256sum "$ARCHIVE")"; actual="${actual%% *}"
@@ -137,12 +168,12 @@ stage_release() {
 }
 
 stop_backend() {
-    # Backups may take time. Never interrupt a different job that has since taken the pane.
+    # Preflight/staging may take time. Never interrupt a different foreground job.
     local group
     kill -0 "$OLD_PID" 2>/dev/null || die 'Old backend exited before restart; refusing to send Ctrl+C'
     is_descendant "$OLD_PID" "$SHELL_PID" || die 'Old backend no longer belongs to the selected pane'
     group="$(ps -o pgid= -p "$OLD_PID" | tr -d '[:space:]')"
-    [[ -n "$group" && "$group" == "$(foreground_group)" ]] || die 'Foreground job changed during backup; refusing to send Ctrl+C'
+    [[ -n "$group" && "$group" == "$(foreground_group)" ]] || die 'Foreground job changed during preflight; refusing to send Ctrl+C'
     log "Sending Ctrl+C to $PANE_ID (old PID $OLD_PID)"
     tmux send-keys -t "$PANE_ID" C-c
     local deadline=$((SECONDS + STOP_TIMEOUT))
@@ -226,14 +257,17 @@ main() {
     # Recheck after taking the lock, before any backup or process changes.
     check_config_baseline || return 0
     check_pane
-    trap cleanup EXIT
-    log 'Backing up the current installation before deployment'
-    (cd -- "$APP_DIR" && bash ./backup.sh --dir "$APP_DIR")
+    trap handle_exit EXIT
+    # Validate/unpack into staging before downtime; the installed binary stays unchanged.
     stage_release
     check_config_baseline || return 0
     stop_backend
+    BACKEND_STOPPED=1
+    log 'Old backend stopped; backing up the installation before replacement'
+    (cd -- "$APP_DIR" && bash ./backup.sh --dir "$APP_DIR")
     # Atomic replacement avoids ETXTBSY and never truncates a running executable.
     mv -f -- "$NEXT_BINARY" "$APP_DIR/$BIN_NAME"
+    BINARY_REPLACED=1
     NEXT_BINARY=""
     start_backend
     observe_backend

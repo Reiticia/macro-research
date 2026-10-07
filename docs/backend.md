@@ -657,8 +657,8 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 
 `.github/workflows/backend-release.yml`：后端/工作流文件推送、PR 与手动触发都会构建验证
 Linux x86_64；Tag 运行还会创建 Release。`main` 推送构建成功后，最后的 job 引用独立的
-`.github/workflows/backend-deploy.yml`，使用 SSH 自动备份、在 `macro-research` tmux 窗格中
-替换并重启 `/root/macro-research/market-event-analyzer`，检查新进程持续运行。配置模板变化
+`.github/workflows/backend-deploy.yml`，使用 SSH 在 `macro-research` tmux 窗格中停止旧后端、
+备份，再替换并启动 `/root/macro-research/market-event-analyzer`，检查新进程持续运行。配置模板变化
 或未确认服务器配置基线时跳过部署、要求人工处理。SSH Secrets、tmux 目标、首次配置基线
 及失败排查见 [后端自动部署](backend-auto-deploy.md)。
 
