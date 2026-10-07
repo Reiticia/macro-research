@@ -4,9 +4,13 @@ on:
   push:
     paths:
       - "backend/**"
+      - ".github/workflows/backend-release.yml"
+      - ".github/workflows/backend-deploy.yml"
   pull_request:
     paths:
       - "backend/**"
+      - ".github/workflows/backend-release.yml"
+      - ".github/workflows/backend-deploy.yml"
   workflow_dispatch:
 
 permissions:
@@ -14,7 +18,8 @@ permissions:
 
 concurrency:
   group: backend-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never interrupt a main run while it may be stopping/restarting production.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # 仅构建 Linux x86_64 (glibc) 版本。
 jobs:
@@ -31,6 +36,9 @@ jobs:
         with:
           workspaces: backend -> target
           key: x86_64-unknown-linux-gnu
+
+      - name: 自动部署脚本回归测试
+        run: bash backend/deploy/test-auto-deploy.sh
 
       - name: 代码格式检查
         working-directory: backend
@@ -100,3 +108,10 @@ jobs:
 
             > 首次启动会自动创建 `data/market.db` 并执行迁移。
             > `translation.enabled = true` 时需要设置 `OPENAI_API_KEY`，否则可改为 `false`。
+
+  deploy:
+    name: 自动部署到服务器
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/backend-deploy.yml
+    secrets: inherit

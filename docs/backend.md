@@ -655,10 +655,15 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 
 ### GitHub Actions
 
-`.github/workflows/backend-release.yml`：PR 与手动触发都会构建验证 x86_64；推送分支或 Tag
-不再自动运行。要发布时在 Actions 对 `v*` tag 手动运行工作流，构建并创建 Release。不想依赖
-Actions 时本地跑 `./scripts/build-release.sh`（支持 `--musl`、`--target aarch64-unknown-linux-gnu`），
-产物在 `backend/dist/`。
+`.github/workflows/backend-release.yml`：后端/工作流文件推送、PR 与手动触发都会构建验证
+Linux x86_64；Tag 运行还会创建 Release。`main` 推送构建成功后，最后的 job 引用独立的
+`.github/workflows/backend-deploy.yml`，使用 SSH 自动备份、在 `macro-research` tmux 窗格中
+替换并重启 `/root/macro-research/market-event-analyzer`，检查新进程持续运行。配置模板变化
+或未确认服务器配置基线时跳过部署、要求人工处理。SSH Secrets、tmux 目标、首次配置基线
+及失败排查见 [后端自动部署](backend-auto-deploy.md)。
+
+不想依赖 Actions 时本地跑 `./scripts/build-release.sh`（支持 `--musl`、
+`--target aarch64-unknown-linux-gnu`），产物在 `backend/dist/`。
 
 ## 验证
 

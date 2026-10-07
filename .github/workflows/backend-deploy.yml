@@ -1,0 +1,171 @@
+name: Backend automatic deployment
+
+# Called only after a successful backend build. Artifacts are from the same workflow run.
+on:
+  workflow_call:
+    secrets:
+      BACKEND_DEPLOY_HOST:
+        required: true
+      BACKEND_DEPLOY_SSH_KEY:
+        required: true
+      BACKEND_DEPLOY_KNOWN_HOSTS:
+        required: true
+      BACKEND_DEPLOY_PORT:
+        required: false
+      BACKEND_DEPLOY_USER:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Never expose deployment credentials to PRs, tags, or other branches.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DEPLOY_HOST: ${{ secrets.BACKEND_DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.BACKEND_DEPLOY_PORT || '22' }}
+      DEPLOY_USER: ${{ secrets.BACKEND_DEPLOY_USER || 'root' }}
+      DEPLOY_PANE: ${{ vars.BACKEND_TMUX_PANE || 'macro-research:0.0' }}
+      OBSERVE_SECONDS: ${{ vars.BACKEND_DEPLOY_OBSERVE_SECONDS || '60' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 跳过已过期的构建
+        id: current
+        shell: bash
+        run: |
+          set -euo pipefail
+          latest="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [[ "$latest" == "$GITHUB_SHA" ]]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::main 已有更新提交，本次旧构建不部署。"
+            echo "### 跳过部署：本次构建已不是 main 最新提交" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 配置并验证 SSH
+        if: steps.current.outputs.proceed == 'true'
+        env:
+          SSH_DIR: ${{ runner.temp }}/backend-deploy-ssh
+          SSH_PRIVATE_KEY: ${{ secrets.BACKEND_DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.BACKEND_DEPLOY_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "SSH_DIR=$SSH_DIR" >> "$GITHUB_ENV"
+          [[ -n "$SSH_PRIVATE_KEY" && -n "$SSH_KNOWN_HOSTS" ]] || { echo '::error::缺少部署 SSH 私钥或服务器 known_hosts Secret'; exit 1; }
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9._:-]+$ ]] || { echo '::error::BACKEND_DEPLOY_HOST 不合法'; exit 1; }
+          [[ "$DEPLOY_USER" == root ]] || { echo '::error::/root/macro-research 部署需要 root SSH 账户'; exit 1; }
+          [[ "$DEPLOY_PORT" =~ ^[1-9][0-9]*$ ]] && (( DEPLOY_PORT <= 65535 )) || { echo '::error::SSH 端口不合法'; exit 1; }
+          install -d -m 0700 "$SSH_DIR"
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > "$SSH_DIR/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$SSH_DIR/known_hosts"
+          chmod 0600 "$SSH_DIR/key" "$SSH_DIR/known_hosts"
+          ssh-keygen -y -P '' -f "$SSH_DIR/key" > /dev/null
+
+      - name: 配置模板变更时跳过自动部署
+        id: config
+        if: steps.current.outputs.proceed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(sha256sum backend/config.example.toml | cut -d' ' -f1)"
+          baseline="$(ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+            -o ConnectTimeout=15 "$DEPLOY_USER@$DEPLOY_HOST" \
+            'if test -f /root/macro-research/.deploy-config-example.sha256; then cat /root/macro-research/.deploy-config-example.sha256; fi')"
+          echo "template_hash=$expected" >> "$GITHUB_OUTPUT"
+          if [[ "$baseline" == "$expected" ]]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo '::warning::config.example.toml 已变化或服务器尚未设置配置基线。已跳过自动部署，请手动更新配置、部署并确认新基线。'
+            echo '### 跳过部署：需手动处理 config.example.toml 并确认配置基线' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/download-artifact@v4
+        if: steps.config.outputs.proceed == 'true'
+        with:
+          name: market-event-analyzer-x86_64-unknown-linux-gnu
+          path: dist
+
+      - name: 校验并上传本次构建产物
+        id: upload
+        if: steps.config.outputs.proceed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(dist/*-x86_64-unknown-linux-gnu.tar.gz)
+          [[ ${#archives[@]} -eq 1 ]] || { echo '::error::未找到唯一的后端构建产物'; exit 1; }
+          archive="${archives[0]}"
+          (cd dist && sha256sum -c "$(basename "$archive").sha256")
+          archive_hash="$(sha256sum "$archive" | cut -d' ' -f1)"
+          remote_dir="$(ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+            -o ConnectTimeout=15 "$DEPLOY_USER@$DEPLOY_HOST" \
+            'mktemp -d /tmp/macro-research-deploy.XXXXXXXX')"
+          [[ "$remote_dir" =~ ^/tmp/macro-research-deploy\.[a-zA-Z0-9]+$ ]] || { echo '::error::服务器临时目录不合法'; exit 1; }
+          echo "remote_dir=$remote_dir" >> "$GITHUB_OUTPUT"
+          echo "archive_hash=$archive_hash" >> "$GITHUB_OUTPUT"
+          scp_host="$DEPLOY_HOST"
+          [[ "$scp_host" != *:* ]] || scp_host="[$scp_host]"
+          scp_options=(-i "$SSH_DIR/key" -P "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" -o ConnectTimeout=15)
+          scp "${scp_options[@]}" "$archive" "$DEPLOY_USER@$scp_host:$remote_dir/release.tar.gz"
+          scp "${scp_options[@]}" backend/deploy/auto-deploy.sh "$DEPLOY_USER@$scp_host:$remote_dir/auto-deploy.sh"
+
+      - name: 备份、tmux 重启并验证二进制持续运行
+        if: steps.config.outputs.proceed == 'true'
+        env:
+          REMOTE_DIR: ${{ steps.upload.outputs.remote_dir }}
+          ARCHIVE_HASH: ${{ steps.upload.outputs.archive_hash }}
+          CONFIG_HASH: ${{ steps.config.outputs.template_hash }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Recheck main after upload so a slow build never knowingly overwrites a newer commit.
+          latest="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [[ "$latest" != "$GITHUB_SHA" ]]; then
+            echo '::notice::上传期间 main 已更新，本次旧构建不部署。'
+            echo '### 跳过部署：上传期间 main 已更新' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          printf -v command 'bash %q --dir /root/macro-research --pane %q --archive %q --archive-sha256 %q --config-sha256 %q --revision %q --observe-seconds %q' \
+            "$REMOTE_DIR/auto-deploy.sh" "$DEPLOY_PANE" "$REMOTE_DIR/release.tar.gz" "$ARCHIVE_HASH" "$CONFIG_HASH" "$GITHUB_SHA" "$OBSERVE_SECONDS"
+          if ! ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$command" | tee "$RUNNER_TEMP/backend-deploy-result.txt"; then
+            echo '::error::后端自动部署失败：备份/重启失败，或新二进制未持续运行。请检查服务器备份与 .deploy-run-*/backend.log。'
+            exit 1
+          fi
+          if grep -qx 'DEPLOY_RESULT=success' "$RUNNER_TEMP/backend-deploy-result.txt"; then
+            printf '### 部署成功\n提交：`%s`\n新进程持续运行观察：%s 秒\n' "$GITHUB_SHA" "$OBSERVE_SECONDS" >> "$GITHUB_STEP_SUMMARY"
+          elif grep -qx 'DEPLOY_RESULT=manual_required' "$RUNNER_TEMP/backend-deploy-result.txt"; then
+            echo '::warning::服务器配置基线发生变化，已跳过部署，请手动部署。'
+            echo '### 跳过部署：服务器配置基线变化' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '::error::部署脚本未返回明确的成功/跳过状态'
+            exit 1
+          fi
+
+      - name: 清理 SSH 凭据及服务器临时产物
+        if: always()
+        env:
+          REMOTE_DIR: ${{ steps.upload.outputs.remote_dir }}
+        shell: bash
+        run: |
+          if [[ "$REMOTE_DIR" =~ ^/tmp/macro-research-deploy\.[a-zA-Z0-9]+$ && -f "$SSH_DIR/key" ]]; then
+            ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
+              -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+              -o ConnectTimeout=15 "$DEPLOY_USER@$DEPLOY_HOST" "rm -rf -- '$REMOTE_DIR'" || true
+          fi
+          rm -rf -- "${SSH_DIR:-$RUNNER_TEMP/backend-deploy-ssh}"
