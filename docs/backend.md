@@ -463,7 +463,7 @@ reasoning 混排、schema 回显、截断、`snake_case`、`verdict` 归一化�
 4. 采纳 → 写入 `event_name_translation` 并回写所有同名事件，所有设备下次刷新即生效；
    屏蔽 → 写入 `translation_correction_mute`，该词条不再接受勘正、不再通知。
 
-机器人命令：`/status`（数据源健康）、`/pending`（待审译名勘正）、`/usage`（近 24 小时模型用量）。
+机器人命令：`/status`（数据源健康）、`/usage`（近 24 小时模型用量）、`/notifications`（通知开关按钮）。
 仅配置文件里 `telegram.admin_chat_ids` 白名单中的 chat 会被响应。
 
 ## 告警
@@ -496,6 +496,17 @@ quiet_hours_timezone = "Asia/Shanghai"
 4. 恢复 → 发一条恢复通知；
 5. 公布时间已过 30 分钟仍无 Actual → 汇总成一条摘要（最多 10 条，单事件 6 小时内不重复）；
 6. 主源与回退源同时不可用、或数据库写入失败 → critical，绕过静默时段。
+
+**独立通知开关**：管理员发送 `/notifications`，机器人显示两类通知的当前状态，并提供各自的「开启 / 关闭」按钮：
+
+- **公布值缺失通知**：只控制 `calendar.data_missing` 摘要。
+- **数据源异常/恢复通知**：控制 `calendar.*`（不含 `calendar.data_missing`）与 `market.*` 的失败、降级、恢复和严重告警。
+
+点击后弹出操作确认，**只编辑原消息**显示两类通知的当前状态，并移除全部按钮，不发送新消息；再次修改请重新发送 `/notifications`。
+两个开关默认开启、互不影响，对所有管理员生效，保存到 SQLite `notification_settings` 表，重启后保留。仅白名单管理员可操作。
+关闭通知不会停止数据采集或健康记录，`/status` 仍能查看状态；AI 调用失败、启动通知和反馈按钮不受影响。
+显式关闭数据源通知也会抑制该类别的 critical 通知（与静默时段规则不同）；被抑制的发送尝试仍写入审计表。
+关闭缺失摘要时不更新事件通知冷却记录；重新开启后按原定检查周期和冷却规则通知，不立即重放历史告警。
 
 静默时段只抑制非 critical 通知；所有发送尝试写入 `alert_event` 审计表，因此“机器人不出声”
 与“数据源真的没问题”可以区分。Telegram 用 long polling（`offset` 落库），无需公网回调。

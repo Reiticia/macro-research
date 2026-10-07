@@ -4,7 +4,14 @@ use chrono::{DateTime, Timelike, Utc};
 use chrono_tz::Tz;
 use sqlx::SqlitePool;
 
-use crate::{alert::telegram::TelegramClient, config::AlertConfig, error::AppError};
+use crate::{
+    alert::{
+        preferences::{self, NotificationKind},
+        telegram::TelegramClient,
+    },
+    config::AlertConfig,
+    error::AppError,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Severity {
@@ -62,6 +69,14 @@ impl AlertService {
         self.telegram.is_some() && !self.chat_ids.is_empty()
     }
 
+    /// Explicit category switches also apply to critical alerts and quiet-hours bypasses.
+    pub async fn notification_enabled(&self, key: &str) -> Result<bool, AppError> {
+        match NotificationKind::for_alert(key) {
+            Some(kind) => preferences::enabled(&self.pool, kind).await,
+            None => Ok(true),
+        }
+    }
+
     /// Local time inside the configured window suppresses non-critical alerts.
     pub fn quiet_now(&self, now: DateTime<Utc>) -> bool {
         let Some((start, end)) = self.quiet_window else {
@@ -96,7 +111,7 @@ impl AlertService {
         self.send_to_admins(severity, key, &message).await
     }
 
-    /// Sends regardless of quiet hours.
+    /// Sends regardless of quiet hours, but still respects explicit category switches.
     ///
     /// Used for the startup notice: a restart is rare enough to be worth hearing about at night,
     /// and the very first boot must prove the bot token and chat id actually work.
@@ -138,6 +153,10 @@ impl AlertService {
         key: &str,
         message: &str,
     ) -> Result<(), AppError> {
+        if !self.notification_enabled(key).await? {
+            tracing::debug!(key, "alert suppressed by notification preference");
+            return Ok(());
+        }
         let Some(telegram) = &self.telegram else {
             tracing::info!(key, %message, "alert (no Telegram bot configured)");
             return Ok(());
@@ -195,6 +214,164 @@ fn parse_clock(value: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn notification_switches_gate_delivery_but_not_health_or_audit() {
+        use crate::alert::{
+            HealthRegistry,
+            test_support::{TelegramMock, test_pool},
+        };
+
+        let mock = TelegramMock::start().await;
+        let pool = test_pool().await;
+        let service = Arc::new(AlertService::new(
+            Some(mock.client.clone()),
+            vec![42],
+            pool.clone(),
+            AlertConfig::default(),
+        ));
+        let health = HealthRegistry::new(pool.clone(), Some(service.clone()), 3, 3600);
+
+        // Both categories default on.
+        service
+            .notify(
+                Severity::Warning,
+                "calendar.data_missing",
+                "degraded",
+                "missing".into(),
+            )
+            .await
+            .unwrap();
+        service
+            .notify(Severity::Warning, "market.yahoo", "down", "source".into())
+            .await
+            .unwrap();
+        assert_eq!(mock.requests.lock().await.len(), 2);
+
+        preferences::set_enabled(&pool, NotificationKind::DataMissing, false)
+            .await
+            .unwrap();
+        service
+            .notify(
+                Severity::Warning,
+                "calendar.data_missing",
+                "degraded",
+                "muted missing".into(),
+            )
+            .await
+            .unwrap();
+        service
+            .notify(
+                Severity::Warning,
+                "market.yahoo",
+                "down",
+                "source still on".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(mock.requests.lock().await.len(), 3);
+
+        preferences::set_enabled(&pool, NotificationKind::DataSources, false)
+            .await
+            .unwrap();
+        preferences::set_enabled(&pool, NotificationKind::DataMissing, true)
+            .await
+            .unwrap();
+        for _ in 0..3 {
+            health.record_failure("market.yahoo", "timeout").await;
+        }
+        let snapshot = health.snapshot().await.unwrap();
+        assert_eq!(snapshot[0].status, "down");
+        assert_eq!(snapshot[0].consecutive_failures, 3);
+        health.record_success("market.yahoo").await;
+        assert_eq!(health.snapshot().await.unwrap()[0].status, "healthy");
+        service
+            .notify(
+                Severity::Warning,
+                "calendar.primary",
+                "degraded",
+                "muted degradation".into(),
+            )
+            .await
+            .unwrap();
+        // An explicit source off switch also suppresses critical and quiet-hours bypasses.
+        health
+            .notify_critical("calendar.all_sources", "all failed".into())
+            .await;
+        service
+            .notify_unsuppressed(
+                Severity::Warning,
+                "market.cnbc",
+                "down",
+                "muted bypass".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(mock.requests.lock().await.len(), 3);
+
+        // Fresh service instances read persisted preferences, not process-local defaults.
+        let restarted = AlertService::new(
+            Some(mock.client.clone()),
+            vec![42],
+            pool.clone(),
+            AlertConfig::default(),
+        );
+        assert!(
+            !restarted
+                .notification_enabled("market.yahoo")
+                .await
+                .unwrap()
+        );
+        assert!(
+            restarted
+                .notification_enabled("calendar.data_missing")
+                .await
+                .unwrap()
+        );
+        restarted
+            .notify(
+                Severity::Warning,
+                "calendar.data_missing",
+                "degraded",
+                "missing still on".into(),
+            )
+            .await
+            .unwrap();
+        restarted
+            .notify_unsuppressed(
+                Severity::Info,
+                "service.startup",
+                "healthy",
+                "started".into(),
+            )
+            .await
+            .unwrap();
+        health
+            .record_ai_failure("analysis.ai", "relay failed")
+            .await;
+        assert_eq!(mock.requests.lock().await.len(), 6);
+
+        // Muted attempts still leave an audit trail.
+        let muted: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM alert_event WHERE message LIKE 'muted%'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(muted, 3);
+        preferences::set_enabled(&pool, NotificationKind::DataSources, true)
+            .await
+            .unwrap();
+        restarted
+            .notify(
+                Severity::Warning,
+                "market.yahoo",
+                "down",
+                "resumed source".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(mock.requests.lock().await.len(), 7);
+    }
 
     #[tokio::test]
     async fn quiet_hours_wrap_past_midnight() {

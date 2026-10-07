@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 
 use crate::{
     alert::{
+        preferences::{self, NotificationKind},
         state::HealthRegistry,
         telegram::{InlineButton, TelegramClient},
     },
@@ -20,7 +21,7 @@ use crate::{
 
 /// Telegram long-polling loop: the admin console for the server.
 ///
-/// It answers `/status`, `/usage` and `/help`, and it resolves the inline buttons attached to
+/// It answers `/status`, `/usage`, `/notifications` and `/help`, and resolves buttons attached to
 /// shared-analysis feedback. Only whitelisted chat ids are answered.
 pub struct BotState {
     pub telegram: Arc<TelegramClient>,
@@ -104,6 +105,39 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
     };
     if let Some((action, module)) = data.split_once(':') {
         match action {
+            "notify" => {
+                let Some((key, value)) = module.split_once(':') else {
+                    return Ok(());
+                };
+                let Some(kind) = NotificationKind::parse(key) else {
+                    return Ok(());
+                };
+                let enabled = match value {
+                    "on" => true,
+                    "off" => false,
+                    _ => return Ok(()),
+                };
+                preferences::set_enabled(&state.pool, kind, enabled).await?;
+                state
+                    .telegram
+                    .answer_callback(
+                        callback_id,
+                        &format!(
+                            "{}已{}",
+                            kind.label(),
+                            if enabled { "开启" } else { "关闭" }
+                        ),
+                    )
+                    .await?;
+                if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
+                    let (text, _) = notification_panel(&state.pool).await?;
+                    state
+                        .telegram
+                        .edit_message(chat_id, message_id, &text, None)
+                        .await?;
+                }
+                return Ok(());
+            }
             "apitest" => {
                 let buttons = api_symbol_buttons(module);
                 if buttons.is_empty() {
@@ -277,6 +311,11 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
     let reply = match command {
         "/status" => status_text(state).await?,
         "/usage" => usage_text(state).await?,
+        "/notifications" => {
+            let (text, buttons) = notification_panel(&state.pool).await?;
+            state.telegram.send_message(chat_id, &text, Some(buttons)).await?;
+            return Ok(());
+        }
         "/test_market_api" => {
             state.telegram.send_message(chat_id, "请选择要测试的行情 API：", Some(vec![
                 vec![InlineButton { text: "Yahoo Finance".into(), callback_data: "apitest:yahoo".into() }, InlineButton { text: "BiQuote".into(), callback_data: "apitest:biquote".into() }],
@@ -314,12 +353,39 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
             return Ok(());
         }
         "/help" | "/start" => {
-            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试日历源连通性\n/translation_failed — 查询失败事件名并选择是否重译\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
+            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试日历源连通性\n/translation_failed — 查询失败事件名并选择是否重译\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
         }
         _ => return Ok(()),
     };
     state.telegram.send_message(chat_id, &reply, None).await?;
     Ok(())
+}
+
+async fn notification_panel(
+    pool: &SqlitePool,
+) -> Result<(String, Vec<Vec<InlineButton>>), crate::error::AppError> {
+    let mut lines = vec!["<b>通知开关</b>".to_owned()];
+    let mut buttons = Vec::new();
+    for kind in NotificationKind::ALL {
+        let enabled = preferences::enabled(pool, kind).await?;
+        lines.push(format!(
+            "{}：<b>{}</b>",
+            kind.label(),
+            if enabled { "开启" } else { "关闭" }
+        ));
+        buttons.push(vec![
+            InlineButton {
+                text: format!("{}开启{}", if enabled { "✅ " } else { "" }, kind.label()),
+                callback_data: format!("notify:{}:on", kind.key()),
+            },
+            InlineButton {
+                text: format!("{}关闭{}", if enabled { "" } else { "✅ " }, kind.label()),
+                callback_data: format!("notify:{}:off", kind.key()),
+            },
+        ]);
+    }
+    lines.push("\n两个开关互不影响，对所有管理员生效，重启后保留。\n数据源开关控制日历/行情源的异常、降级、恢复及严重告警。\n不影响数据采集、健康检查、AI 通知或启动通知。\n再次修改请发送 /notifications。".to_owned());
+    Ok((lines.join("\n"), buttons))
 }
 
 fn api_label(provider: &str) -> &'static str {
@@ -619,6 +685,10 @@ async fn usage_text(state: &BotState) -> Result<String, crate::error::AppError> 
     }
     Ok(lines.join("\n"))
 }
+
+#[cfg(test)]
+#[path = "bot_tests.rs"]
+mod tests;
 
 async fn read_offset(pool: &SqlitePool) -> Result<i64, crate::error::AppError> {
     Ok(

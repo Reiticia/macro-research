@@ -47,6 +47,7 @@ impl TelegramClient {
         let commands = json!([
             {"command": "status", "description": "查看数据源健康状态"},
             {"command": "usage", "description": "查看近24小时模型用量"},
+            {"command": "notifications", "description": "按钮控制公布值缺失/数据源通知"},
             {"command": "test_ai", "description": "测试 AI 接口可用性"},
             {"command": "test_market_api", "description": "测试行情 API 连通性"},
             {"command": "test_calendar_api", "description": "测试日历源连通性"},
@@ -157,12 +158,16 @@ impl TelegramClient {
             .await?;
         let body: Value = response.json().await?;
         if body.get("ok").and_then(Value::as_bool) != Some(true) {
-            return Err(AppError::Provider(format!(
-                "Telegram editMessageText failed: {}",
-                body.get("description")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown error")
-            )));
+            let description = body
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error");
+            // Explicit on/off buttons are idempotent; repeated clicks need no new message.
+            if !description.starts_with("Bad Request: message is not modified") {
+                return Err(AppError::Provider(format!(
+                    "Telegram editMessageText failed: {description}"
+                )));
+            }
         }
         Ok(())
     }
