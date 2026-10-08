@@ -41,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -51,6 +52,7 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -123,10 +125,13 @@ class MacroRepository(
         if (previousMode == DataSourceMode.BACKEND) {
             pushTopicManager.unsubscribeAll(dao.followedEventIds())
         }
-        backendPreferences.setMode(mode)
-        dao.clearCache()
-        analysisDao.clearAll()
-        marketCache.clear()
+        releaseCommitMutex.withLock {
+            backendPreferences.setMode(mode)
+            invalidateReleaseRefresh()
+            dao.clearCache()
+            analysisDao.clearAll()
+            marketCache.clear()
+        }
         historySyncedAt = 0L
         networkPreferences.clearUpcomingSync()
         publishWarning(null)
@@ -134,6 +139,7 @@ class MacroRepository(
 
     fun saveBackendSettings(baseUrl: String, token: String) {
         backendPreferences.save(baseUrl, token)
+        invalidateReleaseRefresh()
         backendPreferences.clearVerification()
         networkPreferences.clearUpcomingSync()
         historySyncedAt = 0L
@@ -146,16 +152,19 @@ class MacroRepository(
     }
 
     suspend fun clearBackendSettings() {
-        if (dataSourceSettings.value.mode == DataSourceMode.BACKEND) {
-            pushTopicManager.unsubscribeAll(dao.followedEventIds())
-            dao.clearCache()
-            analysisDao.clearAll()
-            marketCache.clear()
-            historySyncedAt = 0L
-            networkPreferences.clearUpcomingSync()
+        releaseCommitMutex.withLock {
+            invalidateReleaseRefresh()
+            if (dataSourceSettings.value.mode == DataSourceMode.BACKEND) {
+                pushTopicManager.unsubscribeAll(dao.followedEventIds())
+                dao.clearCache()
+                analysisDao.clearAll()
+                marketCache.clear()
+                historySyncedAt = 0L
+                networkPreferences.clearUpcomingSync()
+            }
+            backendPreferences.clear()
+            backendPreferences.setMode(DataSourceMode.DIRECT)
         }
-        backendPreferences.clear()
-        backendPreferences.setMode(DataSourceMode.DIRECT)
     }
 
     /** Validates the saved backend address and token against `/api/v1/meta`. */
@@ -210,7 +219,69 @@ class MacroRepository(
     private val _translationsUpdated = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val translationsUpdated: SharedFlow<Unit> = _translationsUpdated.asSharedFlow()
 
-    private val releaseRefresher = EventReleaseRefresher(calendarClient, dao)
+    private val releaseGate = ReleaseRefreshGate()
+    private val releaseGeneration = releaseGate.generation
+    private val releaseCommitMutex get() = releaseGate.commitMutex
+    private var coordinatorGeneration = -1L
+    private val releaseCoordinator = ForegroundReleaseCoordinator(
+        candidates = { now ->
+            releaseCommitMutex.withLock {
+                dao.cachedRange(now.minusSeconds(30 * 60).toString(), now.toString())
+                    .map { it.asExternalModel() }
+            }
+        },
+        refresh = { events ->
+            try {
+                refreshReleaseGroup(events)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                ReleaseRefreshOutcome(false, if (source.mode == DataSourceMode.DIRECT) calendarClient.nextRetryAt() else null)
+            }
+        },
+        groupingZone = { if (source.mode == DataSourceMode.BACKEND) ZoneOffset.UTC else ZoneId.systemDefault() },
+    )
+
+    private fun invalidateReleaseRefresh() = releaseGate.invalidate()
+
+    /** Owned by the Activity's STARTED lifecycle. Cancelling this also cancels in-flight requests. */
+    suspend fun runForegroundReleaseRefresh() {
+        releaseGeneration.collectLatest { generation ->
+            if (coordinatorGeneration != generation) {
+                releaseCoordinator.reset()
+                coordinatorGeneration = generation
+            }
+            releaseCoordinator.run()
+        }
+    }
+
+    /** Both manual and automatic retries share a date-level gate and a 15-second network cooldown. */
+    private suspend fun refreshReleaseGroup(
+        events: List<EconomicEvent>,
+        expectedGeneration: Long = releaseGeneration.value,
+    ): ReleaseRefreshOutcome {
+        val generation = expectedGeneration
+        val activeSource = releaseCommitMutex.withLock {
+            if (generation != releaseGeneration.value) throw CancellationException("Data source changed")
+            source
+        }
+        val zone = if (activeSource.mode == DataSourceMode.BACKEND) ZoneOffset.UTC else ZoneId.systemDefault()
+        val day = Instant.parse(events.first().eventTime).atZone(zone).toLocalDate()
+        return try {
+            releaseGate.refresh(generation, day,
+                fetch = { ReleaseBatchFetcher.fetch(events, activeSource, zone) },
+                commit = { result ->
+                    dao.mergeCalendar(mergeCachedTranslations(result.events).map(EconomicEvent::asEntity))
+                    publishWarning(result.warning)
+                },
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (generation == releaseGeneration.value) publishWarning(warningFor(error))
+            throw error
+        }
+    }
     private val marketCache = ConcurrentHashMap<Long, CachedMarket>()
     private val upcomingMutex = Mutex()
     private val historyMutex = Mutex()
@@ -219,9 +290,18 @@ class MacroRepository(
     private var historySyncedAt = 0L
 
     fun observeUpcoming(): Flow<List<EconomicEvent>> =
-        dao.observeUpcoming(Instant.now().toString()).map { events ->
+        // Keep today's already released rows on Home so their instant labels remain visible.
+        dao.observeUpcoming(LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toString()).map { events ->
             events.map { it.asExternalModel() }
         }
+
+    fun observeCalendar(date: LocalDate): Flow<List<EconomicEvent>> {
+        val zone = ZoneId.systemDefault()
+        return dao.observeRange(
+            date.atStartOfDay(zone).toInstant().toString(),
+            date.plusDays(1).atStartOfDay(zone).toInstant().minusNanos(1).toString(),
+        ).map { rows -> rows.map { it.asExternalModel() } }
+    }
 
     fun observeEvent(id: Long): Flow<EconomicEvent?> =
         dao.observeEvent(id).map { it?.asExternalModel() }
@@ -330,13 +410,18 @@ class MacroRepository(
     }
 
     suspend fun event(id: Long): EventDetailResponse {
-        if (source.mode == DataSourceMode.BACKEND) {
+        val (generation, activeSource) = releaseCommitMutex.withLock { releaseGeneration.value to source }
+        if (activeSource.mode == DataSourceMode.BACKEND) {
             try {
-                source.eventDetail(id)?.let { detail ->
+                activeSource.eventDetail(id)?.let { detail ->
                     // Keep a translation already cached on the device if this server event was
                     // stored before the server-side backfill completed.
-                    val event = mergeCachedTranslations(listOf(detail.event)).single()
-                    dao.upsert(listOf(event.asEntity()))
+                    val translated = mergeCachedTranslations(listOf(detail.event)).single()
+                    val event = releaseCommitMutex.withLock {
+                        if (generation != releaseGeneration.value) throw CancellationException("Data source changed")
+                        // A detail GET must not erase a value just published by the date-level poll.
+                        dao.mergeCalendar(listOf(translated.asEntity())).single().asExternalModel()
+                    }
                     if (event.eventZhCn.isNullOrBlank() || event.eventZhTw.isNullOrBlank()) {
                         repositoryScope.launch { runCatching { enrichTranslations(listOf(event)) } }
                     }
@@ -380,16 +465,14 @@ class MacroRepository(
      * source warning so the caller can explain why a value is still absent.
      */
     suspend fun refreshEventRelease(id: Long): EventDetailResponse {
-        if (source.mode == DataSourceMode.BACKEND) {
-            val detail = source.refreshRelease(id)
-            if (detail != null) {
-                dao.upsert(listOf(detail.event.asEntity()))
-                return detail
-            }
-        }
-        val warning = releaseRefresher.refresh(id).warning
-        publishWarning(warning)
-        return event(id)
+        val generation = releaseGeneration.value
+        val original = dao.event(id)?.asExternalModel()
+            ?: error("Event is not available in the local cache")
+        refreshReleaseGroup(listOf(original), generation)
+        if (generation != releaseGeneration.value) throw CancellationException("Data source changed")
+        // Preserve backend descriptions/observation history on a manual retry; labels themselves
+        // already rendered from Room before this optional detail read finishes.
+        return if (source.mode == DataSourceMode.BACKEND) event(id) else localEvent(id)
     }
 
     suspend fun analysis(id: Long): AnalysisReport {

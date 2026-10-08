@@ -1,6 +1,7 @@
 package com.macroresearch.ui.common
 
 import com.macroresearch.data.model.EconomicEvent
+import com.macroresearch.data.ReleaseImpactRules
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Duration
@@ -34,18 +35,28 @@ fun EconomicEvent.localDate(locale: Locale, pattern: String): String = runCatchi
 
 fun EconomicEvent.value(value: String?, locale: Locale = Locale.ENGLISH): String {
     if (value == null) return "--"
-    val number = value.toBigDecimalOrNull() ?: return value
+    val number = value.trim().toBigDecimalOrNull() ?: return value
     return when (unit) {
         "%" -> "${number.stripTrailingZeros().toPlainString()}%"
         "count" -> compact(number, locale)
-        "currency" -> "$${compact(number, locale)}"
-        else -> number.stripTrailingZeros().toPlainString()
+        "currency" -> {
+            // The weekly parser infers 'currency' from M even for physical inventory/counts.
+            val physical = provider == "forex_factory" && ReleaseImpactRules.match(event)?.unit in
+                setOf(ReleaseImpactRules.Unit.PEOPLE, ReleaseImpactRules.Unit.BARRELS)
+            (if (physical) "" else "$") + compact(number, locale)
+        }
+        else -> number.stripTrailingZeros().toPlainString() +
+            (unit?.takeIf { it.isNotBlank() }?.let { " $it" } ?: "")
     }
 }
 
+fun EconomicEvent.marketExpectation(): String? =
+    consensus?.takeIf { it.trim().toBigDecimalOrNull() != null }
+        ?: forecast?.takeIf { it.trim().toBigDecimalOrNull() != null }
+
 fun EconomicEvent.surprise(): BigDecimal? {
-    val actualValue = actual?.toBigDecimalOrNull() ?: return null
-    val consensusValue = (consensus ?: forecast)?.toBigDecimalOrNull() ?: return null
+    val actualValue = actual?.trim()?.toBigDecimalOrNull() ?: return null
+    val consensusValue = marketExpectation()?.trim()?.toBigDecimalOrNull() ?: return null
     return actualValue - consensusValue
 }
 

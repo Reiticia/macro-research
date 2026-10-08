@@ -133,6 +133,8 @@ class EventReleaseRefreshTest {
             emptyList<CachedEventEntity>()
         override suspend fun cachedRange(from: String, to: String) =
             rows.values.filter { it.eventTime in from..to }
+        override fun observeRange(from: String, to: String): Flow<List<CachedEventEntity>> =
+            flowOf(rows.values.filter { it.eventTime in from..to })
         override suspend fun translations(names: List<String>) = emptyList<CachedTranslation>()
         override suspend fun updateTranslation(name: String, zhCn: String, zhTw: String) {
             rows.replaceAll { _, row ->

@@ -4,6 +4,10 @@ import android.Manifest
 import android.os.Build
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,6 +19,7 @@ import com.macroresearch.ui.theme.MacroTheme
 
 class MainActivity : AppCompatActivity() {
     private var notificationPermissionAsked = false
+    private var releaseRefreshJob: Job? = null
     private var notificationEventId by mutableStateOf<Long?>(null)
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -50,11 +55,15 @@ class MainActivity : AppCompatActivity() {
         val app = application as MacroApplication
         // The push channel only exists in backend mode; direct mode has no server to listen to.
         app.startBackendPush()
+        releaseRefreshJob?.cancel()
+        releaseRefreshJob = lifecycleScope.launch(Dispatchers.IO) { app.repository.runForegroundReleaseRefresh() }
         requestNotificationPermission()
     }
 
     override fun onStop() {
         super.onStop()
+        releaseRefreshJob?.cancel()
+        releaseRefreshJob = null
         (application as MacroApplication).stopBackendPush()
     }
 

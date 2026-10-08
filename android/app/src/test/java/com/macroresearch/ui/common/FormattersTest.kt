@@ -38,6 +38,16 @@ class FormattersTest {
     }
 
     @Test
+    fun invalidConsensusFallsBackAndExplicitScaleRemainsVisible() {
+        val event = event(actual = "250", consensus = " N/A ", unit = "K").copy(forecast = "200")
+        assertEquals("200", event.marketExpectation())
+        assertEquals("50", event.surprise()!!.toPlainString())
+        assertEquals("250 K", event.value(event.actual))
+        val oil = event.copy(provider = "forex_factory", event = "Crude Oil Inventories", unit = "currency", actual = "-2000000")
+        assertEquals("-2M", oil.value(oil.actual))
+    }
+
+    @Test
     fun eventNameFollowsChineseScriptAndFallsBackToEnglish() {
         val event = event(actual = null, consensus = null, unit = null).copy(
             eventZhCn = "消费者价格指数同比",

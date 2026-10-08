@@ -64,6 +64,13 @@ class EconomicCalendarClient(
     /** Serializes calendar traffic so Home and History cannot race both providers. */
     private val fetchMutex = Mutex()
 
+    /** If both providers are blocked, retry when the first one becomes available. */
+    internal fun nextRetryAt(now: Instant = Instant.now()): Instant? {
+        val primary = backoff.blockedUntil(CalendarSource.PRIMARY)?.takeIf { it.isAfter(now) } ?: return null
+        val fallback = backoff.blockedUntil(CalendarSource.FALLBACK)?.takeIf { it.isAfter(now) } ?: return null
+        return minOf(primary, fallback)
+    }
+
     suspend fun events(
         start: LocalDate,
         end: LocalDate,
@@ -169,7 +176,7 @@ class EconomicCalendarClient(
         }
     }
 
-    private fun fetchTradingView(
+    private suspend fun fetchTradingView(
         http: OkHttpClient,
         start: LocalDate,
         end: LocalDate,
@@ -191,19 +198,19 @@ class EconomicCalendarClient(
             .header("Origin", "https://www.tradingview.com")
             .cacheControl(CacheControl.FORCE_NETWORK)
             .build()
-        http.newCall(request).execute().use { response ->
+        return http.newCall(request).awaitResponse { response ->
             check(response.isSuccessful) { "Calendar provider returned HTTP ${response.code}" }
-            return parseTradingView(response.body?.string().orEmpty(), now)
+            parseTradingView(response.body?.string().orEmpty(), now)
         }
     }
 
-    private fun fetchForexFactory(http: OkHttpClient, start: LocalDate, end: LocalDate, now: Instant): List<EconomicEvent> {
+    private suspend fun fetchForexFactory(http: OkHttpClient, start: LocalDate, end: LocalDate, now: Instant): List<EconomicEvent> {
         val request = Request.Builder()
             .url(fallbackUrl)
             .header("Accept", "application/json")
             .cacheControl(CacheControl.FORCE_NETWORK)
             .build()
-        http.newCall(request).execute().use { response ->
+        return http.newCall(request).awaitResponse { response ->
             if (response.code == HTTP_TOO_MANY_REQUESTS) {
                 val wait = retryAfterSeconds(response, now) ?: DEFAULT_RATE_LIMIT_BACKOFF.seconds
                 backoff.block(CalendarSource.FALLBACK, now.plusSeconds(wait))
@@ -211,7 +218,7 @@ class EconomicCalendarClient(
             }
             check(response.isSuccessful) { "Fallback calendar returned HTTP ${response.code}" }
             backoff.clear(CalendarSource.FALLBACK)
-            return parseForexFactory(response.body?.string().orEmpty(), now, start, end)
+            parseForexFactory(response.body?.string().orEmpty(), now, start, end)
         }
     }
 

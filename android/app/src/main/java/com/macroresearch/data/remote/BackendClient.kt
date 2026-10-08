@@ -241,16 +241,19 @@ class BackendClient(
     private fun events(root: com.google.gson.JsonElement): List<EconomicEvent> =
         gson.fromJson(root, object : TypeToken<List<EconomicEvent>>() {}.type)
 
-    private fun getJson(
+    private suspend fun getJson(
         path: String,
         authenticated: Boolean = true,
         configure: (HttpUrl.Builder) -> Unit = {},
     ): com.google.gson.JsonElement {
-        val request = requestBuilder(path, authenticated, configure).get().build()
+        val builder = requestBuilder(path, authenticated, configure)
+        // A release POST syncs the server, but cannot invalidate OkHttp's separate calendar URL.
+        if (path == "/api/v1/calendar") builder.cacheControl(okhttp3.CacheControl.FORCE_NETWORK)
+        val request = builder.get().build()
         return execute(request)
     }
 
-    private fun postJson(
+    private suspend fun postJson(
         path: String,
         body: com.google.gson.JsonElement,
         authenticated: Boolean = true,
@@ -280,30 +283,29 @@ class BackendClient(
         return builder
     }
 
-    private fun execute(request: Request): com.google.gson.JsonElement {
-        val response = try {
-            client.newCall(request).execute()
-        } catch (error: IOException) {
-            throw BackendUnavailableException(error.message ?: "Backend is unreachable", error)
-        }
-        response.use {
-            val text = it.body?.string().orEmpty()
-            if (it.isSuccessful) {
-                if (text.isBlank()) return JsonObject()
-                return runCatching { JsonParser.parseString(text) }
+    private suspend fun execute(request: Request): com.google.gson.JsonElement = try {
+        client.newCall(request).awaitResponse { response ->
+            val text = response.body?.string().orEmpty()
+            if (response.isSuccessful) {
+                if (text.isBlank()) JsonObject()
+                else runCatching { JsonParser.parseString(text) }
                     .getOrElse { error -> throw BackendUnavailableException("Backend returned malformed JSON", error) }
-            }
-            val error = runCatching {
-                JsonParser.parseString(text).asJsonObject.getAsJsonObject("error")
-            }.getOrNull()
-            val code = error?.stringOrNull("code")
-            val message = error?.stringOrNull("message") ?: "Backend returned HTTP ${it.code}"
-            when (it.code) {
-                401, 403 -> throw BackendUnauthorizedException(message)
-                400, 404, 409, 429 -> throw BackendException(it.code, code, message)
-                else -> throw BackendUnavailableException(message)
+            } else {
+                val error = runCatching {
+                    JsonParser.parseString(text).asJsonObject.getAsJsonObject("error")
+                }.getOrNull()
+                val code = error?.stringOrNull("code")
+                val message = error?.stringOrNull("message") ?: "Backend returned HTTP ${response.code}"
+                when (response.code) {
+                    401, 403 -> throw BackendUnauthorizedException(message)
+                    400, 404, 409, 429 -> throw BackendException(response.code, code, message)
+                    else -> throw BackendUnavailableException(message)
+                }
             }
         }
+    } catch (error: IOException) {
+        if (error is BackendException || error is BackendUnauthorizedException || error is BackendUnavailableException) throw error
+        throw BackendUnavailableException(error.message ?: "Backend is unreachable", error)
     }
 
     companion object {

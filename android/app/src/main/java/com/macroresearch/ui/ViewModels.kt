@@ -121,6 +121,7 @@ class CalendarViewModel(private val repository: MacroRepository) : ViewModel() {
     )
     val state = _state.asStateFlow()
     private var request: Job? = null
+    private var dateObservation: Job? = null
 
     init {
         selectDate(LocalDate.now())
@@ -138,12 +139,18 @@ class CalendarViewModel(private val repository: MacroRepository) : ViewModel() {
         // Cancel the previous fetch: a slow earlier response must never overwrite the day the
         // user just picked, and the list must not keep showing another day's events meanwhile.
         request?.cancel()
+        dateObservation?.cancel()
         _state.value = _state.value.copy(date = date, events = emptyList(), loading = true, error = null)
+        dateObservation = viewModelScope.launch {
+            repository.observeCalendar(date).collect { events ->
+                if (_state.value.date == date) _state.value = _state.value.copy(events = events)
+            }
+        }
         request = viewModelScope.launch {
             try {
-                val events = repository.calendar(date)
+                repository.calendar(date)
                 if (_state.value.date == date) {
-                    _state.value = _state.value.copy(events = events, loading = false)
+                    _state.value = _state.value.copy(loading = false)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -169,8 +176,11 @@ class CalendarViewModel(private val repository: MacroRepository) : ViewModel() {
                 repository.cachedTranslations(current.map(EconomicEvent::event))
             }.getOrNull().orEmpty()
             if (updates.isEmpty()) return@launch
-            val refreshed = current.map { it.withTranslation(updates) }
-            if (refreshed != current) _state.value = _state.value.copy(events = refreshed)
+            // Never overwrite a newly published value or a different selected date with this
+            // earlier name-enrichment snapshot. Room remains the source of event observations.
+            val latest = _state.value.events
+            val refreshed = latest.map { it.withTranslation(updates) }
+            if (refreshed != latest) _state.value = _state.value.copy(events = refreshed)
         }
     }
 }

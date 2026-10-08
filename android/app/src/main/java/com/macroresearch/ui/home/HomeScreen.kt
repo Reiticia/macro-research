@@ -224,12 +224,10 @@ private fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
                 "${flag(event.country)}  ${event.localizedName(locale)}",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Schedule and values share one flow row, and the three values travel as a single unit:
-            // when the line is too narrow the whole previous/consensus/forecast group moves to the
-            // next line instead of splitting apart. A large system font scale stacks the two groups.
+            // Keep the upcoming-event summary free of release values, just like event lists.
             FlowRow(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap),
@@ -242,22 +240,9 @@ private fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
                     Spacer(Modifier.width(ResearchLayout.smallGap))
                     ImportanceDots(event.importance)
                 }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
-                    InlineValue(stringResource(R.string.previous), event.value(event.previous))
-                    InlineValue(stringResource(R.string.consensus), event.value(event.consensus))
-                    InlineValue(stringResource(R.string.forecast), event.value(event.forecast))
-                }
             }
         }
     }
-}
-
-/** Label and value on a single line keep the hero card short; the label stays secondary. */
-@Composable
-private fun InlineValue(label: String, value: String) = Row(verticalAlignment = Alignment.CenterVertically) {
-    Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Spacer(Modifier.width(4.dp))
-    Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
 }
 
 @Composable

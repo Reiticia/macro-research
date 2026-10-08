@@ -63,6 +63,7 @@ internal fun assetLabelResource(symbol: String): Int? = when (symbol.trim().lowe
     "us2y", "us 2y" -> R.string.asset_us2y
     "us10y", "us 10y" -> R.string.asset_us10y
     "wti", "oil", "crude_oil" -> R.string.asset_wti
+    "brent" -> R.string.asset_brent
     "natural_gas", "natural gas", "natgas" -> R.string.asset_natural_gas
     "bitcoin", "btc" -> R.string.asset_bitcoin
     "ethereum", "eth" -> R.string.asset_ethereum

@@ -56,6 +56,9 @@ interface EventDao {
     @Query("SELECT * FROM cached_event WHERE eventTime >= :from AND eventTime <= :to")
     suspend fun cachedRange(from: String, to: String): List<CachedEventEntity>
 
+    @Query("SELECT * FROM cached_event WHERE eventTime >= :from AND eventTime <= :to ORDER BY eventTime, importance DESC")
+    fun observeRange(from: String, to: String): Flow<List<CachedEventEntity>>
+
     @Transaction
     suspend fun mergeCalendar(events: List<CachedEventEntity>): List<CachedEventEntity> {
         if (events.isEmpty()) return events
