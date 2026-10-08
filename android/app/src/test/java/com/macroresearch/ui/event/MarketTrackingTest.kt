@@ -2,6 +2,9 @@ package com.macroresearch.ui.event
 
 import com.macroresearch.data.model.MarketReaction
 import com.macroresearch.data.model.MarketSnapshot
+import com.macroresearch.data.model.EconomicEvent
+import com.macroresearch.data.model.currentStatus
+import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,12 +37,48 @@ class MarketTrackingTest {
 
     @Test
     fun liveStatesKeepTheFullPlaceholderList() {
-        for (status in listOf("scheduled", "released", "collecting_market_data", "analyzing")) {
+        for (status in listOf("scheduled", "watching", "released", "collecting_market_data", "analyzing")) {
             assertEquals(
                 MARKET_TRACKING_SYMBOLS,
                 visibleMarketSymbols(status, emptyList(), emptyList()),
             )
         }
+    }
+
+    @Test
+    fun missingReleaseKeepsRowsThroughTheMarketWindow() {
+        val time = Instant.parse("2026-09-18T12:00:00Z")
+        for (status in listOf("timeout", "data_unavailable")) {
+            for (seconds in listOf(1_800L, 2_400L, 3_600L)) {
+                assertEquals(
+                    MARKET_TRACKING_SYMBOLS,
+                    visibleMarketSymbols(status, emptyList(), emptyList(), time.toString(), time.plusSeconds(seconds)),
+                )
+            }
+            assertEquals(
+                listOf("gold"),
+                visibleMarketSymbols(status, listOf(snapshot("gold")), emptyList(), time.toString(), time.plusSeconds(3_601)),
+            )
+            assertTrue(visibleMarketSymbols(status, emptyList(), emptyList(), time.toString(), time.plusSeconds(3_601)).isEmpty())
+            assertTrue(visibleMarketSymbols(status, emptyList(), emptyList(), "invalid", time).isEmpty())
+        }
+    }
+
+    @Test
+    fun timeoutRecomputedAsMissingStillKeepsMonitoringRows() {
+        val time = Instant.parse("2026-09-18T12:00:00Z")
+        val now = time.plusSeconds(2_400)
+        val event = EconomicEvent(
+            id = 7L, provider = "fixture", providerId = "missing-release", releaseGroupId = null,
+            country = "United States", currency = "USD", category = "inflation", event = "CPI",
+            eventTime = time.toString(), importance = 3, actual = null, previous = null,
+            consensus = null, forecast = null, unit = "%", status = "timeout",
+        )
+        assertEquals("data_unavailable", event.currentStatus(now))
+        assertEquals(
+            MARKET_TRACKING_SYMBOLS,
+            visibleMarketSymbols(event.currentStatus(now), emptyList(), emptyList(), event.eventTime, now),
+        )
     }
 
     @Test

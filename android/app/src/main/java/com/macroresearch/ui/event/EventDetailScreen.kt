@@ -331,9 +331,17 @@ private fun EventIntroduction(event: EconomicEvent, stateDescription: EventDescr
 internal val MARKET_TRACKING_SYMBOLS =
     listOf("gold", "dxy", "us2y", "us10y", "nasdaq100", "bitcoin", "wti", "natural_gas")
 
-/** States that may still deliver quotes; their rows stay visible even while they are empty. */
-internal fun marketTrackingAwaitingData(status: String): Boolean =
-    status in setOf("scheduled", "released", "collecting_market_data", "analyzing")
+/** Missing Actual does not end the standard 60-minute market observation window. */
+internal fun marketTrackingAwaitingData(
+    status: String,
+    eventTime: String? = null,
+    now: Instant = Instant.now(),
+): Boolean {
+    if (status in setOf("scheduled", "watching", "released", "collecting_market_data", "analyzing")) return true
+    if (status !in setOf("timeout", "data_unavailable")) return false
+    val elapsed = runCatching { Duration.between(Instant.parse(eventTime), now).seconds }.getOrNull()
+    return elapsed != null && elapsed in 0L..3_600L
+}
 
 /**
  * Rows shown in the market card. Live states keep the full placeholder list; terminal states
@@ -344,19 +352,21 @@ internal fun visibleMarketSymbols(
     status: String,
     snapshots: List<MarketSnapshot>,
     reactions: List<MarketReaction>,
+    eventTime: String? = null,
+    now: Instant = Instant.now(),
 ): List<String> {
-    if (marketTrackingAwaitingData(status)) return MARKET_TRACKING_SYMBOLS
+    if (marketTrackingAwaitingData(status, eventTime, now)) return MARKET_TRACKING_SYMBOLS
     val available = snapshots.mapTo(hashSetOf()) { it.symbol } +
         reactions.mapTo(hashSetOf()) { it.symbol }
     return MARKET_TRACKING_SYMBOLS.filter { it in available }
 }
 
 @Composable
-private fun MarketTrackingCard(event: EconomicEvent, market: MarketResponse?) {
+internal fun MarketTrackingCard(event: EconomicEvent, market: MarketResponse?) {
     val status = event.currentStatus()
     val latest = market?.snapshots.orEmpty().groupBy { it.symbol }.mapValues { it.value.maxByOrNull { row -> row.timestamp } }
     val reactions = market?.reactions.orEmpty().associateBy { it.symbol }
-    val rows = visibleMarketSymbols(status, market?.snapshots.orEmpty(), market?.reactions.orEmpty())
+    val rows = visibleMarketSymbols(status, market?.snapshots.orEmpty(), market?.reactions.orEmpty(), event.eventTime)
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
