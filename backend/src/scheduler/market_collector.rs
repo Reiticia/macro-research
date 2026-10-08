@@ -66,7 +66,10 @@ async fn collect_once(
 
         if matches!(
             event.status,
-            EventStatus::Released | EventStatus::CollectingMarketData | EventStatus::Analyzing
+            EventStatus::Released
+                | EventStatus::CollectingMarketData
+                | EventStatus::Analyzing
+                | EventStatus::Timeout
         ) {
             state
                 .events

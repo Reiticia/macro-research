@@ -216,6 +216,103 @@ fn json_request(uri: &str, token: &str, body: serde_json::Value) -> Request<Body
 }
 
 #[tokio::test]
+async fn release_timeout_does_not_end_market_collection_or_delete_evidence() {
+    let app = app().await;
+    let now = Utc::now();
+    let mut pending = fixture_event(0);
+    pending.provider_id = "timed-out-still-collecting".into();
+    pending.event_time = now - Duration::minutes(40);
+    pending.status = EventStatus::Timeout;
+    let mut finished = pending.clone();
+    finished.provider_id = "timed-out-window-finished".into();
+    finished.event_time = now - Duration::minutes(70);
+    let ids = app
+        .state
+        .events
+        .save_events(&[pending.clone(), finished.clone()])
+        .await
+        .unwrap();
+    let (pending_id, finished_id) = (ids[0], ids[1]);
+    for (id, event) in [(pending_id, &pending), (finished_id, &finished)] {
+        app.state
+            .market
+            .save_quote(
+                id,
+                &Quote {
+                    symbol: MarketSymbol::Gold,
+                    timestamp: event.event_time - Duration::minutes(1),
+                    price: 99.0,
+                },
+            )
+            .await
+            .unwrap();
+    }
+    app.state
+        .market
+        .save_quote(
+            finished_id,
+            &Quote {
+                symbol: MarketSymbol::Gold,
+                timestamp: finished.event_time + Duration::minutes(60),
+                price: 100.0,
+            },
+        )
+        .await
+        .unwrap();
+    let mut notifications = app.state.event_bus.subscribe();
+    let collector = tokio::spawn(market_event_analyzer::scheduler::market_collect_loop(
+        app.state.clone(),
+        app.state.config.scheduler.clone(),
+    ));
+    // The first iteration handles both fixtures without contacting external providers/models.
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let mut collected = false;
+        let mut analyzed = false;
+        while !collected || !analyzed {
+            match notifications.recv().await.unwrap() {
+                market_event_analyzer::model::AppEvent::MarketDataCollected { event_id }
+                    if event_id == pending_id =>
+                {
+                    collected = true
+                }
+                market_event_analyzer::model::AppEvent::AnalysisCompleted { event_id }
+                    if event_id == finished_id =>
+                {
+                    analyzed = true
+                }
+                _ => {}
+            }
+        }
+    })
+    .await;
+    collector.abort();
+    result.expect("timed-out events must still be collected and finalized");
+
+    assert_eq!(
+        app.state.market.snapshots(pending_id).await.unwrap().len(),
+        2
+    );
+    assert_eq!(
+        app.state.events.get(pending_id).await.unwrap().status,
+        EventStatus::Timeout
+    );
+    let finished_event = app.state.events.get(finished_id).await.unwrap();
+    assert_eq!(finished_event.status, EventStatus::Completed);
+    assert!(finished_event.actual.is_none());
+    let report = app.state.analyses.get(finished_id).await.unwrap();
+    assert!(report.raw_surprise.is_none());
+    assert_eq!(report.observed_reactions.len(), 1);
+    assert!(report.observed_reactions[0].change_60m.is_some());
+    assert_eq!(
+        app.state.market.snapshots(finished_id).await.unwrap().len(),
+        2
+    );
+    let active = app.state.events.market_active().await.unwrap();
+    assert!(active.iter().any(|event| event.id == pending_id));
+    assert!(active.iter().all(|event| event.id != finished_id));
+}
+
+#[tokio::test]
 async fn meta_is_public_while_data_requires_a_token() {
     let app = app().await;
     let router = api::router(app.state.clone());

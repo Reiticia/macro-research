@@ -232,6 +232,8 @@ Android 13+ 通知权限时消息可以到达但不会显示。
 
 ## Jev 事件相关行情采集
 
+公布值等待与行情采集使用独立窗口：`release_timeout_minutes`（默认 30）只终止等待 Actual 的监视轮询，进入 `timeout` 不会停止行情采样；采集持续到事件时间加 `market_collect_after_minutes`（默认 60），随后生成规则报告并结束采集。Actual 缺失时报告不生成数据超预期数值，已保存的行情快照与反应继续可读，不因超时或采集结束删除。
+
 默认不启用。开启后，事件首次进入行情采集时，后端用 `[typesafe]` 的 Jev 对配置的 `[market].symbols` 一次性并行判断，结果写入 `event_market_selection`，该事件后续采样和服务重启都会复用，不会每 15 秒重复调用模型。
 
 ```toml

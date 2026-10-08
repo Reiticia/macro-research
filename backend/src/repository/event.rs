@@ -589,6 +589,9 @@ impl EventRepository {
             EventStatus::Released,
             EventStatus::CollectingMarketData,
             EventStatus::Analyzing,
+            // Release-value polling can time out before the configured market window ends.
+            // Keep these events in the collector until it advances them to analysis.
+            EventStatus::Timeout,
         ])
         .await
     }
