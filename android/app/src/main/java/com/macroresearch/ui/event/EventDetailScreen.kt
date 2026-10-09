@@ -156,9 +156,13 @@ private fun EventContent(
             }
         }
         item { CountdownCard(event) }
-        if (event.currentStatus() == "data_unavailable") {
+        val missingActual = event.currentStatus() == "data_unavailable"
+        val missingUnit = event.unit.isNullOrBlank() || event.unit?.trim() in
+            setOf("$", "USD", "€", "EUR", "£", "GBP", "number", "currency")
+        if (missingActual || (missingUnit && hasEventTimeArrived(event.eventTime, now))) {
             item {
                 ReleaseRetryCard(
+                    unitRecovery = !missingActual,
                     fetching = releaseFetching,
                     outcome = releaseOutcome,
                     error = releaseError,
@@ -195,9 +199,10 @@ private fun EventContent(
     }
 }
 
-/** Manual recovery for an elapsed event whose published value is still missing. */
+/** Manual recovery for missing release values or source unit/scale metadata. */
 @Composable
 private fun ReleaseRetryCard(
+    unitRecovery: Boolean,
     fetching: Boolean,
     outcome: ReleaseFetchOutcome?,
     error: String?,
@@ -207,14 +212,15 @@ private fun ReleaseRetryCard(
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                stringResource(R.string.release_data_missing),
+                stringResource(if (unitRecovery) R.string.event_unit_refresh_note else R.string.release_data_missing),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             outcome?.let {
                 Text(
                     stringResource(
-                        if (it == ReleaseFetchOutcome.RETRIEVED) R.string.release_fetch_updated
+                        if (unitRecovery) R.string.event_unit_refresh_result
+                        else if (it == ReleaseFetchOutcome.RETRIEVED) R.string.release_fetch_updated
                         else R.string.release_fetch_missing,
                     ),
                     style = MaterialTheme.typography.bodySmall,
@@ -244,7 +250,7 @@ private fun ReleaseRetryCard(
                     Icon(Icons.Outlined.Refresh, contentDescription = null)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text(stringResource(if (fetching) R.string.release_fetching else R.string.release_fetch_action))
+                Text(stringResource(if (fetching) R.string.release_fetching else if (unitRecovery) R.string.event_unit_refresh_action else R.string.release_fetch_action))
             }
         }
     }

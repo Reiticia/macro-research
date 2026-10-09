@@ -113,11 +113,33 @@ pub fn parse_events(json: &str, now: DateTime<Utc>) -> Result<Vec<EconomicEvent>
         // TradingView publishes a single market expectation. Storing it as the consensus
         // baseline too keeps the rule engine from classifying every release as neutral.
         let expectation = entry.get("forecast").and_then(scalar_decimal);
-        let unit = entry
+        let source_unit = entry
             .get("unit")
             .and_then(scalar_text)
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("none"));
+        // The API's actual/previous/forecast are display-scaled, while *Raw are absolute.
+        // Keep those values unchanged and retain the independent scale as part of the unit.
+        let scale = entry
+            .get("scale")
+            .and_then(scalar_text)
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("none"));
+        let unit = match (scale, source_unit) {
+            (Some(scale), Some(unit)) if scale != unit => Some(format!("{scale} {unit}")),
+            (Some(scale), _) => Some(scale),
+            (None, unit) => unit,
+        }
+        .or_else(|| {
+            // Verified source tickers for diffusion indices, not a generic title heuristic.
+            let ticker = entry.get("ticker").and_then(Value::as_str);
+            (country == "United States"
+                && matches!(
+                    ticker,
+                    Some("ECONOMICS:USBCOI" | "ECONOMICS:USNMPMI" | "ECONOMICS:USCPMI")
+                ))
+            .then(|| "index points".to_owned())
+        });
         let importance = match entry.get("importance").and_then(Value::as_i64) {
             Some(1) => 3,
             Some(0) => 2,
@@ -274,6 +296,52 @@ mod tests {
             .unwrap();
         assert_eq!(holiday.importance, 2);
         assert_eq!(holiday.status, crate::model::EventStatus::Scheduled);
+    }
+
+    #[test]
+    fn preserves_source_scales_and_display_values_from_shared_fixture() {
+        let raw =
+            include_str!("../../../android/app/src/test/resources/calendar-units/tradingview.json");
+        let events = parse_events(raw, Utc::now()).unwrap();
+        let source: Value = serde_json::from_str(raw).unwrap();
+        for row in source["result"].as_array().unwrap() {
+            let event = events
+                .iter()
+                .find(|event| event.provider_id == row["id"].as_str().unwrap())
+                .unwrap();
+            assert_eq!(event.actual, row.get("actual").and_then(scalar_decimal));
+            assert_eq!(event.previous, row.get("previous").and_then(scalar_decimal));
+            assert_eq!(
+                event.consensus,
+                row.get("forecast").and_then(scalar_decimal)
+            );
+            assert_eq!(event.consensus, event.forecast);
+        }
+        let unit_for = |name: &str| {
+            events
+                .iter()
+                .find(|e| e.event == name)
+                .unwrap()
+                .unit
+                .as_deref()
+        };
+        assert_eq!(unit_for("Initial Jobless Claims"), Some("K"));
+        assert_eq!(unit_for("Current Account"), Some("B $"));
+        assert_eq!(unit_for("EIA Crude Oil Stocks Change"), Some("M"));
+        assert_eq!(unit_for("ISM Manufacturing PMI"), Some("index points"));
+        assert_eq!(unit_for("New Home Sales"), Some("M"));
+        assert_eq!(unit_for("Retail Sales MoM"), Some("%"));
+    }
+
+    #[test]
+    fn missing_scale_is_not_inferred_from_the_event_name() {
+        let raw = r#"{"status":"ok","result":[{"id":"1","title":"Initial Jobless Claims","country":"US","date":"2026-09-24T12:30:00Z","actual":197,"unit":"None","scale":"None"},{"id":"2","title":"ISM Manufacturing PMI","country":"US","ticker":"OTHER","date":"2026-09-24T12:30:00Z","actual":52}]}"#;
+        assert!(
+            parse_events(raw, Utc::now())
+                .unwrap()
+                .iter()
+                .all(|e| e.unit.is_none())
+        );
     }
 
     #[test]

@@ -1,0 +1,11 @@
+{
+  "status": "ok",
+  "result": [
+    {"id":"396869","title":"Initial Jobless Claims","country":"US","indicator":"Initial Jobless Claims","ticker":"ECONOMICS:USIJC","date":"2026-09-24T12:30:00.000Z","actual":197,"previous":198,"forecast":201,"actualRaw":197000,"previousRaw":198000,"forecastRaw":201000,"currency":"USD","scale":"K","importance":0},
+    {"id":"399013","title":"Current Account","country":"US","indicator":"Current Account","ticker":"ECONOMICS:USCA","date":"2026-09-24T12:30:00.000Z","actual":-246,"previous":-212.6,"forecast":-255,"actualRaw":-246000000000,"previousRaw":-212600000000,"forecastRaw":-255000000000,"currency":"USD","unit":"$","scale":"B","importance":0},
+    {"id":"396855","title":"EIA Crude Oil Stocks Change","country":"US","indicator":"Crude Oil Stocks Change","ticker":"ECONOMICS:USCOSC","date":"2026-09-23T14:30:00.000Z","actual":2.969,"previous":-0.64,"forecast":-0.6,"actualRaw":2969000,"previousRaw":-640000,"forecastRaw":-600000,"currency":"USD","scale":"M","importance":0},
+    {"id":"396677","title":"ISM Manufacturing PMI","country":"US","indicator":"Business Confidence","ticker":"ECONOMICS:USBCOI","date":"2026-09-01T14:00:00.000Z","actual":54.6,"previous":55.6,"forecast":55.2,"actualRaw":54.6,"previousRaw":55.6,"forecastRaw":55.2,"currency":"USD","importance":1},
+    {"id":"398250","title":"New Home Sales","country":"US","indicator":"New Home Sales","ticker":"ECONOMICS:USNHS","date":"2026-09-24T14:00:00.000Z","actual":0.684,"previous":0.643,"forecast":0.62,"actualRaw":684000,"previousRaw":643000,"forecastRaw":620000,"currency":"USD","scale":"M","importance":0},
+    {"id":"398500","title":"Retail Sales MoM","country":"US","indicator":"Retail Sales MoM","ticker":"ECONOMICS:USRSMM","date":"2026-09-16T12:30:00.000Z","actual":1.2,"previous":-0.5,"forecast":0.8,"actualRaw":1.2,"previousRaw":-0.5,"forecastRaw":0.8,"currency":"USD","unit":"%","importance":1}
+  ]
+}

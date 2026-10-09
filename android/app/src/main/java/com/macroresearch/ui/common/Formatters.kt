@@ -50,6 +50,32 @@ fun EconomicEvent.value(
     val plain = number.stripTrailingZeros().toPlainString()
     val sourceUnit = unit?.trim().orEmpty()
     if (sourceUnit.isEmpty()) return "$plain ($unknownUnitLabel)"
+    val sourceScale = Regex("^([KMBT])(?:\\s+(.+))?$", RegexOption.IGNORE_CASE).matchEntire(sourceUnit)
+    if (sourceScale != null) {
+        val scale = sourceScale.groupValues[1].uppercase(Locale.ROOT)
+        val dimension = sourceScale.groupValues[2]
+        val physical = if (dimension.isEmpty() && isUsReleaseImpactCountry()) {
+            when (ReleaseImpactRules.match(event)?.unit) {
+                ReleaseImpactRules.Unit.PEOPLE -> peopleLabel
+                ReleaseImpactRules.Unit.BARRELS -> barrelsLabel
+                else -> null
+            }
+        } else null
+        if (physical != null) {
+            val label = if (locale.language == "zh") when (scale) {
+                "K" -> "千"; "M" -> "百万"; "B" -> "十亿"; else -> "万亿"
+            } else scale
+            return "${plain}${label} $physical" // Preserve the source precision, not compact rounding.
+        }
+        return when (dimension.lowercase(Locale.ROOT)) {
+            "$" -> "\$$plain$scale"
+            "€", "eur" -> "${plain}${scale} EUR"
+            "£", "gbp" -> "${plain}${scale} GBP"
+            "usd" -> "${plain}${scale} USD"
+            "" -> "$plain $scale"
+            else -> "$plain $scale $dimension"
+        }
+    }
     // Only normalized absolute quantities can be compacted. Never infer K/M/B from a title.
     val normalized = sourceUnit in setOf("number", "count") ||
         (sourceUnit == "currency" && provider == "forex_factory")

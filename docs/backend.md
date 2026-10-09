@@ -196,6 +196,8 @@ status, timeExact}`，宏观数值以字符串返回以避免浮点误差。`sta
 `scheduled | data_unavailable | released | collecting_market_data | analyzing | completed |
 historical`。
 
+TradingView 单位处理保留来源独立 `scale`：展示数值不变，unit 存为 `K`、`M`、`B $` 等组合，不混用绝对量 `*Raw` 后重复乘倍率。观察到的公开响应及三条指数 ticker 的维度依据记录在 `android/app/src/test/resources/calendar-units/README.md`，不视为上游稳定 API 文档。旧缓存可通过已有事件刷新接口重查该日期，来源仍缺字段时不猜单位。历史保护拒绝覆盖的行只在数值各字段、事件名、国家、时间全部精确一致时补来源单位，不更改公布值、状态或观察流水。更新服务不会自动扫描或外网重抓所有历史记录。
+
 启动时服务会把「已有公布值、已超出监视窗口、但状态仍停留在
 `scheduled / timeout / data_unavailable`」的事件批量改为 `historical`：这些事件不可能再
 进入监视（例如停机期间公布、之后由日历同步补到数值），客户端本就把它们显示为历史事件。

@@ -325,6 +325,9 @@
     <string name="release_impact_unknown_unit">單位不明確，暫無可靠判斷</string>
     <string name="event_unit_unconfirmed">單位未確認</string>
     <string name="event_scale_unconfirmed">倍率未確認</string>
+    <string name="event_unit_refresh_note">快取記錄缺少來源單位或倍率，可重新查詢該事件日期以補回。</string>
+    <string name="event_unit_refresh_action">重新整理數值與單位</string>
+    <string name="event_unit_refresh_result">已重新查詢來源；來源仍未提供的單位繼續保留未確認。</string>
     <string name="release_impact_equal">符合預期 · 無明顯方向</string>
     <string name="release_impact_asset">%1$s：%2$s</string>
     <string name="release_impact_up">利多</string>

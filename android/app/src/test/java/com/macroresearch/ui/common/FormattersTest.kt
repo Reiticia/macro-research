@@ -75,7 +75,7 @@ class FormattersTest {
         assertEquals("-246B (unit unconfirmed)", monetary.value(monetary.actual))
         assertEquals("-246B (unit unconfirmed)", monetary.copy(unit = "currency").value(monetary.actual))
         assertEquals("-246B USD", monetary.copy(unit = "USD").value(monetary.actual))
-        assertEquals("-246 B USD", monetary.copy(provider = "trading_view", unit = "B USD", actual = "-246").value("-246"))
+        assertEquals("-246B USD", monetary.copy(provider = "trading_view", unit = "B USD", actual = "-246").value("-246"))
     }
 
     @Test

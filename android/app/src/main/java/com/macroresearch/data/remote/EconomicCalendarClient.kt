@@ -267,8 +267,19 @@ class EconomicCalendarClient(
             // baseline too, otherwise the rule engine has nothing to compare the actual against
             // and every release would be classified as neutral.
             val expectation = entry.number("forecast")
-            val unit = entry.text("unit").normalized()
+            val sourceUnit = entry.text("unit").normalized()
                 ?.takeIf { !it.equals("None", ignoreCase = true) }
+            // Values are already display-scaled. Preserve the separate source scale without
+            // expanding actual/forecast again (e.g. actual=197, scale=K, actualRaw=197000).
+            val scale = entry.text("scale").normalized()
+                ?.takeIf { !it.equals("None", ignoreCase = true) }
+            val unit = listOfNotNull(scale, sourceUnit).distinct().joinToString(" ").ifEmpty {
+                // These source tickers explicitly describe diffusion indices; there is no
+                // implicit multiplier. Do not apply this to generic Business Confidence rows.
+                if (countryCode == "US" && entry.text("ticker") in setOf(
+                    "ECONOMICS:USBCOI", "ECONOMICS:USNMPMI", "ECONOMICS:USCPMI",
+                )) "index points" else null
+            }
             EconomicEvent(
                 id = stableEventId("trading_view|$providerId"),
                 provider = "trading_view",

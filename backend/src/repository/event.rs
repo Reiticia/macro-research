@@ -117,6 +117,28 @@ impl EventRepository {
                     .bind(&event.provider_id)
                     .fetch_one(&mut *transaction)
                     .await?;
+                    // Refresh source metadata on an archived row only if every persisted
+                    // numeric field and occurrence identity is unchanged. Never replace historical
+                    // values/observations with a newer live-calendar revision merely to fix units.
+                    if event.unit.is_some() {
+                        sqlx::query(
+                            "UPDATE economic_event SET unit = ?, updated_at = ? \
+                             WHERE id = ? AND country = ? AND event = ? AND event_time = ? \
+                             AND actual IS ? AND previous IS ? AND consensus IS ? AND forecast IS ?",
+                        )
+                        .bind(&event.unit)
+                        .bind(Utc::now().to_rfc3339())
+                        .bind(id)
+                        .bind(&event.country)
+                        .bind(&event.event)
+                        .bind(event.event_time.to_rfc3339())
+                        .bind(event.actual.map(|value| value.to_string()))
+                        .bind(event.previous.map(|value| value.to_string()))
+                        .bind(event.consensus.map(|value| value.to_string()))
+                        .bind(event.forecast.map(|value| value.to_string()))
+                        .execute(&mut *transaction)
+                        .await?;
+                    }
                     (id, false)
                 }
             };
