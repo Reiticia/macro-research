@@ -168,6 +168,30 @@ mod tests {
     ]"#;
 
     #[test]
+    fn source_units_and_absolute_quantities_match_the_android_fixture() {
+        let raw = include_str!(
+            "../../../android/app/src/test/resources/calendar-units/forex-factory.json"
+        );
+        let start = DateTime::parse_from_rfc3339("2026-09-24T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let events = parse_events(raw, start, start + chrono::Duration::days(1), start).unwrap();
+        let rows: Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(events.len(), rows.as_array().unwrap().len());
+        for row in rows.as_array().unwrap() {
+            let event = events
+                .iter()
+                .find(|e| e.event == row["title"].as_str().unwrap())
+                .unwrap();
+            assert_eq!(
+                event.actual.unwrap().to_string(),
+                row["expectedActual"].as_str().unwrap()
+            );
+            assert_eq!(event.unit.as_deref(), row["expectedUnit"].as_str());
+        }
+    }
+
+    #[test]
     fn parses_and_filters_the_weekly_feed() {
         let start = DateTime::parse_from_rfc3339("2026-09-11T00:00:00Z")
             .unwrap()

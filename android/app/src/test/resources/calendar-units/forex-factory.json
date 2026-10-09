@@ -1,0 +1,10 @@
+[
+  {"title":"Initial Jobless Claims","country":"USD","date":"2026-09-24T12:30:00Z","actual":"197K","forecast":"201K","previous":"198K","expectedActual":"197000","expectedUnit":"number"},
+  {"title":"Crude Oil Inventories","country":"USD","date":"2026-09-24T12:30:00Z","actual":"-2M","forecast":"-0.5M","previous":"1.2M","expectedActual":"-2000000","expectedUnit":"number"},
+  {"title":"Current Account","country":"USD","date":"2026-09-24T12:30:00Z","actual":"-246B","forecast":"-255B","previous":"-212.6B","expectedActual":"-246000000000","expectedUnit":"number"},
+  {"title":"Explicit Dollar Amount","country":"USD","date":"2026-09-24T12:30:00Z","actual":"$-246B","forecast":"$-255B","expectedActual":"-246000000000","expectedUnit":"$"},
+  {"title":"Explicit Euro Amount","country":"EUR","date":"2026-09-24T12:30:00Z","actual":"€1.5M","expectedActual":"1500000","expectedUnit":"EUR"},
+  {"title":"Explicit Pound Amount","country":"GBP","date":"2026-09-24T12:30:00Z","actual":"£12K","expectedActual":"12000","expectedUnit":"GBP"},
+  {"title":"Core CPI m/m","country":"USD","date":"2026-09-24T12:30:00Z","actual":"0.4%","forecast":"0.3%","expectedActual":"0.4","expectedUnit":"%"},
+  {"title":"Unknown Scale","country":"USD","date":"2026-09-24T12:30:00Z","actual":"197","forecast":"201","expectedActual":"197","expectedUnit":null}
+]

@@ -368,11 +368,10 @@ cargo run -- --check-ai            # 开发机上，读当前目录 config.toml
 OpenAI 兼容接口，并且只生成当前请求的这一条。缓存键是
 `(event_id, language, method, timezone)`，语言固定 en / zh-CN / zh-TW；之后相同请求直接读取
 数据库，不再调用模型。不存在规则分析报告时，首次请求会先生成确定性的规则报告；未公布的事件
-不会触发 AI 调用。并发请求同一个缓存键时，服务端只保留一次模型调用。
+不会触发 AI 调用。事件时间到达后，即使 Actual 缺失也可生成事件背景/行情分析；模型必须标明缺失值与未观测行情，不得伪造惊喜或确定因果。新增可选 `refresh=true` 查询参数仅对已存在的精确缓存键执行一次受限更新，仍走配额、冷却、并发控制、审计与 revision 递增；不允许该参数创建缓存未命中的新组合。普通读取仍返回冻结缓存。并发请求同一个缓存键时，服务端只保留一次模型调用。
 
 - 后端模式使用 `GET /api/v1/events/{id}/ai-analysis`；按 provider 查询使用
-  `GET /api/v1/ai-analysis/by-provider`，两者都需要 Bearer token。缓存命中直接返回，缓存未命中
-  才同步生成当前语言/方法；
+  `GET /api/v1/ai-analysis/by-provider`，两者都需要 Bearer token。普通请求缓存命中直接返回，缓存未命中才同步生成当前语言/方法；`refresh=true` 仅允许更新已有的精确缓存键；
 - 读者对结果有异议时 `POST /api/v1/events/{id}/analysis-feedback` 提交反馈，同一结果
   （同一 revision）只记一条；
 - 反馈通过 Telegram 推送给管理员，消息带「重新分析 / 忽略」按钮；只有管理员点击

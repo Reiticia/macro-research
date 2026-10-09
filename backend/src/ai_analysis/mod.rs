@@ -395,6 +395,49 @@ impl AiAnalysisService {
         result
     }
 
+    /// Refreshes one existing exact cache key for an active client request. The ordinary
+    /// read endpoint remains cache-only; cooldown, quota, concurrency and revision rules apply.
+    pub async fn refresh_lazy(
+        &self,
+        event_id: i64,
+        language: &str,
+        method: AnalysisMethod,
+        timezone: &str,
+        caller: &str,
+        quota: &QuotaService,
+    ) -> Result<AiAnalysisResponse, AppError> {
+        let language = normalize_language(language);
+        let timezone = normalize_timezone(timezone);
+        let key = GenerationKey {
+            event_id,
+            language: language.clone(),
+            method: method.as_u8(),
+            timezone: timezone.clone(),
+        };
+        let mut lease = self.generation_lock(&key).await;
+        let result = {
+            let _guard = lease.lock.lock().await;
+            async {
+                let cached = self
+                    .cached(event_id, &language, method, &timezone)
+                    .await?
+                    .ok_or(AppError::NotFound)?;
+                if let Some(remaining) = self.cooldown_remaining(&cached) {
+                    return Ok(AiAnalysisResponse::throttled(cached, remaining));
+                }
+                quota
+                    .consume(caller, "ai_analysis", quota.ai_analysis_limit())
+                    .await?;
+                let _slot = quota.acquire_ai_slot().await?;
+                self.generate_locked(event_id, &language, method, &timezone, true, caller)
+                    .await
+            }
+            .await
+        };
+        lease.release().await;
+        result
+    }
+
     async fn generation_lock(&self, key: &GenerationKey) -> GenerationLease {
         let mut locks = self.generation_locks.lock().await;
         let entry = locks
@@ -964,20 +1007,15 @@ fn output_language(language: &str) -> &'static str {
 fn system_prompt(language: &str, stage: Stage) -> String {
     let mut prompt = String::new();
     prompt.push_str(
-        "You are a macro market analyst writing a post-release briefing for one economic event. ",
+        "You are a macro market analyst writing a post-event briefing for one economic event. ",
     );
-    prompt.push_str("Use only the numbers and observations in the payload; never invent data. If actual, consensus, forecast, or market observations are absent, state that they are unavailable and do not infer or fabricate them. When actual is absent, do not describe a data surprise; ground the briefing in event context and any observed market reaction, and label unobserved effects as unknown. ");
+    prompt.push_str("Use only payload numbers and observations; never invent data. If actual is absent, do not claim a data surprise. Analyze event context and any observed market reaction; distinguish measured evidence from hypotheses and say when effects are unobserved. Without usable market observations, provide conditional context rather than claiming no impact. ");
     match stage {
         Stage::Expectation => prompt.push_str(
-            "No market reaction data is provided and none exists yet in your reading: build the chain \
-             and the outlook from available event data and the rule signal only, and never state or \
-             guess what prices did. If actual is missing, analyze the event context without claiming \
-             a measured surprise. Frame the outlook as conditional expectations and say what would \
-             confirm or invalidate each link. ",
+            "No market reaction data is provided in this pass: build a conditional chain from event context, available values and rule signal only; do not guess what prices did. If actual is missing, discuss potential event transmission without claiming a measured surprise. State what would confirm or invalidate each link. ",
         ),
         Stage::SinglePass => prompt.push_str(
-            "Explain the causal transmission from the event or measured surprise to asset prices step by step, and \
-             treat the observed moves as evidence of which links held. ",
+            "Explain potential transmission from event context or measured surprise to assets. Use only supplied observed moves; otherwise state that reaction is unobserved, not absent. Describe causal links as hypotheses unless evidence supports them. ",
         ),
         Stage::Comparison => prompt.push_str(
             "You already produced an ex-ante expectation without seeing any prices; it is supplied as \
@@ -1044,7 +1082,7 @@ mod tests {
         assert!(prompt.contains("Simplified Chinese"));
         let expectation = system_prompt("en", Stage::Expectation);
         assert!(!expectation.contains("verdict"));
-        assert!(expectation.contains("When actual is absent, do not describe a data surprise"));
+        assert!(expectation.contains("If actual is missing, discuss potential event transmission without claiming a measured surprise"));
         assert!(expectation.contains("explicitly say when a value is unavailable"));
     }
 }

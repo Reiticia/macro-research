@@ -45,10 +45,15 @@ pub fn detect_unit(raw: &str) -> Option<String> {
     let value = raw.trim().to_ascii_uppercase();
     if value.contains('%') {
         Some("%".to_owned())
-    } else if value.ends_with('K') {
-        Some("count".to_owned())
-    } else if value.ends_with(['M', 'B', 'T']) {
-        Some("currency".to_owned())
+    } else if value.contains('$') {
+        Some("$".to_owned())
+    } else if value.contains('€') {
+        Some("EUR".to_owned())
+    } else if value.contains('£') {
+        Some("GBP".to_owned())
+    } else if value.ends_with(['K', 'M', 'B', 'T']) {
+        // A scale suffix alone says nothing about currency or physical dimension.
+        Some("number".to_owned())
     } else {
         None
     }
@@ -147,8 +152,11 @@ mod tests {
     #[test]
     fn units_are_detected_only_from_real_suffixes() {
         assert_eq!(detect_unit("0.2%").as_deref(), Some("%"));
-        assert_eq!(detect_unit("12K").as_deref(), Some("count"));
-        assert_eq!(detect_unit("1.5B").as_deref(), Some("currency"));
+        assert_eq!(detect_unit("12K").as_deref(), Some("number"));
+        assert_eq!(detect_unit("1.5B").as_deref(), Some("number"));
+        assert_eq!(detect_unit("$1.5B").as_deref(), Some("$"));
+        assert_eq!(detect_unit("€1.5M").as_deref(), Some("EUR"));
+        assert_eq!(detect_unit("£12K").as_deref(), Some("GBP"));
         assert_eq!(detect_unit("3.1"), None);
     }
 

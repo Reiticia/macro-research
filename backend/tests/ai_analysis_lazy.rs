@@ -163,5 +163,42 @@ async fn lazy_generation_is_single_flight_and_scoped_to_the_requested_language()
         .unwrap();
     assert_eq!(rows, 2);
 
+    // Refresh must not generate a new language/key, and a matching key gets a new revision.
+    let missing = service
+        .refresh_lazy(
+            event_id,
+            "zh-TW",
+            AnalysisMethod::NumbersOnly,
+            "UTC",
+            "alice",
+            &quota,
+        )
+        .await;
+    assert!(matches!(
+        missing,
+        Err(market_event_analyzer::error::AppError::NotFound)
+    ));
+    assert_eq!(relay_state.calls.load(Ordering::SeqCst), 2);
+    let refreshed = service
+        .refresh_lazy(
+            event_id,
+            "en",
+            AnalysisMethod::NumbersOnly,
+            "UTC",
+            "alice",
+            &quota,
+        )
+        .await
+        .unwrap();
+    assert_eq!(refreshed.analysis.revision, first.analysis.revision + 1);
+    assert_eq!(relay_state.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM ai_analysis")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        2
+    );
+
     relay.abort();
 }

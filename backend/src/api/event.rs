@@ -176,6 +176,7 @@ pub struct AiQuery {
     language: Option<String>,
     method: Option<u8>,
     timezone: Option<String>,
+    refresh: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -185,6 +186,7 @@ pub struct ProviderAiQuery {
     language: Option<String>,
     method: Option<u8>,
     timezone: Option<String>,
+    refresh: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -240,6 +242,7 @@ pub async fn ai_analysis(
         query.language.as_deref(),
         query.method,
         query.timezone.as_deref(),
+        query.refresh.unwrap_or(false),
         &token.0,
     )
     .await
@@ -263,6 +266,7 @@ pub async fn ai_analysis_by_provider(
         query.language.as_deref(),
         query.method,
         query.timezone.as_deref(),
+        query.refresh.unwrap_or(false),
         &token.0,
     )
     .await
@@ -278,14 +282,21 @@ async fn lazy_ai_analysis(
     language: Option<&str>,
     method: Option<u8>,
     timezone: Option<&str>,
+    refresh: bool,
     caller: &str,
 ) -> Result<Json<AiAnalysisResponse>, AppError> {
     let timezone = crate::ai_analysis::normalize_timezone(timezone.unwrap_or("UTC"));
-    // Keep already persisted briefings readable even when the model relay is currently disabled.
-    match cached_ai_analysis(state, id, language, method, Some(&timezone)).await {
-        Ok(response) => return Ok(response),
-        Err(AppError::NotFound) => {}
+    // Refresh is limited to an existing exact key; ordinary reads remain frozen-cache hits.
+    let cached = match cached_ai_analysis(state, id, language, method, Some(&timezone)).await {
+        Ok(response) => Some(response.0),
+        Err(AppError::NotFound) => None,
         Err(error) => return Err(error),
+    };
+    if cached.is_some() && !refresh {
+        return Ok(Json(cached.unwrap()));
+    }
+    if refresh && cached.is_none() {
+        return Err(AppError::NotFound);
     }
 
     let service = state
@@ -310,16 +321,29 @@ async fn lazy_ai_analysis(
 
     let language = language_or_default(language);
     let method = method.unwrap_or(state.config.ai.default_method);
-    let response = service
-        .generate_lazy(
-            id,
-            &language,
-            crate::ai_analysis::AnalysisMethod::from_u8(method),
-            &timezone,
-            caller,
-            &state.quota,
-        )
-        .await?;
+    let response = if refresh && cached.is_some() {
+        service
+            .refresh_lazy(
+                id,
+                &language,
+                crate::ai_analysis::AnalysisMethod::from_u8(method),
+                &timezone,
+                caller,
+                &state.quota,
+            )
+            .await?
+    } else {
+        service
+            .generate_lazy(
+                id,
+                &language,
+                crate::ai_analysis::AnalysisMethod::from_u8(method),
+                &timezone,
+                caller,
+                &state.quota,
+            )
+            .await?
+    };
     Ok(Json(response))
 }
 
