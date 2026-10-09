@@ -3,6 +3,10 @@ package com.macroresearch.ui.common
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.ui.res.stringResource
+import com.macroresearch.R
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -28,6 +32,7 @@ import com.macroresearch.ui.theme.Dovish
 import com.macroresearch.ui.theme.Upcoming
 import com.macroresearch.ui.theme.ResearchLayout
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EventCard(
     event: EconomicEvent,
@@ -66,12 +71,22 @@ fun EventCard(
                         color = statusColor(status), style = MaterialTheme.typography.labelMedium)
                 }
             }
-            // Lists are schedule summaries only. Values, surprises and asset impact live in detail.
+            Text(event.localizedName(LocalConfiguration.current.locales[0]),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Text(event.localizedName(LocalConfiguration.current.locales[0]),
-                    Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(stringResource(R.string.previous_value, event.localizedValue(event.previous)),
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.consensus_value, event.localizedValue(event.marketExpectation())),
+                        style = MaterialTheme.typography.bodyMedium)
+                    if (!event.actual.isNullOrBlank()) {
+                        Text("${stringResource(R.string.actual)} ${event.localizedValue(event.actual)}",
+                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    }
+                }
                 ImportanceDots(event.importance)
             }
         }

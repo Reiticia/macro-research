@@ -13,6 +13,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -30,8 +32,10 @@ import com.macroresearch.data.local.asEntity
 import com.macroresearch.data.local.asExternalModel
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.ui.event.ReleaseDataCard
+import com.macroresearch.ui.home.NextEventCard
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -48,32 +52,72 @@ class ReleaseImpactUiTest {
     private fun asset(symbol: Int, direction: Int) =
         hasText(context.getString(symbol)) and hasText(context.getString(direction))
 
-    @Test fun listsContainOnlyEventMetadataEvenAfterPublicationAndStillOpenDetail() {
+    @Test fun publishedListsKeepPreviousExpectationAndActualAndStillOpenDetail() {
         var clicks = 0
         compose.setContent { MaterialTheme { EventCard(event(), { clicks++ }, showDate = true) } }
         compose.onNodeWithText("Core CPI MoM").assertIsDisplayed().performClick()
         assertEquals(1, clicks)
         for (value in listOf("0.31%", "0.3%", "0.2%")) {
-            compose.onNodeWithText(value, substring = true).assertDoesNotExist()
+            compose.onNodeWithText(value, substring = true).assertIsDisplayed()
         }
         compose.onNodeWithText(context.getString(R.string.release_impact_title)).assertDoesNotExist()
         compose.onNode(asset(R.string.asset_gold, R.string.release_impact_weak_down)).assertDoesNotExist()
     }
 
-    @Test fun upcomingListsDoNotShowPredictionOrPreviousPlaceholders() {
+    @Test fun upcomingListsKeepPreviousAndExpectationWithoutImpactPredictions() {
         compose.setContent { MaterialTheme { EventCard(event(null), {}) } }
         compose.onNodeWithText("Core CPI MoM").assertIsDisplayed()
-        compose.onNodeWithText("0.3%", substring = true).assertDoesNotExist()
-        compose.onNodeWithText("0.2%", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("0.3%", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("0.2%", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("0.31%", substring = true).assertDoesNotExist()
         compose.onNodeWithText(context.getString(R.string.release_impact_waiting)).assertDoesNotExist()
     }
 
-    @Test fun detailValuesShowActualAndOneComparisonWithoutDuplicateForecast() {
+    @Test fun detailValuesKeepAllFourColumnsInTheirOriginalOrder() {
         compose.setContent { MaterialTheme { ReleaseDataCard(event()) } }
-        compose.onNodeWithText(context.getString(R.string.release_data_title)).assertIsDisplayed()
         compose.onNodeWithText("0.31%").assertIsDisplayed()
+        compose.onAllNodesWithText("0.3%").assertCountEquals(2)
+        compose.onNodeWithText("0.2%").assertIsDisplayed()
+        val labels = listOf(R.string.actual, R.string.consensus, R.string.forecast, R.string.previous)
+            .map { compose.onNodeWithText(context.getString(it)).assertIsDisplayed().fetchSemanticsNode().boundsInRoot }
+        labels.zipWithNext().forEach { (left, right) ->
+            assertTrue(left.left < right.left)
+            assertEquals(left.top, right.top, 1f)
+        }
+    }
+
+    @Test fun missingDetailValuesKeepFourColumnsAndPreviousOnTheRight() {
+        compose.setContent { MaterialTheme { ReleaseDataCard(event(null).copy(consensus = null, forecast = null)) } }
+        compose.onAllNodesWithText("--").assertCountEquals(3)
+        compose.onNodeWithText("0.2%").assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.previous)).assertIsDisplayed()
+    }
+
+    @Test fun listExpectationFallsBackToForecast() {
+        compose.setContent { MaterialTheme { EventCard(event().copy(consensus = null, forecast = "0.5"), {}) } }
+        compose.onNodeWithText("0.5%", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("0.31%", substring = true).assertIsDisplayed()
+    }
+
+    @Test fun nextEventSummaryKeepsAllSourceValues() {
+        compose.setContent { MaterialTheme { NextEventCard(event(null).copy(forecast = "0.5"), {}) } }
+        compose.onNodeWithText("0.2%").assertIsDisplayed()
         compose.onNodeWithText("0.3%").assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.forecast)).assertDoesNotExist()
+        compose.onNodeWithText("0.5%").assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.release_impact_title)).assertDoesNotExist()
+    }
+
+    @Test fun assetImpactIsSingleColumnAndEachRowShowsStrength() {
+        compose.setContent { MaterialTheme { ReleaseImpactLabels(event()) } }
+        val rows = listOf("dxy", "gold", "nasdaq100", "bitcoin", "us2y", "us10y")
+            .map { compose.onNodeWithTag("release-impact-$it").assertIsDisplayed().fetchSemanticsNode().boundsInRoot }
+        rows.zipWithNext().forEach { (first, second) ->
+            assertEquals(first.left, second.left, 1f)
+            assertEquals(first.right, second.right, 1f)
+            assertTrue(first.bottom <= second.top)
+        }
+        compose.onAllNodes(hasText(context.getString(R.string.release_impact_strength_limited)))
+            .assertCountEquals(6)
     }
 
     @Test fun weakImpactChangesToMaterialWithoutAnyReportOrMarket() {
@@ -85,12 +129,15 @@ class ReleaseImpactUiTest {
         compose.onNode(asset(R.string.asset_gold, R.string.release_impact_down)).assertIsDisplayed()
         compose.onNode(asset(R.string.asset_us2y, R.string.release_impact_yield_up)).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.release_impact_limited)).assertDoesNotExist()
+        compose.onAllNodes(hasText(context.getString(R.string.release_impact_strength_material))).assertCountEquals(6)
     }
 
     @Test fun unknownMissingForecastAndEqualAreDistinctAndNeverShowBearishTiles() {
         val row = mutableStateOf(event("0.3"))
         compose.setContent { MaterialTheme { ReleaseImpactLabels(row.value) } }
         compose.onNodeWithText(context.getString(R.string.release_impact_equal)).assertIsDisplayed()
+        compose.onNode(asset(R.string.asset_gold, R.string.release_impact_flat)).assertIsDisplayed()
+        compose.onAllNodes(hasText(context.getString(R.string.release_impact_strength_none))).assertCountEquals(6)
         compose.runOnIdle { row.value = event().copy(consensus = null, forecast = null) }
         compose.onNodeWithText(context.getString(R.string.release_impact_missing_expectation)).assertIsDisplayed()
         compose.runOnIdle { row.value = event().copy(country = "Canada") }

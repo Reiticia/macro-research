@@ -3,13 +3,6 @@ package com.macroresearch.ui.event
 import androidx.compose.ui.res.stringResource
 import com.macroresearch.R
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Surface
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -72,7 +65,6 @@ import com.macroresearch.ui.common.localizedCountdown as countdown
 import com.macroresearch.ui.common.flag
 import com.macroresearch.ui.common.localizedChange as formatChange
 import com.macroresearch.ui.common.localTime
-import com.macroresearch.ui.common.marketExpectation
 import com.macroresearch.ui.common.ReleaseImpactLabels
 import com.macroresearch.ui.common.localizedName
 import com.macroresearch.ui.common.statusLabel
@@ -176,12 +168,12 @@ private fun EventContent(
             }
         }
         item { ReleaseDataCard(event) }
+        item { EventIntroduction(event, stateDescription = description) }
         item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 ReleaseImpactLabels(event, Modifier.fillMaxWidth().padding(16.dp), detailed = true)
             }
         }
-        item { EventIntroduction(event, stateDescription = description) }
         item { MarketTrackingCard(event, market) }
         item {
             Button(
@@ -287,58 +279,25 @@ private fun CountdownCard(event: EconomicEvent) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ReleaseDataCard(event: EconomicEvent) {
-    val expectation = event.marketExpectation()
-    val consensusNumber = event.consensus?.trim()?.toBigDecimalOrNull()
-    val usesConsensus = consensusNumber != null
-    val expectationLabel = stringResource(if (usesConsensus) R.string.consensus else R.string.forecast)
+    // Preserve the original four columns and their order, even when the two expectations match.
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.release_data_title), style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold)
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val stack = maxWidth / LocalDensity.current.fontScale < 280.dp
-                if (stack) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        DataValue(stringResource(R.string.actual), event.value(event.actual), Modifier.fillMaxWidth(), true)
-                        DataValue(expectationLabel, event.value(expectation), Modifier.fillMaxWidth())
-                    }
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        DataValue(stringResource(R.string.actual), event.value(event.actual), Modifier.weight(1f), true)
-                        DataValue(expectationLabel, event.value(expectation), Modifier.weight(1f))
-                    }
-                }
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.previous_value, event.value(event.previous)),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                // Do not repeat a forecast that is identical to the chosen market expectation.
-                if (consensusNumber != null && event.forecast?.trim()?.toBigDecimalOrNull()?.let {
-                        it.compareTo(consensusNumber) != 0
-                    } == true) {
-                    Text("${stringResource(R.string.forecast)} ${event.value(event.forecast)}",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            DataValue(stringResource(R.string.actual), event.value(event.actual), event.actual != null)
+            DataValue(stringResource(R.string.consensus), event.value(event.consensus))
+            DataValue(stringResource(R.string.forecast), event.value(event.forecast))
+            DataValue(stringResource(R.string.previous), event.value(event.previous))
         }
     }
 }
 
 @Composable
-private fun DataValue(label: String, value: String, modifier: Modifier, highlight: Boolean = false) {
-    Surface(modifier, shape = RoundedCornerShape(8.dp),
-        color = if (highlight) MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace,
-                color = if (highlight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.SemiBold)
-        }
-    }
+private fun DataValue(label: String, value: String, highlight: Boolean = false) = Column {
+    Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(value, style = MaterialTheme.typography.titleMedium,
+        color = if (highlight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        fontWeight = FontWeight.Bold)
 }
 
 @Composable

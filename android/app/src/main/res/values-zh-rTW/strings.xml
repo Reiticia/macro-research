@@ -305,7 +305,11 @@
     <string name="display_compact">緊湊</string>
     <string name="display_system">標準</string>
     <string name="asset_brent">布蘭特原油</string>
-    <string name="release_impact_title">資產影響</string>
+    <string name="release_impact_title">標的影響程度</string>
+    <string name="release_impact_strength_none">無明顯影響</string>
+    <string name="release_impact_strength_limited">影響有限</string>
+    <string name="release_impact_strength_material">影響較明顯</string>
+    <string name="release_impact_flat">無明顯方向</string>
     <string name="release_impact_waiting">等待公布值</string>
     <string name="release_impact_missing_expectation">缺少有效預測值，暫無判斷</string>
     <string name="release_impact_invalid_number">公布值無法可靠解析，暫無判斷</string>

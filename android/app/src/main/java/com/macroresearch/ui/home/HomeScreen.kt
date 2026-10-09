@@ -185,7 +185,7 @@ internal fun marketOverviewRows(selectedMarkets: List<String>): List<List<String
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
+internal fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
     var now by remember { mutableStateOf(Instant.now()) }
     val locale = LocalConfiguration.current.locales[0]
     LaunchedEffect(event.id) {
@@ -227,7 +227,7 @@ private fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Keep the upcoming-event summary free of release values, just like event lists.
+            // Keep the source values in the compact summary, separate from detail-only impact.
             FlowRow(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap),
@@ -240,9 +240,24 @@ private fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
                     Spacer(Modifier.width(ResearchLayout.smallGap))
                     ImportanceDots(event.importance)
                 }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
+                    InlineValue(stringResource(R.string.previous), event.value(event.previous))
+                    InlineValue(stringResource(R.string.consensus), event.value(event.consensus))
+                    InlineValue(stringResource(R.string.forecast), event.value(event.forecast))
+                    if (!event.actual.isNullOrBlank()) {
+                        InlineValue(stringResource(R.string.actual), event.value(event.actual))
+                    }
+                }
             }
         }
     }
+}
+
+@Composable
+private fun InlineValue(label: String, value: String) = Row(verticalAlignment = Alignment.CenterVertically) {
+    Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Spacer(Modifier.width(4.dp))
+    Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
 }
 
 @Composable

@@ -1,23 +1,19 @@
 package com.macroresearch.ui.common
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -26,7 +22,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -45,7 +43,7 @@ import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.ui.theme.AssetDown
 import com.macroresearch.ui.theme.AssetUp
 
-/** Detail-only impact report: directions first, shared strength once, evidence beneath. */
+/** Detail-only single-column asset list. Strength is rule-based, not a price-move forecast. */
 @Composable
 fun ReleaseImpactLabels(event: EconomicEvent, modifier: Modifier = Modifier, detailed: Boolean = false) {
     val impact = remember(event) { ReleaseImpactEvaluator.evaluate(event) }
@@ -73,44 +71,49 @@ fun ReleaseImpactLabels(event: EconomicEvent, modifier: Modifier = Modifier, det
             Text(stringResource(it), style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (impact.status == ReleaseImpactStatus.DIRECTIONAL) {
+        if (impact.assets.isNotEmpty()) {
+            val strength = stringResource(when (impact.strength) {
+                ReleaseImpactStrength.NONE -> R.string.release_impact_strength_none
+                ReleaseImpactStrength.LIMITED -> R.string.release_impact_strength_limited
+                ReleaseImpactStrength.MATERIAL -> R.string.release_impact_strength_material
+            })
             BoxWithConstraints(Modifier.fillMaxWidth()) {
-                val columns = if (maxWidth / LocalDensity.current.fontScale < 280.dp) 1 else 2
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    impact.assets.chunked(columns).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            row.forEach { asset ->
-                                val up = asset.direction == ReleaseImpactDirection.UP
-                                val weak = impact.strength == ReleaseImpactStrength.LIMITED
-                                val yield = asset.symbol in setOf("us2y", "us10y")
-                                val direction = when {
-                                    yield && weak && up -> R.string.release_impact_yield_weak_up
-                                    yield && weak -> R.string.release_impact_yield_weak_down
-                                    yield && up -> R.string.release_impact_yield_up
-                                    yield -> R.string.release_impact_yield_down
-                                    weak && up -> R.string.release_impact_weak_up
-                                    weak -> R.string.release_impact_weak_down
-                                    up -> R.string.release_impact_up
-                                    else -> R.string.release_impact_down
-                                }
-                                val color = if (up) AssetUp else AssetDown
-                                Surface(
-                                    Modifier.weight(1f).testTag("release-impact-${asset.symbol}")
-                                        .semantics(mergeDescendants = true) {},
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = BorderStroke(1.dp, if (weak) MaterialTheme.colorScheme.outlineVariant else color.copy(alpha = 0.2f)),
-                                    color = color.copy(alpha = if (weak) 0.025f else 0.06f),
-                                ) {
-                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(assetLabel(asset.symbol), style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text(stringResource(direction), style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = if (weak) MaterialTheme.colorScheme.onSurfaceVariant else color)
-                                    }
-                                }
+                val stack = maxWidth / LocalDensity.current.fontScale < 280.dp
+                Column {
+                    impact.assets.forEachIndexed { index, asset ->
+                        if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        val up = asset.direction == ReleaseImpactDirection.UP
+                        val weak = impact.strength == ReleaseImpactStrength.LIMITED
+                        val yield = asset.symbol in setOf("us2y", "us10y")
+                        val direction = stringResource(when {
+                            asset.direction == ReleaseImpactDirection.FLAT -> R.string.release_impact_flat
+                            yield && weak && up -> R.string.release_impact_yield_weak_up
+                            yield && weak -> R.string.release_impact_yield_weak_down
+                            yield && up -> R.string.release_impact_yield_up
+                            yield -> R.string.release_impact_yield_down
+                            weak && up -> R.string.release_impact_weak_up
+                            weak -> R.string.release_impact_weak_down
+                            up -> R.string.release_impact_up
+                            else -> R.string.release_impact_down
+                        })
+                        val color = when {
+                            weak || asset.direction == ReleaseImpactDirection.FLAT -> MaterialTheme.colorScheme.onSurfaceVariant
+                            up -> AssetUp
+                            else -> AssetDown
+                        }
+                        val rowModifier = Modifier.fillMaxWidth().testTag("release-impact-${asset.symbol}")
+                            .semantics(mergeDescendants = true) {}.padding(vertical = 10.dp)
+                        if (stack) {
+                            Column(rowModifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(assetLabel(asset.symbol), style = MaterialTheme.typography.bodyMedium)
+                                ImpactValue(direction, strength, color)
                             }
-                            if (row.size < columns) Spacer(Modifier.weight(1f))
+                        } else {
+                            Row(rowModifier, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text(assetLabel(asset.symbol), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                ImpactValue(direction, strength, color, Modifier.weight(1f), Alignment.End)
+                            }
                         }
                     }
                 }
@@ -157,6 +160,20 @@ fun ReleaseImpactLabels(event: EconomicEvent, modifier: Modifier = Modifier, det
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ImpactValue(
+    direction: String,
+    strength: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    alignment: Alignment.Horizontal = Alignment.Start,
+) {
+    Column(modifier, horizontalAlignment = alignment, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(direction, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = color)
+        Text(strength, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

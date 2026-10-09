@@ -306,7 +306,11 @@
     <string name="display_compact">Compact</string>
     <string name="display_system">Standard</string>
     <string name="asset_brent">Brent crude oil</string>
-    <string name="release_impact_title">Asset impact</string>
+    <string name="release_impact_title">Asset impact strength</string>
+    <string name="release_impact_strength_none">No clear impact</string>
+    <string name="release_impact_strength_limited">Limited impact</string>
+    <string name="release_impact_strength_material">Material impact</string>
+    <string name="release_impact_flat">No clear direction</string>
     <string name="release_impact_waiting">Waiting for the published value</string>
     <string name="release_impact_missing_expectation">No valid forecast — impact unavailable</string>
     <string name="release_impact_invalid_number">Published value cannot be interpreted reliably</string>
