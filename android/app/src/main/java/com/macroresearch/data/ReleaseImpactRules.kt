@@ -16,7 +16,13 @@ internal object ReleaseImpactRules {
 
     private fun rule(id: String, unit: Unit, threshold: String, vararg aliases: String,
                      higher: Higher = Higher.HAWKISH) =
-        Rule(id, aliases.toList(), unit, BigDecimal(threshold), higher)
+        Rule(
+            id = id,
+            aliases = aliases.toList(),
+            unit = unit,
+            threshold = BigDecimal(threshold),
+            higher = higher,
+        )
 
     // Specific/core indicators must win over headline aliases. Only rate releases, not price levels.
     val rules = listOf(

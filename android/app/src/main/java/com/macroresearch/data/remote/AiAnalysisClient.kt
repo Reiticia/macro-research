@@ -42,6 +42,8 @@ data class AiAnalysisDraft(
     val risks: String?,
 )
 
+data class AiConversationMessage(val role: String, val content: String, val createdAt: Long = System.currentTimeMillis())
+
 /**
  * Generates a post-release briefing on the user's own OpenAI-compatible endpoint:
  * a transmission chain from the data surprise to asset prices, a read of the released
@@ -100,17 +102,77 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
         includeNews: Boolean,
     ): AiAnalysisDraft {
         val endpoint = chatEndpoint(settings.baseUrl)
-        val call = { jsonMode: Boolean ->
-            execute(endpoint, apiKey, payload(input, settings.model, jsonMode, stage, includeMoves, expectation, includeNews))
-        }
-        val responseText = try {
-            call(true)
+        fun requestPayload(jsonMode: Boolean, compactRetry: Boolean = false): Map<String, Any?> =
+            payload(input, settings.model, jsonMode, stage, includeMoves, expectation, includeNews)
+                .let { body ->
+                    if (!compactRetry) body else body.withCompactRetryInstruction()
+                }
+        fun send(jsonMode: Boolean, compactRetry: Boolean = false): String =
+            execute(endpoint, apiKey, requestPayload(jsonMode, compactRetry))
+        fun sendWithCompatibilityFallback(compactRetry: Boolean): String = try {
+            send(true, compactRetry)
         } catch (rejected: ApiException) {
             // Not every OpenAI-compatible gateway accepts response_format.
-            if (rejected.code in UNSUPPORTED_JSON_MODE_CODES) call(false) else throw rejected
+            if (rejected.code in UNSUPPORTED_JSON_MODE_CODES) send(false, compactRetry) else throw rejected
         }
-        return parseResponse(responseText)
+
+        val responseText = sendWithCompatibilityFallback(compactRetry = false)
+        try {
+            return parseResponse(responseText)
+        } catch (parseError: IllegalStateException) {
+            // Some gateways/models stop early despite a generous output budget. Retry once with a
+            // strict compact-output instruction; never retry transport/provider errors.
+            val retryText = sendWithCompatibilityFallback(compactRetry = true)
+            try {
+                return parseResponse(retryText)
+            } catch (retryError: IllegalStateException) {
+                responseObserver?.invoke(retryText)
+                retryError.addSuppressed(parseError)
+                throw retryError
+            }
+        }
     }
+
+    suspend fun converse(
+        input: AiAnalysisInput,
+        settings: TranslationSettings,
+        apiKey: String,
+        history: List<AiConversationMessage>,
+        question: String,
+        currentBriefing: String? = null,
+    ): AiConversationMessage = withContext(Dispatchers.IO) {
+        val endpoint = chatEndpoint(settings.baseUrl)
+        val system = buildString {
+            append("You are a careful macro-market analyst. Answer follow-up questions about this event using only the supplied event, analysis, observed market reactions and conversation. Distinguish measured facts from hypotheses; do not invent missing values, market moves, news or causality. If actual is absent, do not claim a data surprise. State when evidence is unavailable. This is descriptive analysis, not investment advice. ")
+            append("Write in ").append(outputLanguage(input.languageTag)).append('.')
+        }
+        val context = mapOf(
+            "event" to input.event,
+            "macroSignal" to input.macroSignal,
+            "rawSurprise" to input.rawSurprise,
+            "expectedReactions" to input.expectedReactions,
+            "observedReactions" to input.observedReactions,
+            "currentBriefing" to currentBriefing,
+        )
+        val messages = buildList {
+            add(mapOf("role" to "system", "content" to system))
+            add(mapOf("role" to "user", "content" to "Event context: ${gson.toJson(context)}"))
+            history.takeLast(20).forEach { add(mapOf("role" to it.role, "content" to it.content)) }
+            add(mapOf("role" to "user", "content" to question))
+        }
+        val body = execute(endpoint, apiKey, mapOf("model" to settings.model, "messages" to messages, "stream" to false, "max_tokens" to MAX_TOKENS))
+        val root = com.google.gson.JsonParser.parseString(body).asJsonObject
+        val answer = root.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject
+            ?.getAsJsonObject("message")?.get("content")?.asString?.trim()
+            ?.takeIf(String::isNotEmpty) ?: error("AI returned an empty response")
+        AiConversationMessage("assistant", answer)
+    }
+
+    fun encodeConversation(messages: List<AiConversationMessage>): String = gson.toJson(messages)
+
+    fun decodeConversation(json: String): List<AiConversationMessage> = runCatching {
+        gson.fromJson(json, Array<AiConversationMessage>::class.java)?.toList().orEmpty()
+    }.getOrDefault(emptyList())
 
     fun encodeChain(chain: List<TransmissionStep>): String = gson.toJson(chain)
 
@@ -217,6 +279,18 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
         }
     }
 
+    private fun Map<String, Any?>.withCompactRetryInstruction(): Map<String, Any?> {
+        val updatedMessages = (this["messages"] as List<Map<String, String>>).toMutableList()
+        val system = updatedMessages.firstOrNull()?.get("content").orEmpty()
+        updatedMessages[0] = updatedMessages.first().toMutableMap().apply {
+            put(
+                "content",
+                system + " RETRY: The prior answer was not valid JSON. Return a very concise complete JSON object now; keep chain to at most 4 links, each text field to 1-2 short sentences, and do not add prose or markdown.",
+            )
+        }
+        return toMutableMap().apply { put("messages", updatedMessages) }
+    }
+
     private fun exAnte(draft: AiAnalysisDraft): Map<String, Any?> = mapOf(
         "chain" to draft.chain.map {
             mapOf("from" to it.from, "to" to it.to, "direction" to it.direction, "rationale" to it.rationale)
@@ -227,19 +301,13 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
     )
 
     private fun systemPrompt(languageTag: String, stage: AnalysisStage): String = buildString {
-        append("You are a macro market analyst writing a post-release briefing for one economic event. ")
-        append("Use only the numbers and observations in the payload; never invent data. If actual, consensus, forecast, or market observations are absent, state that they are unavailable and do not infer or fabricate them. When actual is absent, do not describe a data surprise; ground the briefing in event context and any observed market reaction, and label unobserved effects as unknown. If newsSearchStatus is no_relevant_articles_found, state that no matching articles were found. If newsSearchStatus is search_unavailable, state that news could not be retrieved; if it is partial_results, disclose that source coverage was incomplete. If relatedNews is present, use it only as dated context, distinguish reporting from measured event data, and cite the exact supplied title, source and URL; never invent citations or imply an article proves causation. ")
+        append("You are a macro market analyst writing a post-event briefing for one economic event. Use only payload data; never invent figures. If actual is absent, do not claim a data surprise. Analyze the event context and any observed market reaction; distinguish evidence from hypotheses, and state when effects are unobserved. Without usable market observations, provide conditional context rather than claiming no impact. If news is supplied, treat it only as dated context, cite only supplied sources, and do not imply it proves causality. ")
         when (stage) {
             AnalysisStage.EXPECTATION -> append(
-                "No market reaction data is provided and none exists yet in your reading: build the chain " +
-                    "and the outlook from available event data and the rule signal only, and never state or " +
-                    "guess what prices did. If actual is missing, analyze the event context without claiming " +
-                    "a measured surprise. Frame the outlook as conditional expectations and say what would " +
-                    "confirm or invalidate each link. ",
+                "No market reaction data is provided in this pass: build a conditional chain from event context, available values and rule signal only; do not guess what prices did. If actual is missing, discuss the event's potential channels without claiming a measured surprise. Say what would confirm or invalidate each link. ",
             )
             AnalysisStage.SINGLE_PASS -> append(
-                "Explain the causal transmission from the event or measured surprise to asset prices step by step. " +
-                    "Use observed moves only when supplied; otherwise mark market reaction as unobserved. Treat related news as context, not as measured market data. ",
+                "Explain potential transmission from the event context or measured surprise to assets. Use only supplied observed moves; otherwise say market reaction is unobserved, not absent. Describe causal links as hypotheses unless the evidence supports them. Treat related news only as context. ",
             )
             AnalysisStage.COMPARISON -> append(
                 "You already produced an ex-ante expectation without seeing any prices; it is supplied as " +
@@ -380,7 +448,7 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
         /** Debug-only hook; the app logs raw model output when a reply cannot be parsed. */
         internal var responseObserver: ((String) -> Unit)? = null
 
-        private const val MAX_TOKENS = 4096
+        private const val MAX_TOKENS = 8192
         private val UNSUPPORTED_JSON_MODE_CODES = setOf(400, 404, 422)
         /** Fragments of the schema echo; a real briefing never contains them. */
         private val PLACEHOLDER_TOKENS = listOf("up|down|flat", "...", "short node names", "2-4 sentences")

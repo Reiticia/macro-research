@@ -6,8 +6,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CachedEventEntity::class, FollowedEventEntity::class, AiAnalysisEntity::class],
-    version = 7,
+    entities = [CachedEventEntity::class, FollowedEventEntity::class, AiAnalysisEntity::class, AiConversationEntity::class, AiAutoRefreshEntity::class],
+    version = 8,
     exportSchema = true,
 )
 abstract class MacroDatabase : RoomDatabase() {
@@ -105,6 +105,27 @@ abstract class MacroDatabase : RoomDatabase() {
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS `name_correction`")
+            }
+        }
+
+        // v8 persists private client-AI conversation history separately from generated briefings.
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `ai_auto_refresh` (" +
+                        "`eventId` INTEGER NOT NULL, " +
+                        "`method` INTEGER NOT NULL, " +
+                        "`language` TEXT NOT NULL, " +
+                        "`attemptedAtEpochMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`eventId`, `method`, `language`))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `ai_conversation` (" +
+                        "`eventId` INTEGER NOT NULL, " +
+                        "`messagesJson` TEXT NOT NULL, " +
+                        "`updatedAtEpochMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`eventId`))",
+                )
             }
         }
     }

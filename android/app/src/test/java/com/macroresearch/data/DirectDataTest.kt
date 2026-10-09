@@ -108,7 +108,7 @@ class DirectDataTest {
         assertEquals("released", first.status)
         val reserves = events.first { it.currency == "CHF" }
         assertEquals("768000000000", reserves.previous)
-        assertEquals("currency", reserves.unit)
+        assertEquals("number", reserves.unit)
         // Elapsed time is not evidence that a numeric release value was retrieved.
         assertEquals("data_unavailable", reserves.status)
     }

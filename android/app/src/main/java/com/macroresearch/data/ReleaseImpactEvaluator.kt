@@ -43,7 +43,9 @@ object ReleaseImpactEvaluator {
         val rule = ReleaseImpactRules.match(event.event) ?: return base
         val unit = ReleaseImpactUnit.valueOf(rule.unit.name)
         val withRule = base.copy(ruleId = rule.id, unit = unit, threshold = rule.threshold)
-        val multiplier = multiplier(event, rule.unit)
+        // Indicator identity tells us the dimension, not the provider's numeric scale.
+        // Missing metadata must not silently multiply employment by 1,000 or oil by 1,000,000.
+        val multiplier = multiplier(event, rule)
             ?: return withRule.copy(status = ReleaseImpactStatus.UNKNOWN_UNIT)
         val surprise = (actual - expectation) * multiplier
         val metadata = withRule.copy(surprise = surprise)
@@ -70,15 +72,20 @@ object ReleaseImpactEvaluator {
         )
     }
 
-    private fun multiplier(event: EconomicEvent, unit: ReleaseImpactRules.Unit): BigDecimal? {
-        val sourceUnit = event.unit?.trim()?.lowercase(Locale.ROOT).orEmpty()
+    private fun multiplier(event: EconomicEvent, rule: ReleaseImpactRules.Rule): BigDecimal? {
+        val unit = rule.unit
+        val rawUnit = event.unit?.trim().orEmpty()
+        if (rawUnit.isEmpty()) return null
+        val sourceUnit = rawUnit.lowercase(Locale.ROOT)
         return when (unit) {
             ReleaseImpactRules.Unit.PERCENTAGE_POINTS -> if (sourceUnit in setOf("%", "percent", "percentage", "percentage points", "pp")) BigDecimal.ONE else null
-            ReleaseImpactRules.Unit.INDEX_POINTS -> if (sourceUnit in setOf("", "index", "points", "point", "index points")) BigDecimal.ONE else null
+            ReleaseImpactRules.Unit.INDEX_POINTS -> if (sourceUnit in setOf("number", "index", "points", "point", "index points")) BigDecimal.ONE else null
             ReleaseImpactRules.Unit.PEOPLE, ReleaseImpactRules.Unit.BARRELS -> {
                 // FF (also through the backend) already expands K/M/B into absolute numbers.
                 // Its legacy 'currency' unit is inferred from M, even for oil inventory barrels.
-                if (event.provider == "forex_factory" && sourceUnit in setOf("", "count", "currency")) return BigDecimal.ONE
+                if (event.provider == "forex_factory" && sourceUnit in setOf("count", "currency")) return BigDecimal.ONE
+                // 'number' is a source-normalized absolute quantity (not a currency).
+                if (sourceUnit == "number") return BigDecimal.ONE
                 // A weekly row hydrated from TradingView may retain its provider id but carry
                 // the primary's explicit K/M unit. Those values have not yet been expanded.
                 val typedPeople = setOf("thousand persons", "thousand people", "million persons", "million people")

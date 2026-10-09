@@ -89,10 +89,14 @@ class MacroApplication : Application() {
                 MacroDatabase.MIGRATION_4_5,
                 MacroDatabase.MIGRATION_5_6,
                 MacroDatabase.MIGRATION_6_7,
+                MacroDatabase.MIGRATION_7_8,
             )
             .build()
         if (BuildConfig.DEBUG) {
-            AiAnalysisClient.responseObserver = { android.util.Log.d("AiAnalysisRaw", it.take(4000)) }
+            // Do not log model responses: they may contain private prompts or event context.
+            AiAnalysisClient.responseObserver = { response ->
+                android.util.Log.w("AiAnalysis", "Model response could not be parsed (${response.length} chars)")
+            }
         }
         val networkPreferences = NetworkPreferences(this)
         val analysisPreferences = AnalysisPreferences(this)

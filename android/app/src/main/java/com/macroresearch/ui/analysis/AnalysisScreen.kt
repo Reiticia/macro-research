@@ -32,6 +32,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -90,6 +92,9 @@ fun AnalysisScreen(id: Long, repository: MacroRepository, onBack: () -> Unit) {
     val languageTag = LocalConfiguration.current.locales[0].toLanguageTag()
     val method by repository.analysisMethod.collectAsStateWithLifecycle()
     val dataSource by repository.dataSourceSettings.collectAsStateWithLifecycle()
+    val conversation by vm.conversation.collectAsStateWithLifecycle()
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
     LaunchedEffect(id, languageTag, method, settings.configured, dataSource) {
         if (settings.configured) {
             vm.loadAi(languageTag)
@@ -98,6 +103,10 @@ fun AnalysisScreen(id: Long, repository: MacroRepository, onBack: () -> Unit) {
             // the persisted row on subsequent requests.
             vm.loadAi(languageTag)
         }
+    }
+    LaunchedEffect(settings.configured, method) { vm.loadConversation() }
+    LaunchedEffect(id, languageTag, lifecycleState, state.event, ai.analysis?.revision) {
+        vm.scheduleWindowEndRefresh(languageTag, lifecycleState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
     }
     Scaffold(
         topBar = { TopAppBar(title = { Text(state.event?.localizedName(LocalConfiguration.current.locales[0]) ?: stringResource(R.string.analysis), fontWeight = FontWeight.Bold) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back)) } }) },
@@ -116,6 +125,9 @@ fun AnalysisScreen(id: Long, repository: MacroRepository, onBack: () -> Unit) {
                 onGenerateAi = { vm.generateAiAnalysis(languageTag) },
                 onFeedback = { vm.feedback(languageTag, it) },
                 onRefreshShared = { vm.refreshSharedAi(languageTag) },
+                conversation = conversation,
+                onAsk = { vm.askFollowUp(languageTag, it) },
+                onResetConversation = vm::resetConversation,
                 modifier = Modifier.padding(padding),
             )
         }
@@ -146,6 +158,9 @@ private fun AnalysisContent(
     onGenerateAi: () -> Unit,
     onFeedback: (String) -> Unit,
     onRefreshShared: () -> Unit,
+    conversation: com.macroresearch.ui.AiConversationState,
+    onAsk: (String) -> Unit,
+    onResetConversation: () -> Unit,
     modifier: Modifier,
 ) {
     LazyColumn(modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -167,6 +182,9 @@ private fun AnalysisContent(
                 onGenerateAi,
                 onFeedback,
                 onRefreshShared,
+                conversation,
+                onAsk,
+                onResetConversation,
             )
         }
         item {
@@ -184,7 +202,11 @@ private fun AiAnalysisCard(
     onGenerate: () -> Unit,
     onFeedback: (String) -> Unit,
     onRefreshShared: () -> Unit,
+    conversation: com.macroresearch.ui.AiConversationState,
+    onAsk: (String) -> Unit,
+    onResetConversation: () -> Unit,
 ) {
+    var question by remember(event.id) { mutableStateOf("") }
     var feedbackText by remember(ai.analysis?.revision, ai.analysis?.method) { mutableStateOf("") }
     var now by remember(event.id) { mutableStateOf(Instant.now()) }
     LaunchedEffect(event.id) { while (true) { now = Instant.now(); delay(1_000) } }
@@ -237,6 +259,28 @@ private fun AiAnalysisCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    if (configured) {
+                        HorizontalDivider()
+                        Text(stringResource(R.string.ai_conversation), fontWeight = FontWeight.SemiBold)
+                        conversation.messages.forEach { message ->
+                            Text(if (message.role == "user") stringResource(R.string.ai_you, message.content) else stringResource(R.string.ai_assistant, message.content))
+                        }
+                        conversation.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        OutlinedTextField(
+                            value = question,
+                            onValueChange = { if (it.length <= 2000) question = it },
+                            label = { Text(stringResource(R.string.ai_followup_hint)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !conversation.loading,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { onAsk(question); question = "" }, enabled = question.isNotBlank() && !conversation.loading) {
+                                Text(stringResource(if (conversation.loading) R.string.ai_followup_loading else R.string.ai_followup_send))
+                            }
+                            if (conversation.messages.isNotEmpty()) TextButton(onClick = onResetConversation) { Text(stringResource(R.string.ai_reset_conversation)) }
+                        }
+                    }
                     analysis.usageSummary()?.let { usage ->
                         Text(
                             stringResource(R.string.ai_usage, usage),

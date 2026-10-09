@@ -33,20 +33,56 @@ fun EconomicEvent.localDate(locale: Locale, pattern: String): String = runCatchi
     Instant.parse(eventTime).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern(pattern, locale))
 }.getOrDefault(eventTime)
 
-fun EconomicEvent.value(value: String?, locale: Locale = Locale.ENGLISH): String {
+private fun EconomicEvent.isUsReleaseImpactCountry(): Boolean = country.trim().lowercase(Locale.ROOT) in
+    setOf("us", "usa", "united states", "united states of america")
+
+fun EconomicEvent.value(
+    value: String?,
+    locale: Locale = Locale.ENGLISH,
+    unknownUnitLabel: String = "unit unconfirmed",
+    unknownScaleLabel: String = "scale unconfirmed",
+    peopleLabel: String = "people",
+    barrelsLabel: String = "barrels",
+    indexLabel: String = "index points",
+): String {
     if (value == null) return "--"
     val number = value.trim().toBigDecimalOrNull() ?: return value
-    return when (unit) {
-        "%" -> "${number.stripTrailingZeros().toPlainString()}%"
-        "count" -> compact(number, locale)
-        "currency" -> {
-            // The weekly parser infers 'currency' from M even for physical inventory/counts.
-            val physical = provider == "forex_factory" && ReleaseImpactRules.match(event)?.unit in
-                setOf(ReleaseImpactRules.Unit.PEOPLE, ReleaseImpactRules.Unit.BARRELS)
-            (if (physical) "" else "$") + compact(number, locale)
+    val plain = number.stripTrailingZeros().toPlainString()
+    val sourceUnit = unit?.trim().orEmpty()
+    if (sourceUnit.isEmpty()) return "$plain ($unknownUnitLabel)"
+    // Only normalized absolute quantities can be compacted. Never infer K/M/B from a title.
+    val normalized = sourceUnit in setOf("number", "count") ||
+        (sourceUnit == "currency" && provider == "forex_factory")
+    val physicalUnit = if (normalized && isUsReleaseImpactCountry()) {
+        when (ReleaseImpactRules.match(event)?.unit) {
+            ReleaseImpactRules.Unit.PEOPLE -> peopleLabel
+            ReleaseImpactRules.Unit.BARRELS -> barrelsLabel
+            ReleaseImpactRules.Unit.INDEX_POINTS -> indexLabel
+            else -> null
         }
-        else -> number.stripTrailingZeros().toPlainString() +
-            (unit?.takeIf { it.isNotBlank() }?.let { " $it" } ?: "")
+    } else null
+    if (physicalUnit != null) return "${compact(number, locale)} $physicalUnit"
+    return when (sourceUnit.lowercase(Locale.ROOT)) {
+        "%", "percent", "percentage" -> "$plain%"
+        "$", "usd", "€", "eur", "£", "gbp" -> {
+            val code = when (sourceUnit.lowercase(Locale.ROOT)) {
+                "$" -> "$" // A dollar symbol alone does not distinguish USD/CAD/AUD.
+                "usd" -> "USD"
+                "€", "eur" -> "EUR"
+                else -> "GBP"
+            }
+            // FF's parser expands any suffix; TradingView's bare currency field supplies
+            // no verified magnitude. Preserve its number and disclose the missing scale.
+            val amount = if (provider == "forex_factory") compact(number, locale) else plain
+            val formatted = if (code == "$") "\$$amount" else "$amount $code"
+            if (provider == "forex_factory") formatted else "$formatted ($unknownScaleLabel)"
+        }
+        "count" -> compact(number, locale)
+        "number", "currency" -> "${compact(number, locale)} ($unknownUnitLabel)"
+        "people", "persons", "person", "jobs" -> "$plain $peopleLabel"
+        "barrels", "barrel", "bbl" -> "$plain $barrelsLabel"
+        "index", "points", "point", "index points" -> "$plain $indexLabel"
+        else -> "$plain $sourceUnit" // Explicit source scale is kept as-is, not applied twice.
     }
 }
 

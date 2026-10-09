@@ -80,7 +80,12 @@ class ReleaseImpactEvaluatorTest {
         assertEquals(ReleaseImpactStatus.UNKNOWN_RULE, ReleaseImpactEvaluator.evaluate(event().copy(country = "Canada")).status)
         assertEquals(ReleaseImpactStatus.UNKNOWN_RULE, ReleaseImpactEvaluator.evaluate(event("Speech", "1", "1")).status)
         assertEquals(ReleaseImpactStatus.UNKNOWN_UNIT, ReleaseImpactEvaluator.evaluate(event(unit = null)).status)
-        assertEquals(ReleaseImpactStatus.UNKNOWN_UNIT, ReleaseImpactEvaluator.evaluate(event("Non Farm Payrolls", "250", "200", null)).status)
+        assertEquals(ReleaseImpactStatus.UNKNOWN_UNIT,
+            ReleaseImpactEvaluator.evaluate(event(unit = " ")).status)
+        assertEquals(ReleaseImpactStatus.UNKNOWN_UNIT,
+            ReleaseImpactEvaluator.evaluate(event("Non Farm Payrolls", "250", "200", null)).status)
+        assertEquals(ReleaseImpactStatus.UNKNOWN_UNIT,
+            ReleaseImpactEvaluator.evaluate(event("Non Farm Payrolls", "250", "200", "Million Barrels")).status)
     }
 
     @Test fun countryCodesAliasesAndTranslationsDoNotChangeMatching() {
@@ -104,6 +109,28 @@ class ReleaseImpactEvaluatorTest {
         assertEquals(ReleaseImpactStatus.UNKNOWN_UNIT,
             ReleaseImpactEvaluator.evaluate(event("Non Farm Payrolls", "250", "200", "Million Barrels")).status)
         assertEquals(ReleaseImpactStrength.LIMITED, ReleaseImpactEvaluator.evaluate(event("Initial Jobless Claims", "211", "210", "Thousand")).strength)
+    }
+
+    @Test fun missingScalesDoNotProduceInventedSurprises() {
+        for (source in listOf(
+            event("Non Farm Payrolls", "250", "200", null),
+            event("Crude Oil Inventories", "-2", "-0.5", null),
+            event("ISM Manufacturing PMI", "52", "50", null),
+        )) {
+            val result = ReleaseImpactEvaluator.evaluate(source)
+            assertEquals(ReleaseImpactStatus.UNKNOWN_UNIT, result.status)
+            assertNull(result.surprise)
+            assertTrue(result.assets.isEmpty())
+        }
+        assertEquals(ReleaseImpactStatus.UNKNOWN_UNIT,
+            ReleaseImpactEvaluator.evaluate(event("Core CPI m/m", "0.4", "0.3", "barrels")).status)
+    }
+
+    @Test fun normalizedQuantitiesDoNotApplyScaleAgain() {
+        val payrolls = ReleaseImpactEvaluator.evaluate(event("Non Farm Payrolls", "250000", "200000", "number"))
+        assertEquals(0, BigDecimal("50000").compareTo(payrolls.surprise))
+        val oil = ReleaseImpactEvaluator.evaluate(event("Crude Oil Inventories", "-2000000", "-500000", "number"))
+        assertEquals(0, BigDecimal("-1500000").compareTo(oil.surprise))
     }
 
     @Test fun negativeOilInventoryOnlyAffectsOilAndSupportsLegacyExpandedUnits() {

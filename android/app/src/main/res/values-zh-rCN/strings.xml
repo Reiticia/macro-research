@@ -274,6 +274,7 @@
     <string name="verdict_contradicted">与行情相矛盾</string>
     <string name="verdict_unobserved">该环节缺少可用行情</string>
     <string name="ai_analysis_failed">生成失败：%1$s</string>
+    <string name="ai_response_truncated">AI 回复不完整，已自动尝试一次精简格式重试。若仍失败，请在设置中更换输出上限更高的模型或提高模型输出 token 上限。</string>
     <string name="ai_analyze">生成分析</string>
     <string name="ai_reanalyze">重新分析</string>
     <string name="ai_analysis_hint">调用你配置的 AI 接口，说明该数据如何经由利率、美元与风险资产传导。</string>
@@ -287,7 +288,14 @@
     <string name="ai_news_saved">新闻设置已保存，下次生成或重新分析时生效。</string>
     <string name="ai_requires_key">请先在设置中填写 API Key 才能生成 AI 分析。</string>
     <string name="ai_waiting_for_event">事件预定时间到达后即可进行分析。</string>
-    <string name="ai_missing_release_data">暂无公布值。分析将依据事件背景及可用行情，不会臆测缺失数值。</string>
+    <string name="ai_missing_release_data">暂无公布值。分析将依据事件背景和可用行情，不会把行情变动归因于数据惊喜。</string>
+    <string name="ai_conversation">持续对话</string>
+    <string name="ai_followup_hint">继续询问这个事件</string>
+    <string name="ai_followup_send">发送</string>
+    <string name="ai_followup_loading">思考中…</string>
+    <string name="ai_reset_conversation">重置对话</string>
+    <string name="ai_you">你：%1$s</string>
+    <string name="ai_assistant">AI：%1$s</string>
     <string name="ai_chain">传导链路</string>
     <string name="ai_data_analysis">数据分析</string>
     <string name="ai_market_outlook">市场走势</string>
@@ -315,6 +323,8 @@
     <string name="release_impact_invalid_number">公布值无法可靠解析，暂无判断</string>
     <string name="release_impact_unknown_rule">该事件暂无可靠规则</string>
     <string name="release_impact_unknown_unit">单位不明确，暂无可靠判断</string>
+    <string name="event_unit_unconfirmed">单位未确认</string>
+    <string name="event_scale_unconfirmed">倍率未确认</string>
     <string name="release_impact_equal">符合预期 · 无明显方向</string>
     <string name="release_impact_asset">%1$s：%2$s</string>
     <string name="release_impact_up">利多</string>

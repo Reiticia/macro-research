@@ -51,6 +51,8 @@ MacroRepository            ── 缓存、翻译补全、模式切换
 
 TradingView 接口失败或返回空、且请求范围与当前周重叠时，回退请求 Forex Factory 公开周度 JSON（`nfs.faireconomy.media/ff_calendar_thisweek.json`，同样无需 Key），按 impact Low / Medium / High / Holiday 映射重要度，并将带单位字符串（如 `0.2%`、`768B`）归一化为数值与单位，同样把单一预期值写入 `consensus` 与 `forecast`。两个来源都不单独提供第二套共识值，属于已知数据边界。
 
+数值显示不按事件名称推断来源倍率。Forex Factory 的 K/M/B/T 后缀仅表示倍率，数值展开一次后使用 `number` 单位；只有原文带货币符号才记录对应单位（`$`/EUR/GBP），其中 `$` 不自行解释成美元而保留原符号。TradingView 显式的 K/M 等单位原样显示，不重复转换；裸货币字段缺乏已核实倍率时标注“倍率未确认”，单位为空时标注“单位未确认”。旧缓存的 `currency` 标签不能证明美元维度，按已展开数值显示并标明单位未确认（已识别的 FF 人数/原油库存可使用对应物理维度）。刷新后新解析结果沿现有 Room 合并流程更新，无需数据库迁移。
+
 事件 ID 初始由 provider ID 的 SHA-256 摘要生成。主源恢复后，按国家、精确发布时间和明确的标题别名匹配已有周历事件（例如 Core PPI m/m / Core PPI MoM），仅在匹配唯一时原位补齐数值，保留旧 ID、关注和译文；不模糊匹配、不删除未匹配记录。后续按 provider / providerId 查找保留的 ID。主源已有实际值不会被回退周历覆盖；AI 翻译仅更新译名列，不再回写启动翻译时的整条旧事件快照。应用更新后首次刷新仍会清理旧 `trading_economics` 数据源的缓存行。
 
 回退周历与主源对同一指标使用不同标题，是历史记录长期缺失公布值的主因。因此维护一份**封闭且逐条核对过的同义表**（如 Core CPI m/m ↔ Core Inflation Rate MoM、CPI m/m ↔ Inflation Rate MoM、Crude Oil Inventories ↔ EIA Crude Oil Stocks Change、Natural Gas Storage ↔ EIA Natural Gas Stocks Change、Final Wholesale Inventories m/m ↔ Wholesale Inventories MoM、Prelim UoM Consumer Sentiment ↔ Michigan Consumer Sentiment Prel），每次合并（日历 / 历史 / 首页 / 手动重试）都把同一次发生（国家 + 精确时刻 + 规范化标题）的主源数值补写进回退行：按 id 去重后必须**恰好一条**带值的主源行，否则不改；名称、ID、译名与已有数值均保留。不得凭猜测添加同义条目——错误别名会把其他指标的数值挂到该行上。主源与回退源都不提供实际值的指标（例如 S&P Global PMI 终值）保持为空，重试时如实提示。
@@ -87,7 +89,9 @@ TradingView 接口失败或返回空、且请求范围与当前周重叠时，�
 
 模型返回结构化的 `chain`（传导链路：起点 → 终点、方向、理由）、`dataAnalysis`（数据解读）、`marketOutlook`（走势判断，含失效条件）与 `risks`，解析时容忍 `snake_case` 等命名差异，缺失端点的链路环节会被丢弃。
 
-结果写入 Room 的 `ai_analysis` 表（每个事件和方法一行，`revision` 递增），因此重新进入分析页会直接显示缓存结果；管理员点「重新分析」后才会重新调用模型并覆盖缓存行。输出语言跟随应用语言（简中 / 繁中 / 英文）。未配置 Key 或事件尚未公布数据时不发起请求，仅显示提示。
+结果写入 Room 的 `ai_analysis` 表（每个事件和方法一行，`revision` 递增），因此重新进入分析页会直接显示缓存结果；管理员点「重新分析」后才会重新调用模型并覆盖缓存行。输出语言跟随应用语言（简中 / 繁中 / 英文）。未配置 Key 或事件时间未到时不发起个人 AI 请求。Actual 缺失不再阻止事件后分析：模型必须把 Actual 缺失与市场反应未观测区分开，不能编造惊喜值或把相关性说成确定因果。分析页活跃期间，首次简报若早于事件时间 +60 分钟生成，则边界到达后最多自动补分析一次；离开页面时取消等待，不运行后台 AI 任务。共享模式只允许对已经存在的当前事件/语言/方法/时区缓存键做该次更新，并遵守共享配额、冷却、审计和 revision 规则。
+
+个人 AI Key 路径支持针对当前事件的持续追问。对话按事件保存在本机 Room，发送给用户配置的模型时不会经过项目后端；“重置对话”仅清除该事件对话，不删除简报、事件或行情。切换数据源模式时会清除对话，避免两种事件 ID 空间混用。
 
 ### 分析方法（设置页可选）
 

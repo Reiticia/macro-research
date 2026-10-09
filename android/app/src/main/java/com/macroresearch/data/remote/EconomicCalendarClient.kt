@@ -503,8 +503,11 @@ private fun detectUnit(raw: String?): String? {
     val value = raw?.trim()?.uppercase(Locale.ROOT).orEmpty()
     return when {
         '%' in value -> "%"
-        value.endsWith('K') -> "count"
-        value.endsWith('M') || value.endsWith('B') || value.endsWith('T') -> "currency"
+        '$' in value -> "$"
+        '€' in value -> "EUR"
+        '£' in value -> "GBP"
+        // K/M/B/T specify magnitude only. Oil barrels and job counts are not currencies.
+        value.lastOrNull() in setOf('K', 'M', 'B', 'T') -> "number"
         else -> null
     }
 }

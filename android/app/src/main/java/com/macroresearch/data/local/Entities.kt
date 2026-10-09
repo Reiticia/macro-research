@@ -57,6 +57,21 @@ data class AiAnalysisEntity(
     val retryAfterSeconds: Long?,
 )
 
+@Entity(tableName = "ai_conversation", primaryKeys = ["eventId"])
+data class AiConversationEntity(
+    val eventId: Long,
+    val messagesJson: String,
+    val updatedAtEpochMs: Long,
+)
+
+@Entity(tableName = "ai_auto_refresh", primaryKeys = ["eventId", "method", "language"])
+data class AiAutoRefreshEntity(
+    val eventId: Long,
+    val method: Int,
+    val language: String,
+    val attemptedAtEpochMs: Long,
+)
+
 fun EconomicEvent.asEntity() = CachedEventEntity(
     id, provider, providerId, releaseGroupId, country, currency, category, event, eventZhCn, eventZhTw,
     eventTime, importance, actual, previous, consensus, forecast, unit, status,

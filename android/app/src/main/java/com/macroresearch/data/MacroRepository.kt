@@ -2,6 +2,8 @@ package com.macroresearch.data
 
 import android.util.Log
 import com.macroresearch.data.local.AiAnalysisEntity
+import com.macroresearch.data.local.AiConversationEntity
+import com.macroresearch.data.local.AiAutoRefreshEntity
 import com.macroresearch.data.local.AnalysisDao
 import com.macroresearch.data.local.EventDao
 import com.macroresearch.data.local.FollowedEventEntity
@@ -17,6 +19,8 @@ import com.macroresearch.data.model.hasEventTimeArrived
 import com.macroresearch.data.model.MarketQuotesResponse
 import com.macroresearch.data.model.MarketResponse
 import com.macroresearch.data.remote.AiAnalysisClient
+import com.macroresearch.data.remote.AiAnalysisInput
+import com.macroresearch.data.remote.AiConversationMessage
 import com.macroresearch.data.remote.BackendException
 import com.macroresearch.data.remote.BackendMeta
 import com.macroresearch.data.remote.BackendUnauthorizedException
@@ -130,6 +134,8 @@ class MacroRepository(
             invalidateReleaseRefresh()
             dao.clearCache()
             analysisDao.clearAll()
+            analysisDao.clearAllConversations()
+            analysisDao.clearAllAutoRefreshAttempts()
             marketCache.clear()
         }
         historySyncedAt = 0L
@@ -158,6 +164,8 @@ class MacroRepository(
                 pushTopicManager.unsubscribeAll(dao.followedEventIds())
                 dao.clearCache()
                 analysisDao.clearAll()
+                analysisDao.clearAllConversations()
+                analysisDao.clearAllAutoRefreshAttempts()
                 marketCache.clear()
                 historySyncedAt = 0L
                 networkPreferences.clearUpcomingSync()
@@ -504,12 +512,53 @@ class MacroRepository(
      * the network, it returns the stored result marked `rateLimited`, and a backend that is
      * itself throttled does the same for a device with an empty cache.
      */
-    suspend fun sharedAiAnalysis(eventId: Long, languageTag: String): AiAnalysis? {
+    suspend fun sharedAiAnalysis(eventId: Long, languageTag: String, refresh: Boolean = false): AiAnalysis? {
         check(dataSourceSettings.value.baseUrl.isNotBlank()) {
             "Configure a backend address to read shared analysis"
         }
         val event = localEvent(eventId).event
-        return backendSource.cachedAiAnalysis(event, languageTag, analysisMethod.value)
+        return backendSource.cachedAiAnalysis(event, languageTag, analysisMethod.value, refresh = refresh)
+    }
+
+    suspend fun aiConversation(eventId: Long): List<AiConversationMessage> {
+        val row = analysisDao.conversation(eventId) ?: return emptyList()
+        return aiAnalysisClient.decodeConversation(row.messagesJson)
+    }
+
+    suspend fun resetAiConversation(eventId: Long) {
+        analysisDao.clearConversation(eventId)
+    }
+
+    suspend fun autoRefreshAttempted(eventId: Long, method: Int, language: String): Boolean =
+        analysisDao.autoRefreshAttempt(eventId, method, language) != null
+
+    suspend fun recordAutoRefreshAttempt(eventId: Long, method: Int, language: String) {
+        analysisDao.recordAutoRefreshAttempt(
+            AiAutoRefreshEntity(eventId, method, language, System.currentTimeMillis()),
+        )
+    }
+
+    suspend fun askAiFollowUp(eventId: Long, languageTag: String, question: String): List<AiConversationMessage> {
+        require(translationPreferences.settings.value.configured) { "A personal AI key is required for conversation" }
+        require(question.isNotBlank())
+        val event = dao.event(eventId)?.asExternalModel() ?: error("Event is not available in the local cache")
+        require(hasEventTimeArrived(event.eventTime)) { "The event time has not passed yet" }
+        val report = directSource.ruleAnalysis(event) { directSource.eventMarket(event) }
+        val history = aiConversation(eventId)
+        val settings = translationPreferences.settings.value
+        val key = translationPreferences.apiKey() ?: error("Configure an API key in Settings first")
+        val assistant = aiAnalysisClient.converse(
+            AiAnalysisInput(event, report.macroSignal, report.rawSurprise, report.expectedReactions, report.observedReactions, languageTag),
+            settings, key, history, question.trim(),
+            currentBriefing = analysisDao.analysis(eventId, analysisPreferences.method.value.wireValue)?.let { cached ->
+                "Data: ${cached.dataAnalysis}\nOutlook: ${cached.marketOutlook}\nRisks: ${cached.risks.orEmpty()}"
+            },
+        )
+        val updated = history + AiConversationMessage("user", question.trim()) + assistant
+        analysisDao.upsertConversation(
+            AiConversationEntity(eventId, aiAnalysisClient.encodeConversation(updated), System.currentTimeMillis()),
+        )
+        return updated
     }
 
     suspend fun submitAnalysisFeedback(language: String, analysis: AiAnalysis, message: String) {

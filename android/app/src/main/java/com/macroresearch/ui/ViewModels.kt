@@ -9,6 +9,7 @@ import com.macroresearch.data.model.AiAnalysis
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.data.model.EventDetailResponse
 import com.macroresearch.data.model.MarketResponse
+import com.macroresearch.data.remote.AiConversationMessage
 import com.macroresearch.data.model.MarketQuotesResponse
 import com.macroresearch.ui.common.toggleImportanceSelection
 import kotlinx.coroutines.Job
@@ -281,6 +282,12 @@ data class AiAnalysisState(
     val feedbackSent: Boolean = false,
 )
 
+data class AiConversationState(
+    val messages: List<AiConversationMessage> = emptyList(),
+    val loading: Boolean = false,
+    val error: String? = null,
+)
+
 class AnalysisViewModel(
     private val id: Long,
     private val repository: MacroRepository,
@@ -289,6 +296,10 @@ class AnalysisViewModel(
     val state = _state.asStateFlow()
     private val _ai = MutableStateFlow(AiAnalysisState())
     val ai = _ai.asStateFlow()
+    private val _conversation = MutableStateFlow(AiConversationState())
+    val conversation = _conversation.asStateFlow()
+    private var refreshJob: Job? = null
+    private var refreshedRevision: Int? = null
 
     init {
         refresh()
@@ -303,6 +314,65 @@ class AnalysisViewModel(
     }
 
     fun refreshSharedAi(language: String) = viewModelScope.launch { loadAi(language) }
+
+    fun loadConversation() = viewModelScope.launch {
+        if (!repository.translationSettings.value.configured) return@launch
+        _conversation.value = _conversation.value.copy(messages = repository.aiConversation(id))
+    }
+
+    fun askFollowUp(language: String, question: String) = viewModelScope.launch {
+        _conversation.value = _conversation.value.copy(loading = true, error = null)
+        runCatching { repository.askAiFollowUp(id, language, question) }
+            .onSuccess { _conversation.value = AiConversationState(messages = it) }
+            .onFailure { _conversation.value = _conversation.value.copy(loading = false, error = it.message) }
+    }
+
+    fun resetConversation() = viewModelScope.launch {
+        repository.resetAiConversation(id)
+        _conversation.value = AiConversationState()
+    }
+
+    fun scheduleWindowEndRefresh(language: String, active: Boolean) {
+        refreshJob?.cancel()
+        if (!active || !_conversationEligible()) return
+        val event = _state.value.event ?: return
+        if (_ai.value.analysis == null) return
+        val boundary = runCatching { java.time.Instant.parse(event.eventTime).plusSeconds(3600) }.getOrNull() ?: return
+        val delayMs = java.time.Duration.between(java.time.Instant.now(), boundary).toMillis().coerceAtLeast(0)
+        val current = _ai.value.analysis ?: return
+        val refreshMethod = current.method
+        val refreshLanguage = language
+        val generatedAt = runCatching { java.time.Instant.parse(current.generatedAt) }.getOrNull() ?: return
+        if (delayMs == 0L && !generatedAt.isBefore(boundary)) return
+        refreshJob = viewModelScope.launch {
+            if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
+            if (repository.autoRefreshAttempted(id, refreshMethod, refreshLanguage)) return@launch
+            if (_ai.value.analysis == null || refreshedRevision == _ai.value.analysis?.revision) return@launch
+            val latestGenerated = runCatching { java.time.Instant.parse(_ai.value.analysis?.generatedAt) }.getOrNull()
+            if (latestGenerated != null && !latestGenerated.isBefore(boundary)) return@launch
+            val oldRevision = _ai.value.analysis?.revision
+            repository.recordAutoRefreshAttempt(id, refreshMethod, refreshLanguage)
+            refreshedRevision = oldRevision
+            _ai.value = _ai.value.copy(loading = true, error = null)
+            try {
+                val updated = if (repository.translationSettings.value.configured) {
+                    repository.generateAiAnalysis(id, language, regenerate = true)
+                } else {
+                    repository.sharedAiAnalysis(id, language, refresh = true)
+                }
+                if (updated != null) _ai.value = AiAnalysisState(analysis = updated)
+                refreshedRevision = oldRevision
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _ai.value = _ai.value.copy(loading = false, error = error.message)
+                refreshedRevision = oldRevision
+            }
+        }
+    }
+
+    private fun _conversationEligible(): Boolean =
+        repository.translationSettings.value.configured || repository.dataSourceSettings.value.baseUrl.isNotBlank()
 
     suspend fun loadAi(language: String) {
         _ai.value = AiAnalysisState(loading = true)

@@ -178,6 +178,7 @@ class BackendClient(
         languageTag: String,
         method: AnalysisMethod,
         timezone: String = ZoneId.systemDefault().id,
+        refresh: Boolean = false,
     ): AiAnalysis? = withContext(Dispatchers.IO) {
         val root = try {
             getJson("/api/v1/ai-analysis/by-provider") { url ->
@@ -186,6 +187,7 @@ class BackendClient(
                 url.addQueryParameter("language", languageTag)
                 url.addQueryParameter("method", method.wireValue.toString())
                 url.addQueryParameter("timezone", timezone)
+                if (refresh) url.addQueryParameter("refresh", "true")
             }
         } catch (missing: BackendException) {
             if (missing.statusCode == 404) return@withContext null
@@ -200,12 +202,14 @@ class BackendClient(
         languageTag: String,
         method: AnalysisMethod,
         timezone: String = ZoneId.systemDefault().id,
+        refresh: Boolean = false,
     ): AiAnalysis? = withContext(Dispatchers.IO) {
         val root = try {
             getJson("/api/v1/events/$id/ai-analysis") { url ->
                 url.addQueryParameter("language", languageTag)
                 url.addQueryParameter("method", method.wireValue.toString())
                 url.addQueryParameter("timezone", timezone)
+                if (refresh) url.addQueryParameter("refresh", "true")
             }
         } catch (missing: BackendException) {
             if (missing.statusCode == 404) return@withContext null

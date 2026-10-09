@@ -38,7 +38,7 @@ class AnalysisMethodTest {
         assertEquals(1, bodies.size)
         assertFalse(bodies.single().contains("observedReactions"))
         assertFalse(bodies.single().contains("-0.67"))
-        assertTrue(bodies.single().contains("available event data"))
+        assertTrue(bodies.single().contains("event context"))
         assertTrue(bodies.single().contains("Core CPI m/m"))
         assertEquals("Core CPI 0.3% vs 0.2% expected.", draft.dataAnalysis)
     }
@@ -83,6 +83,26 @@ class AnalysisMethodTest {
     }
 
     @Test
+    fun retriesOnceWithCompactJsonInstructionsWhenModelReplyIsTruncated() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setBody(envelope("{\\\"chain\\\":[{\\\"from\\\":\\\"Gold\\\"")))
+        server.enqueue(MockResponse().setBody(envelope(expectationJson)))
+        server.start()
+        try {
+            val client = AiAnalysisClient(OkHttpClient(), Gson())
+            val settings = TranslationSettings(true, server.url("/v1").toString().removeSuffix("/"), "test-model")
+            val draft = client.analyze(input(), settings, "test-key", AnalysisMethod.NUMBERS_ONLY)
+            assertEquals("Core CPI 0.3% vs 0.2% expected.", draft.dataAnalysis)
+            val first = server.takeRequest(1, TimeUnit.SECONDS)!!.body.readUtf8()
+            val retry = server.takeRequest(1, TimeUnit.SECONDS)!!.body.readUtf8()
+            assertFalse(first.contains("prior answer was not valid JSON"))
+            assertTrue(retry.contains("prior answer was not valid JSON"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
     fun missingPublishedValueStillProducesAnEventContextBriefingWithoutInventingNumbers() {
         val (_, bodies) = run(
             listOf(expectationJson),
@@ -94,8 +114,8 @@ class AnalysisMethodTest {
         // Gson omits absent map values, which makes the missing fields explicit to the model.
         assertFalse(body.contains("\"actual\""))
         assertFalse(body.contains("\"consensus\""))
-        assertTrue(body.contains("When actual is absent, do not describe a data surprise"))
-        assertTrue(body.contains("do not infer or fabricate them"))
+        assertTrue(body.contains("If actual is absent, do not claim a data surprise"))
+        assertTrue(body.contains("never invent figures"))
     }
 
     @Test
@@ -138,7 +158,7 @@ class AnalysisMethodTest {
         assertTrue(body.contains("Federal Reserve signals steady rates"))
         assertTrue(body.contains("https://example.com/fed-story"))
         assertTrue(body.contains("2026-09-23T14:00:00Z"))
-        assertTrue(body.contains("cite the exact supplied title"))
+        assertTrue(body.contains("cite only supplied sources"))
     }
 
     @Test

@@ -275,6 +275,7 @@
     <string name="verdict_contradicted">Contradicted by the observed move</string>
     <string name="verdict_unobserved">No usable move for this link</string>
     <string name="ai_analysis_failed">Generation failed: %1$s</string>
+    <string name="ai_response_truncated">The AI reply was incomplete. A compact retry was attempted once. If it still fails, choose a model with a larger output limit or increase its output token budget.</string>
     <string name="ai_analyze">Generate analysis</string>
     <string name="ai_reanalyze">Re-analyze</string>
     <string name="ai_analysis_hint">Uses your configured AI endpoint to explain how this release transmits through rates, the dollar and risk assets.</string>
@@ -288,7 +289,14 @@
     <string name="ai_news_saved">News settings saved. They apply when you next generate or re-analyze.</string>
     <string name="ai_requires_key">Add an API key in Settings to generate AI analysis.</string>
     <string name="ai_waiting_for_event">Analysis is available once the scheduled event time has passed.</string>
-    <string name="ai_missing_release_data">No published value is available. The analysis will use event context and any available market data without inferring missing numbers.</string>
+    <string name="ai_missing_release_data">No published value is available. This analysis uses event context and available market data; it does not attribute moves to a data surprise.</string>
+    <string name="ai_conversation">Follow-up conversation</string>
+    <string name="ai_followup_hint">Ask a follow-up about this event</string>
+    <string name="ai_followup_send">Send</string>
+    <string name="ai_followup_loading">Thinking…</string>
+    <string name="ai_reset_conversation">Reset conversation</string>
+    <string name="ai_you">You: %1$s</string>
+    <string name="ai_assistant">AI: %1$s</string>
     <string name="ai_chain">Transmission chain</string>
     <string name="ai_data_analysis">Data read</string>
     <string name="ai_market_outlook">Market outlook</string>
@@ -316,6 +324,8 @@
     <string name="release_impact_invalid_number">Published value cannot be interpreted reliably</string>
     <string name="release_impact_unknown_rule">No reliable rule for this event</string>
     <string name="release_impact_unknown_unit">Unclear units — impact unavailable</string>
+    <string name="event_unit_unconfirmed">unit unconfirmed</string>
+    <string name="event_scale_unconfirmed">scale unconfirmed</string>
     <string name="release_impact_equal">In line with expectations · No clear direction</string>
     <string name="release_impact_asset">%1$s: %2$s</string>
     <string name="release_impact_up">Bullish</string>
