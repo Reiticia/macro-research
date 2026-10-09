@@ -18,8 +18,6 @@ fun appLocale(): Locale = LocalConfiguration.current.locales[0]
 @Composable
 fun EconomicEvent.localizedValue(value: String?): String = value(
     value, appLocale(),
-    unknownUnitLabel = stringResource(R.string.event_unit_unconfirmed),
-    unknownScaleLabel = stringResource(R.string.event_scale_unconfirmed),
     peopleLabel = stringResource(R.string.release_impact_unit_people),
     barrelsLabel = stringResource(R.string.release_impact_unit_barrels),
     indexLabel = stringResource(R.string.release_impact_unit_index),

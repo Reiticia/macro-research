@@ -63,10 +63,10 @@ class CalendarUnitsTest {
         val claims = named("Initial Jobless Claims")
         assertEquals("197K people", claims.value(claims.actual))
         assertEquals("-2M barrels", named("Crude Oil Inventories").value("-2000000"))
-        assertEquals("-246B (unit unconfirmed)", named("Current Account").value("-246000000000"))
+        assertEquals("-246B", named("Current Account").value("-246000000000"))
         assertEquals("\$-246B", named("Explicit Dollar Amount").value("-246000000000"))
         assertEquals("\$-246B", named("Explicit Dollar Amount").copy(country = "Canada", currency = "CAD").value("-246000000000"))
-        assertEquals("197 (unit unconfirmed)", named("Unknown Scale").value("197"))
+        assertEquals("197", named("Unknown Scale").value("197"))
         assertEquals(ReleaseImpactStatus.DIRECTIONAL, ReleaseImpactEvaluator.evaluate(claims).status)
         assertEquals("-4000", ReleaseImpactEvaluator.evaluate(claims).surprise!!.stripTrailingZeros().toPlainString())
     }

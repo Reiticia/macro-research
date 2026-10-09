@@ -108,7 +108,7 @@ class LabelsTest {
         assertEquals("-12.34万", event.value("-123400", zh))
         assertEquals("1亿", event.value("100000000", zh))
         assertEquals("1万亿", event.value("1000000000000", zh))
-        assertEquals("1万 (unit unconfirmed)", event.copy(unit = "currency").value("10000", zh))
+        assertEquals("1万", event.copy(unit = "currency").value("10000", zh))
         assertEquals("3.5%", event.copy(unit = "%").value("3.50", zh))
         assertEquals("1萬", event.value("10000", tw))
         assertEquals("1億", event.value("100000000", tw))

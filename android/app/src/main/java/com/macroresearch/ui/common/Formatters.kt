@@ -39,8 +39,6 @@ private fun EconomicEvent.isUsReleaseImpactCountry(): Boolean = country.trim().l
 fun EconomicEvent.value(
     value: String?,
     locale: Locale = Locale.ENGLISH,
-    unknownUnitLabel: String = "unit unconfirmed",
-    unknownScaleLabel: String = "scale unconfirmed",
     peopleLabel: String = "people",
     barrelsLabel: String = "barrels",
     indexLabel: String = "index points",
@@ -49,7 +47,7 @@ fun EconomicEvent.value(
     val number = value.trim().toBigDecimalOrNull() ?: return value
     val plain = number.stripTrailingZeros().toPlainString()
     val sourceUnit = unit?.trim().orEmpty()
-    if (sourceUnit.isEmpty()) return "$plain ($unknownUnitLabel)"
+    if (sourceUnit.isEmpty()) return plain
     val sourceScale = Regex("^([KMBT])(?:\\s+(.+))?$", RegexOption.IGNORE_CASE).matchEntire(sourceUnit)
     if (sourceScale != null) {
         val scale = sourceScale.groupValues[1].uppercase(Locale.ROOT)
@@ -98,13 +96,12 @@ fun EconomicEvent.value(
                 else -> "GBP"
             }
             // FF's parser expands any suffix; TradingView's bare currency field supplies
-            // no verified magnitude. Preserve its number and disclose the missing scale.
+            // no verified magnitude. Preserve its number without guessing a multiplier.
             val amount = if (provider == "forex_factory") compact(number, locale) else plain
-            val formatted = if (code == "$") "\$$amount" else "$amount $code"
-            if (provider == "forex_factory") formatted else "$formatted ($unknownScaleLabel)"
+            if (code == "$") "\$$amount" else "$amount $code"
         }
         "count" -> compact(number, locale)
-        "number", "currency" -> "${compact(number, locale)} ($unknownUnitLabel)"
+        "number", "currency" -> compact(number, locale)
         "people", "persons", "person", "jobs" -> "$plain $peopleLabel"
         "barrels", "barrel", "bbl" -> "$plain $barrelsLabel"
         "index", "points", "point", "index points" -> "$plain $indexLabel"

@@ -324,11 +324,9 @@
     <string name="release_impact_invalid_number">Published value cannot be interpreted reliably</string>
     <string name="release_impact_unknown_rule">No reliable rule for this event</string>
     <string name="release_impact_unknown_unit">Unclear units — impact unavailable</string>
-    <string name="event_unit_unconfirmed">unit unconfirmed</string>
-    <string name="event_scale_unconfirmed">scale unconfirmed</string>
     <string name="event_unit_refresh_note">The cached record is missing source unit or scale metadata. Re-fetch this event’s date to recover it.</string>
     <string name="event_unit_refresh_action">Refresh values and units</string>
-    <string name="event_unit_refresh_result">Source queried again. Units still absent from the source remain unconfirmed.</string>
+    <string name="event_unit_refresh_result">Source queried again and available data updated.</string>
     <string name="release_impact_equal">In line with expectations · No clear direction</string>
     <string name="release_impact_asset">%1$s: %2$s</string>
     <string name="release_impact_up">Bullish</string>

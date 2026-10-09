@@ -323,11 +323,9 @@
     <string name="release_impact_invalid_number">公布值无法可靠解析，暂无判断</string>
     <string name="release_impact_unknown_rule">该事件暂无可靠规则</string>
     <string name="release_impact_unknown_unit">单位不明确，暂无可靠判断</string>
-    <string name="event_unit_unconfirmed">单位未确认</string>
-    <string name="event_scale_unconfirmed">倍率未确认</string>
     <string name="event_unit_refresh_note">缓存记录缺少来源单位或倍率，可重新查询该事件日期以补回。</string>
     <string name="event_unit_refresh_action">刷新数值与单位</string>
-    <string name="event_unit_refresh_result">已重新查询来源；来源仍未提供的单位继续保留未确认。</string>
+    <string name="event_unit_refresh_result">已重新查询来源并更新可用数据。</string>
     <string name="release_impact_equal">符合预期 · 无明显方向</string>
     <string name="release_impact_asset">%1$s：%2$s</string>
     <string name="release_impact_up">利多</string>
