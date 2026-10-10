@@ -328,6 +328,11 @@ async fn meta_is_public_while_data_requires_a_token() {
         .await
         .unwrap();
     assert_eq!(meta.status(), StatusCode::OK);
+    assert_eq!(meta.headers()["cache-control"], "no-store");
+    let body = axum::body::to_bytes(meta.into_body(), 8192).await.unwrap();
+    let meta: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(meta["apiVersion"], 1);
+    assert!(meta.get("version").is_none());
 
     for candidate in [None, Some("wrong-token")] {
         let response = router
@@ -336,8 +341,23 @@ async fn meta_is_public_while_data_requires_a_token() {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let status = router
+            .clone()
+            .oneshot(request("GET", "/api/v1/status", candidate))
+            .await
+            .unwrap();
+        assert_eq!(status.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(status.headers()["cache-control"], "no-store");
     }
 
+    let verified = router
+        .clone()
+        .oneshot(request("GET", "/api/v1/status", Some("secret-token")))
+        .await
+        .unwrap();
+    assert_eq!(verified.status(), StatusCode::OK);
+    assert_eq!(verified.headers()["cache-control"], "no-store");
     let authorized = router
         .oneshot(request(
             "GET",
@@ -347,6 +367,19 @@ async fn meta_is_public_while_data_requires_a_token() {
         .await
         .unwrap();
     assert_eq!(authorized.status(), StatusCode::OK);
+    assert_eq!(authorized.headers()["cache-control"], "no-store");
+}
+
+#[tokio::test]
+async fn explicitly_disabled_auth_exposes_status_so_clients_must_not_claim_key_validation() {
+    let mut app = app().await;
+    app.state.auth.store = Arc::new(TokenStore::new(false, app.state.events.pool().clone()));
+    let response = api::router(app.state)
+        .oneshot(request("GET", "/api/v1/status", None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
 }
 
 #[tokio::test]

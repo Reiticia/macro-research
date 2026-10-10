@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Request, State},
+    http::{HeaderValue, header::CACHE_CONTROL},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -124,12 +125,17 @@ pub async fn require_token(
             android_hash.as_deref(),
         )
         .await;
-    match caller {
+    let mut response = match caller {
         Ok(Some(id)) => {
             request.extensions_mut().insert(TokenId(id));
             next.run(request).await
         }
         Ok(None) => AppError::Unauthorized.into_response(),
         Err(error) => error.into_response(),
-    }
+    };
+    // Never let an HTTP cache turn an old successful authorization into a fresh one.
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }

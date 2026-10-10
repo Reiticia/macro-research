@@ -121,7 +121,7 @@ request_timeout_seconds = 20
 - **通用密钥（general）**无需设备标识，可在多个设备使用；**设备密钥（device）**必须携带两个头：`X-Installation-Id`（安装 UUID）和 `X-Android-Id-Hash`（客户端对 ANDROID_ID 做应用域分隔 SHA-256）。首次成功鉴权以原子条件更新绑定这对标识，后续任意一个不同/缺失均返回 401，不自动重新绑定。REST 与 WebSocket 握手使用同一校验。
 - 服务端只保存两者组合摘要，不保存原始 ANDROID_ID。标识可由定制客户端伪造，**不是硬件证明或设备私钥签名**；不能承诺抵抗主动克隆。密钥不得泄露，公网使用 HTTPS。
 - 配额/审计身份为稳定的 `api_key:<数据库编号>`，共享 AI 缓存命中仍不消耗生成配额，个人模型 Key 不经过后端。
-- 错误统一为 `{"error":{"code","message"}}`；数据库故障拒绝鉴权，不退回公开接口。只有明确设置 `auth.enabled=false` 才禁用校验，仅限本机调试。
+- 错误统一为 `{"error":{"code","message"}}`；数据库故障拒绝鉴权，不退回公开接口。只有明确设置 `auth.enabled=false` 才禁用校验，仅限本机调试。公开 meta 与所有受保护路由响应带 `Cache-Control: no-store`，避免旧 HTTP 响应掩盖协议/鉴权变化。
 
 ### Telegram 申请、审批、查看与撤销
 
@@ -156,7 +156,7 @@ request_timeout_seconds = 20
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/health` | 存活检查 |
-| GET | `/api/v1/meta` | `{version, apiVersion:1, capabilities, aiEnabled, serverTime}` |
+| GET | `/api/v1/meta` | `{name, apiVersion:1, languages, capabilities, aiEnabled, serverTime}`，不返回软件版本号 |
 | POST | `/api/v1/translations/names` | 批量读取已缓存的事件名译名（最多 100 个；只读、不触发模型） |
 
 需要 Bearer：
@@ -616,7 +616,7 @@ location / {
 ```
 
 两种拓扑下客户端填的都是 `https://<域名>`，设备端在「设置 → 数据来源 → 后端」填地址与管理员
-在 Bot 申请并经管理员批准的 API Key，点「测试连接」调 `/api/v1/meta` 校验地址、证书与协议版本，再通过 `/api/v1/status` 验证 Key（设备密钥在此可能首次绑定）。
+在 Bot 申请并经管理员批准的 API Key。新版「测试连接」强制联网读取 `/api/v1/meta` 检查内部协议兼容性，再匿名请求 `/api/v1/status` 确认鉴权开启，最后携带 Key 验证该受保护接口。只读取 meta 不算 Key 验证成功；鉴权关闭、旧/无效/已撤销或设备不匹配的 Key 均不能显示通过。设备密钥在最终授权请求中可能首次绑定；匿名探测不绑定设备。测试结果不返回/显示后端软件版本号。
 
 ## 部署
 

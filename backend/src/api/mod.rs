@@ -8,7 +8,9 @@ mod websocket;
 use axum::{
     Json, Router,
     extract::{Extension, State},
+    http::header,
     middleware,
+    response::IntoResponse,
     routing::{get, post},
 };
 use serde_json::json;
@@ -64,25 +66,27 @@ async fn health() -> &'static str {
 
 /// Capability handshake. Public so a client can validate the address, the TLS chain and the
 /// protocol version before the user commits a token.
-async fn meta(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(json!({
-        "name": "macro-research",
-        "version": env!("CARGO_PKG_VERSION"),
-        "apiVersion": 1,
-        "languages": ["en", "zh-CN", "zh-TW"],
-        "capabilities": [
-            "calendar",
-            "market",
-            "analysis",
-            "aiAnalysis",
-            "translation",
-            "translationCorrection",
-            "ws",
-            "deviceBoundApiKeys",
-        ],
-        "aiEnabled": state.ai_analysis_service.is_some(),
-        "serverTime": chrono::Utc::now().to_rfc3339(),
-    }))
+async fn meta(State(state): State<AppState>) -> impl IntoResponse {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({
+            "name": "macro-research",
+            "apiVersion": 1,
+            "languages": ["en", "zh-CN", "zh-TW"],
+            "capabilities": [
+                "calendar",
+                "market",
+                "analysis",
+                "aiAnalysis",
+                "translation",
+                "translationCorrection",
+                "ws",
+                "deviceBoundApiKeys",
+            ],
+            "aiEnabled": state.ai_analysis_service.is_some(),
+            "serverTime": chrono::Utc::now().to_rfc3339(),
+        })),
+    )
 }
 
 /// Per-source health plus the caller's quota usage.
