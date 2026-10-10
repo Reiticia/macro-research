@@ -5,6 +5,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import com.macroresearch.data.AnalysisMethod
+import com.macroresearch.data.BackendDeviceIdentity
 import com.macroresearch.data.model.AiAnalysis
 import com.macroresearch.data.model.AnalysisReport
 import com.macroresearch.data.model.EconomicEvent
@@ -26,6 +27,12 @@ import java.time.ZoneId
 /** The backend rejected the address, the protocol version, or the token. */
 class BackendUnauthorizedException(message: String) : IOException(message)
 
+/** The backend exposes protected data without authentication, so a Key cannot be verified. */
+class BackendAuthenticationDisabledException : IOException("Backend authentication is disabled")
+
+/** The public handshake reports an incompatible API protocol. */
+class BackendProtocolException : IOException("Backend API protocol is incompatible")
+
 /** The backend could not be reached, or answered with a server error. */
 class BackendUnavailableException(message: String, cause: Throwable? = null) : IOException(message, cause)
 
@@ -39,11 +46,13 @@ class BackendException(
 /** Capability handshake used by the "test connection" action. */
 data class BackendMeta(
     val name: String?,
-    val version: String?,
     val apiVersion: Int,
     val aiEnabled: Boolean,
     val capabilities: List<String>,
 )
+
+/** Returned only after a live protected request succeeds; deliberately contains no version. */
+data class BackendVerificationResult(val aiEnabled: Boolean)
 
 data class BackendSourceHealth(
     val key: String,
@@ -66,18 +75,35 @@ class BackendClient(
     private val gson: Gson,
     private val baseUrl: () -> String,
     private val token: () -> String?,
+    private val deviceIdentity: () -> BackendDeviceIdentity? = { null },
 ) {
     suspend fun meta(): BackendMeta = withContext(Dispatchers.IO) {
         val root = getJson("/api/v1/meta", authenticated = false).asJsonObject
         BackendMeta(
             name = root.stringOrNull("name"),
-            version = root.stringOrNull("version"),
             apiVersion = root.get("apiVersion")?.asInt ?: 0,
             aiEnabled = root.get("aiEnabled")?.asBoolean ?: false,
             capabilities = root.getAsJsonArray("capabilities")
                 ?.mapNotNull { it.takeUnless { value -> value.isJsonNull }?.asString }
                 .orEmpty(),
         )
+    }
+
+    /** Never treat the public handshake or a cached response as proof of a valid Key.
+     * Probe without credentials first so explicitly public/old backends cannot accept any Key.
+     * This probe carries no device identity and cannot claim a first device binding.
+     */
+    suspend fun verifyConnection(expectedApiVersion: Int): BackendVerificationResult {
+        val metadata = meta()
+        if (metadata.apiVersion != expectedApiVersion) throw BackendProtocolException()
+        try {
+            getJson("/api/v1/status", authenticated = false)
+        } catch (_: BackendUnauthorizedException) {
+            // Only a live protected request with the saved Key can complete verification.
+            status()
+            return BackendVerificationResult(aiEnabled = metadata.aiEnabled)
+        }
+        throw BackendAuthenticationDisabledException()
     }
 
     suspend fun status(): BackendStatus = withContext(Dispatchers.IO) {
@@ -253,6 +279,9 @@ class BackendClient(
         val builder = requestBuilder(path, authenticated, configure)
         // A release POST syncs the server, but cannot invalidate OkHttp's separate calendar URL.
         if (path == "/api/v1/calendar") builder.cacheControl(okhttp3.CacheControl.FORCE_NETWORK)
+        if (path == "/api/v1/meta" || path == "/api/v1/status") {
+            builder.cacheControl(okhttp3.CacheControl.Builder().noCache().noStore().build())
+        }
         val request = builder.get().build()
         return execute(request)
     }
@@ -283,6 +312,10 @@ class BackendClient(
             val accessToken = token()
             check(!accessToken.isNullOrBlank()) { "Configure the backend access token in Settings first" }
             builder.header("authorization", "Bearer $accessToken")
+            deviceIdentity()?.let { identity ->
+                builder.header("X-Installation-Id", identity.installationId)
+                builder.header("X-Android-Id-Hash", identity.androidIdHash)
+            }
         }
         return builder
     }

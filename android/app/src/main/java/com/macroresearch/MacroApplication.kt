@@ -100,11 +100,13 @@ class MacroApplication : Application() {
         }
         val networkPreferences = NetworkPreferences(this)
         val analysisPreferences = AnalysisPreferences(this)
+        val deviceIdentity = com.macroresearch.data.DeviceIdentityStore.fromContext(this)
         val backendClient = BackendClient(
             client = backendHttp,
             gson = gson,
             baseUrl = { backendPreferences.settings.value.baseUrl },
             token = backendPreferences::token,
+            deviceIdentity = deviceIdentity::identity,
         )
         val calendarClient = EconomicCalendarClient(
             http,

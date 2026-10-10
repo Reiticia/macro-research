@@ -41,7 +41,10 @@ MacroRepository            ── 缓存、翻译补全、模式切换
 - `DataSourceMode.DIRECT` 为默认值，升级后现有用户行为不变。
 - 后端地址必须是 `https`（APK 带 `usesCleartextTraffic="false"`，且令牌是 Bearer 凭据）；不允许内嵌账号密码、查询参数或路径。
 - 访问令牌用 Android Keystore 的 AES-GCM 密钥加密后保存，排除云备份与设备迁移，与翻译 Key 同一套 `SecureStore` 实现（各自独立密钥别名）。
-- 「测试连接」调 `/api/v1/meta` 校验地址、证书与 `apiVersion`，成功后记录版本。
+- 后端 API Key 在 Telegram Bot 私聊通过 `/request_key device` 或 `/request_key general` 申请并由管理员批准；旧服务端 `auth.tokens` 已废弃且不自动迁移，升级后需申请新 Key。完整 Key 只私聊发送一次，Bot 查看记录仅显示遮罩。
+- 「测试连接」先调公开 `/api/v1/meta` 校验地址、证书与内部 `apiVersion`；随后匿名请求 `/api/v1/status` 必须被拒绝，否则明确报告鉴权未开启，再使用保存的 Key 请求受保护的 `/api/v1/status`。只有最终鉴权成功才记录验证时间，失败清除验证标记；匿名探测不发送 UUID/ANDROID_ID，不会绑定设备。旧版本仅靠 meta 写入的验证标记不再被信任。所有测试请求强制联网且不缓存，不返回/显示/保存后端软件版本号；成功结果保留后端共享 AI 分析「已开启/未开启」状态（来自 meta 的 aiEnabled），不为检查状态调用模型或生成分析。有效设备 Key 在最终请求中可能首次绑定。
+- `DeviceIdentityStore` 使用独立 `device_identity` SharedPreferences 保存安装 UUID，升级/更换后端地址/清除连接配置时不重新生成。认证请求只向配置的后端发送 `X-Installation-Id` 与 `X-Android-Id-Hash`；ANDROID_ID 做应用域分隔 SHA-256，不发送原值。公开 meta/译名缓存、公开日历行情及个人模型请求均不携带这些头。REST 与 `BackendSocket` 握手支持相同头。
+- 通用 Key 可跨设备使用；设备 Key 在首次成功鉴权时原子绑定这对标识，后续缺失/不同会被拒绝，不静默解绑。安装 UUID、后端凭据排除云备份与设备迁移；卸载/清除数据、签名密钥/系统用户变化或重置可能导致绑定不再匹配，需通过 Bot 撤销后申请新 Key。此校验不是硬件证明，不能抵抗主动伪造这两个标识。
 - 后端模式下解锁中文界面无需个人 Key：事件名由服务端提供。
 - 后端模式的历史分页直接请求服务端（多国拼 `country=a,b`），失败时回落到 Room 缓存并提示。
 

@@ -25,7 +25,6 @@ data class BackendSettings(
     val mode: DataSourceMode = DataSourceMode.DIRECT,
     val baseUrl: String = "",
     val tokenConfigured: Boolean = false,
-    val verifiedVersion: String? = null,
     val lastVerifiedAt: Long = 0L,
     /** Explicit opt-in for a plain-HTTP endpoint on any address. */
     val allowCleartext: Boolean = false,
@@ -66,9 +65,10 @@ class BackendPreferences(context: Context) {
         _settings.value = loadSettings()
     }
 
-    fun markVerified(version: String?) {
+    fun markVerified() {
         preferences.edit()
-            .putString(KEY_VERIFIED_VERSION, version.orEmpty())
+            .remove(KEY_VERIFIED_VERSION)
+            .putBoolean(KEY_AUTH_VERIFIED, true)
             .putLong(KEY_VERIFIED_AT, System.currentTimeMillis())
             .apply()
         _settings.value = loadSettings()
@@ -78,6 +78,7 @@ class BackendPreferences(context: Context) {
     fun clearVerification() {
         preferences.edit()
             .remove(KEY_VERIFIED_VERSION)
+            .remove(KEY_AUTH_VERIFIED)
             .remove(KEY_VERIFIED_AT)
             .apply()
         _settings.value = loadSettings()
@@ -93,8 +94,10 @@ class BackendPreferences(context: Context) {
         mode = DataSourceMode.fromName(preferences.getString(KEY_MODE, null)),
         baseUrl = preferences.getString(KEY_BASE_URL, "").orEmpty(),
         tokenConfigured = token() != null,
-        verifiedVersion = preferences.getString(KEY_VERIFIED_VERSION, null)?.takeIf { it.isNotBlank() },
-        lastVerifiedAt = preferences.getLong(KEY_VERIFIED_AT, 0L),
+        // Old app versions marked a public /meta read as verified; never trust that marker.
+        lastVerifiedAt = if (preferences.getBoolean(KEY_AUTH_VERIFIED, false)) {
+            preferences.getLong(KEY_VERIFIED_AT, 0L)
+        } else 0L,
         allowCleartext = preferences.getBoolean(KEY_ALLOW_CLEARTEXT, false),
     )
 
@@ -104,7 +107,8 @@ class BackendPreferences(context: Context) {
         private const val KEY_BASE_URL = "backend_base_url"
         private const val KEY_TOKEN = "backend_token"
         private const val KEY_ALLOW_CLEARTEXT = "backend_allow_cleartext"
-        private const val KEY_VERIFIED_VERSION = "backend_verified_version"
+        private const val KEY_VERIFIED_VERSION = "backend_verified_version" // Legacy, only removed.
+        private const val KEY_AUTH_VERIFIED = "backend_auth_verified"
         private const val KEY_VERIFIED_AT = "backend_verified_at"
         private const val KEY_ALIAS = "macro_backend_token_v1"
 

@@ -46,7 +46,7 @@ Telegram 上点按钮审核。**后端自己就能终结 TLS**（`[server] tls_c
 不需要反向代理；证书可以用长期有效的 Cloudflare Origin Certificate。
 部署与接口细节见 [后端说明](docs/backend.md)。
 
-Android 侧在「设置 → 数据来源 → 后端」填 `https://…` 地址与管理员发放的令牌，点「测试连接」
+先在 Telegram Bot 私聊发送 `/request_key device`（设备绑定）或 `/request_key general`（通用），管理员批准后领取 API Key。Android 侧在「设置 → 数据来源 → 后端」填 `https://…` 地址与该 Key，点「测试连接」
 校验后即可使用；内网/隧道地址可在显式开启明文开关后使用 `http://…`。
 
 ## 构建
@@ -62,7 +62,7 @@ cd android
 
 ```bash
 cd backend
-cp config.example.toml config.toml   # 真实配置不入库，令牌与中转站密钥写在这份里
+cp config.example.toml config.toml   # 真实配置不入库；模型/Bot 凭据填配置，客户端 Key 由 Bot 发放
 cargo test
 cargo run
 ```

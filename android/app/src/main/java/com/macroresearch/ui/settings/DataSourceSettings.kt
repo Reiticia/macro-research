@@ -32,6 +32,8 @@ import com.macroresearch.R
 import com.macroresearch.data.BackendPreferences
 import com.macroresearch.data.DataSourceMode
 import com.macroresearch.data.MacroRepository
+import com.macroresearch.data.remote.BackendAuthenticationDisabledException
+import com.macroresearch.data.remote.BackendProtocolException
 import com.macroresearch.data.remote.BackendUnauthorizedException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -50,7 +52,7 @@ fun DataSourceSettings(repository: MacroRepository) {
     var baseUrl by rememberSaveable(settings.baseUrl) { mutableStateOf(settings.baseUrl) }
     var token by rememberSaveable { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    var status by rememberSaveable { mutableStateOf<String?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var pendingMode by remember { mutableStateOf<DataSourceMode?>(null) }
     // The backend fields must be reachable *before* the mode switches, otherwise a first-time
@@ -60,7 +62,11 @@ fun DataSourceSettings(repository: MacroRepository) {
     }
     // Strings must be resolved in composition; the click handler runs in a coroutine.
     val verifiedLabel = stringResource(R.string.backend_verified)
+    val backendAiEnabledLabel = stringResource(R.string.backend_ai_enabled)
+    val backendAiDisabledLabel = stringResource(R.string.backend_ai_disabled)
     val unauthorizedLabel = stringResource(R.string.backend_unauthorized)
+    val authenticationDisabledLabel = stringResource(R.string.backend_authentication_disabled)
+    val protocolMismatchLabel = stringResource(R.string.backend_protocol_mismatch)
     val unreachableLabel = stringResource(R.string.backend_unreachable)
     val incompleteLabel = stringResource(R.string.data_source_incomplete)
 
@@ -74,11 +80,13 @@ fun DataSourceSettings(repository: MacroRepository) {
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
+                    enabled = !busy,
                     selected = settings.mode == DataSourceMode.DIRECT,
                     onClick = { pendingMode = DataSourceMode.DIRECT },
                     label = { Text(stringResource(R.string.data_source_direct)) },
                 )
                 FilterChip(
+                    enabled = !busy,
                     selected = settings.mode == DataSourceMode.BACKEND,
                     onClick = {
                         // First tap: open the configuration. Switching still goes through the
@@ -115,6 +123,7 @@ fun DataSourceSettings(repository: MacroRepository) {
 
             if (showBackendConfig) {
                 OutlinedTextField(
+                    enabled = !busy,
                     value = baseUrl,
                     onValueChange = { baseUrl = it; error = null; status = null },
                     label = { Text(stringResource(R.string.backend_address)) },
@@ -130,6 +139,7 @@ fun DataSourceSettings(repository: MacroRepository) {
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         Checkbox(
+                            enabled = !busy,
                             checked = settings.allowCleartext,
                             onCheckedChange = {
                                 repository.setAllowBackendCleartext(it)
@@ -149,6 +159,7 @@ fun DataSourceSettings(repository: MacroRepository) {
                     )
                 }
                 OutlinedTextField(
+                    enabled = !busy,
                     value = token,
                     onValueChange = { token = it; error = null; status = null },
                     label = { Text(stringResource(R.string.backend_token)) },
@@ -203,17 +214,16 @@ fun DataSourceSettings(repository: MacroRepository) {
                             scope.launch {
                                 try {
                                     repository.saveBackendSettings(baseUrl, token)
-                                    val meta = repository.verifyBackend()
-                                    status = if (meta.version.isNullOrBlank()) {
-                                        verifiedLabel
-                                    } else {
-                                        "$verifiedLabel v${meta.version} · AI ${if (meta.aiEnabled) "on" else "off"}"
-                                    }
+                                    val result = repository.verifyBackend()
+                                    val aiLabel = if (result.aiEnabled) backendAiEnabledLabel else backendAiDisabledLabel
+                                    status = "$verifiedLabel · $aiLabel"
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
                                 } catch (failure: Exception) {
                                     error = when (failure) {
                                         is BackendUnauthorizedException -> unauthorizedLabel
+                                        is BackendAuthenticationDisabledException -> authenticationDisabledLabel
+                                        is BackendProtocolException -> protocolMismatchLabel
                                         else -> failure.message ?: unreachableLabel
                                     }
                                 } finally {

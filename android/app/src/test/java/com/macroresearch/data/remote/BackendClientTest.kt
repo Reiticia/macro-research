@@ -69,6 +69,32 @@ class BackendClientTest {
     }
 
     @Test
+    fun deviceIdentityIsSentOnlyOnAuthenticatedBackendRequestsAndChangesTakeEffect() = runBlocking {
+        var identity = com.macroresearch.data.BackendDeviceIdentity(
+            "11111111-1111-4111-8111-111111111111", "a".repeat(64),
+        )
+        val client = BackendClient(OkHttpClient(), gson, { server.url("/").toString() }, { token }, { identity })
+        server.enqueue(MockResponse().setBody("""{"sources":[]}"""))
+        client.status()
+        val protected = server.takeRequest()
+        assertEquals(identity.installationId, protected.getHeader("X-Installation-Id"))
+        assertEquals(identity.androidIdHash, protected.getHeader("X-Android-Id-Hash"))
+        server.enqueue(MockResponse().setBody("""{"apiVersion":1}"""))
+        client.meta()
+        val publicMeta = server.takeRequest()
+        assertNull(publicMeta.getHeader("authorization"))
+        assertNull(publicMeta.getHeader("X-Installation-Id"))
+        assertNull(publicMeta.getHeader("X-Android-Id-Hash"))
+        server.enqueue(MockResponse().setBody("{}"))
+        client.translations(listOf("CPI YoY"))
+        assertNull(server.takeRequest().getHeader("X-Installation-Id"))
+        identity = identity.copy(installationId = "22222222-2222-4222-8222-222222222222")
+        server.enqueue(MockResponse().setBody("""{"sources":[]}"""))
+        client.status()
+        assertEquals(identity.installationId, server.takeRequest().getHeader("X-Installation-Id"))
+    }
+
+    @Test
     fun translationCacheDoesNotRequireAnAccessToken() = runBlocking {
         server.enqueue(
             MockResponse().setBody(
@@ -188,7 +214,7 @@ class BackendClientTest {
     }
 
     @Test
-    fun metaReportsTheProtocolVersion() = runBlocking {
+    fun metaKeepsProtocolMetadataAndIgnoresLegacySoftwareVersion() = runBlocking {
         server.enqueue(
             MockResponse().setBody(
                 """{"name":"macro-research","version":"0.2.0","apiVersion":1,
@@ -197,7 +223,8 @@ class BackendClientTest {
         )
         val meta = client().meta()
         assertEquals(1, meta.apiVersion)
-        assertEquals("0.2.0", meta.version)
+        assertEquals("macro-research", meta.name)
+        assertTrue(!meta.toString().contains("0.2.0"))
         assertTrue(meta.aiEnabled)
         // /meta must be reachable before a token exists.
         assertEquals(null, server.takeRequest().getHeader("authorization"))

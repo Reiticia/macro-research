@@ -30,6 +30,7 @@ class BackendSocket(
     private val gson: Gson,
     private val urlProvider: () -> String?,
     private val tokenProvider: () -> String?,
+    private val deviceIdentity: () -> com.macroresearch.data.BackendDeviceIdentity? = { null },
 ) {
     private val _events = MutableSharedFlow<SocketEvent>(
         extraBufferCapacity = 32,
@@ -57,10 +58,12 @@ class BackendSocket(
         reconnectJob = null
         val url = urlProvider() ?: return
         val token = tokenProvider() ?: return
-        webSocket = client.newWebSocket(
-            Request.Builder().url(url).header("authorization", "Bearer $token").build(),
-            listener,
-        )
+        val request = Request.Builder().url(url).header("authorization", "Bearer $token")
+        deviceIdentity()?.let { identity ->
+            request.header("X-Installation-Id", identity.installationId)
+            request.header("X-Android-Id-Hash", identity.androidIdHash)
+        }
+        webSocket = client.newWebSocket(request.build(), listener)
     }
 
     @Synchronized

@@ -22,8 +22,8 @@ import com.macroresearch.data.remote.AiAnalysisClient
 import com.macroresearch.data.remote.AiAnalysisInput
 import com.macroresearch.data.remote.AiConversationMessage
 import com.macroresearch.data.remote.BackendException
-import com.macroresearch.data.remote.BackendMeta
 import com.macroresearch.data.remote.BackendUnauthorizedException
+import com.macroresearch.data.remote.BackendVerificationResult
 import com.macroresearch.data.remote.EconomicCalendarClient
 import com.macroresearch.data.remote.NewsRssClient
 import com.macroresearch.data.remote.PushTopicManager
@@ -175,14 +175,12 @@ class MacroRepository(
         }
     }
 
-    /** Validates the saved backend address and token against `/api/v1/meta`. */
-    suspend fun verifyBackend(): BackendMeta {
-        val meta = backendSource.meta()
-        require(meta.apiVersion == SUPPORTED_API_VERSION) {
-            "Backend speaks API version ${meta.apiVersion}; this app needs $SUPPORTED_API_VERSION"
-        }
-        backendPreferences.markVerified(meta.version)
-        return meta
+    /** Marks verified only after live protocol and credential checks; no software version result. */
+    suspend fun verifyBackend(): BackendVerificationResult {
+        backendPreferences.clearVerification()
+        val result = backendSource.verifyConnection(SUPPORTED_API_VERSION)
+        backendPreferences.markVerified()
+        return result
     }
 
     // ---------------------------------------------------------------- calendar

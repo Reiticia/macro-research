@@ -93,8 +93,13 @@ interface DataSource {
 
     suspend fun quotes(symbols: List<String>): MarketQuotesResponse
 
-    /** Validates the backend address and token; only backend mode implements this. */
+    /** Public protocol metadata; this does not authenticate a Key. */
     suspend fun meta(): com.macroresearch.data.remote.BackendMeta
+
+    /** Checks protocol, rejects an open auth gate, then authorizes a live request with the Key. */
+    suspend fun verifyConnection(expectedApiVersion: Int): com.macroresearch.data.remote.BackendVerificationResult {
+        error("Direct mode has no backend endpoint")
+    }
 }
 
 /** The original on-device pipeline: direct providers plus the local rule engine. */
@@ -252,4 +257,6 @@ class BackendDataSource(
         client.marketQuotes(symbols)
 
     override suspend fun meta(): com.macroresearch.data.remote.BackendMeta = client.meta()
+
+    override suspend fun verifyConnection(expectedApiVersion: Int) = client.verifyConnection(expectedApiVersion)
 }
