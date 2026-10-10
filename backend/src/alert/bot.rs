@@ -22,7 +22,8 @@ use crate::{
 /// Telegram long-polling loop: the admin console for the server.
 ///
 /// It answers `/status`, `/usage`, `/notifications` and `/help`, and resolves buttons attached to
-/// shared-analysis feedback. Only whitelisted chat ids are answered.
+/// shared-analysis feedback. Admin operations require whitelisted chats; private key applications
+/// and own-key records are also available to ordinary users.
 pub struct BotState {
     pub telegram: Arc<TelegramClient>,
     pub chat_ids: Vec<i64>,
@@ -38,6 +39,18 @@ pub struct BotState {
 }
 
 pub async fn bot_loop(state: BotState) {
+    loop {
+        match crate::access_keys::AccessKeys::new(state.pool.clone())
+            .recover_deliveries()
+            .await
+        {
+            Ok(()) => break,
+            Err(error) => {
+                tracing::warn!(%error, "API key delivery recovery failed; retrying before polling");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        }
+    }
     if let Err(error) = state.telegram.set_admin_commands(&state.chat_ids).await {
         tracing::warn!(%error, "Telegram command menu registration failed; polling will continue");
     }
@@ -80,6 +93,9 @@ async fn handle_update(state: &BotState, update: &Value) -> Result<(), crate::er
 }
 
 async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate::error::AppError> {
+    if super::key_commands::callback(state, callback).await? {
+        return Ok(());
+    }
     let chat_id = callback
         .get("message")
         .and_then(|message| message.get("chat"))
@@ -290,6 +306,9 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
 }
 
 async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::error::AppError> {
+    if super::key_commands::message(state, message).await? {
+        return Ok(());
+    }
     let chat_id = message
         .get("chat")
         .and_then(|chat| chat.get("id"))
@@ -353,7 +372,7 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
             return Ok(());
         }
         "/help" | "/start" => {
-            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试日历源连通性\n/translation_failed — 查询失败事件名并选择是否重译\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
+            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试日历源连通性\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
         }
         _ => return Ok(()),
     };

@@ -1,4 +1,5 @@
 pub mod bot;
+mod key_commands;
 pub mod preferences;
 pub mod service;
 pub mod state;

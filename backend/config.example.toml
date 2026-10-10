@@ -54,12 +54,11 @@ live_quote_stale_seconds = 300
 # 必须落在 Android 客户端可展示的符号集合内。
 symbols = ["nasdaq100", "sp500", "gold", "silver", "dxy", "eur_usd", "us2y", "us10y", "wti", "natural_gas", "bitcoin", "ethereum"]
 
-# 客户端访问令牌。启用鉴权却没有任何令牌时，部署脚本会把它写成 false 并告警。
+# API Key 由 Telegram Bot 申请、管理员批准后发放，摘要与绑定状态保存在 SQLite。
+# 未发放密钥时仍保持鉴权，不会因为缺少 auth.tokens 自动开放接口。
+# 旧 auth.tokens 字段已废弃：兼容读取但完全忽略，旧令牌不会自动导入。
 [auth]
 enabled = true
-# 多台设备用逗号分隔，建议按设备命名，便于审计区分：
-# tokens = "pixel:9f2c…,emulator:5a1d…"
-tokens = ""
 
 # 首次请求共享分析时按令牌计费；缓存命中不消耗配额。翻译在同步循环内部运行，
 # 不在此暴露。

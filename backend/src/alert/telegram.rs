@@ -45,6 +45,11 @@ impl TelegramClient {
             return Ok(());
         }
         let commands = json!([
+            {"command": "request_key", "description": "申请后端 API Key"},
+            {"command": "key_requests", "description": "审批 API Key 申请"},
+            {"command": "keys", "description": "查看密钥分发记录（遮罩）"},
+            {"command": "my_keys", "description": "查看自己的密钥记录"},
+            {"command": "revoke_key", "description": "撤销 API Key"},
             {"command": "status", "description": "查看数据源健康状态"},
             {"command": "usage", "description": "查看近24小时模型用量"},
             {"command": "notifications", "description": "按钮控制公布值缺失/数据源通知"},
@@ -74,6 +79,51 @@ impl TelegramClient {
                         .unwrap_or("unknown error")
                 )));
             }
+        }
+        let response = self
+            .client
+            .post(self.url("setMyCommands"))
+            .json(&json!({
+                "commands": [
+                    {"command":"request_key", "description":"申请后端 API Key（需审批）"},
+                    {"command":"my_keys", "description":"查看自己的密钥记录"},
+                    {"command":"help", "description":"查看申请帮助"},
+                    {"command":"start", "description":"开始申请"}
+                ], "scope": {"type":"default"}
+            }))
+            .send()
+            .await
+            .map_err(|error| AppError::Http(error.without_url()))?;
+        let body: Value = response
+            .json()
+            .await
+            .map_err(|error| AppError::Http(error.without_url()))?;
+        if body.get("ok").and_then(Value::as_bool) != Some(true) {
+            return Err(AppError::Provider(
+                "Telegram public command registration failed".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Key delivery is private-only and errors never echo a credential-bearing response.
+    pub async fn send_private_key(&self, chat_id: i64, text: &str) -> Result<(), AppError> {
+        if chat_id <= 0 {
+            return Err(AppError::InvalidRequest(
+                "private Telegram chat required".into(),
+            ));
+        }
+        let response = self.client.post(self.url("sendMessage"))
+            .json(&json!({"chat_id":chat_id, "text":text, "parse_mode":"HTML", "disable_web_page_preview":true}))
+            .send().await.map_err(|error| AppError::Http(error.without_url()))?;
+        let body: Value = response
+            .json()
+            .await
+            .map_err(|error| AppError::Http(error.without_url()))?;
+        if body.get("ok").and_then(Value::as_bool) != Some(true) {
+            return Err(AppError::Provider(
+                "Telegram private key delivery failed".into(),
+            ));
         }
         Ok(())
     }

@@ -199,22 +199,27 @@ impl NetworkConfig {
     }
 }
 
-/// Token gate for every `/api/v1` route. The tokens live in this file; the deployment script
-/// writes them with `0640 root:market` permissions.
+/// Token gate backed by Telegram-issued database credentials. Missing keys never disable it.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AuthConfig {
     pub enabled: bool,
-    /// Access tokens as `name:token,name:token`, one name per device so the audit can tell
-    /// callers apart.
-    pub tokens: String,
+    /// Accept old config files, but discard this field without retaining credentials.
+    #[serde(rename = "tokens")]
+    legacy_tokens: Option<serde::de::IgnoredAny>,
+}
+
+impl AuthConfig {
+    pub fn has_legacy_tokens(&self) -> bool {
+        self.legacy_tokens.is_some()
+    }
 }
 
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            tokens: String::new(),
+            legacy_tokens: None,
         }
     }
 }
@@ -581,7 +586,6 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::TokenStore;
 
     /// The one-file deployment story: everything including credentials lives in the file, and
     /// the executable's own directory is a valid default location.
@@ -655,13 +659,10 @@ market_collect_after_minutes = 60
         // The rules file is looked up next to the configuration file.
         assert_eq!(config.dir(&path), dir);
 
-        // Credentials resolve from the configuration file.
-        assert_eq!(
-            TokenStore::from_config(&config.auth)
-                .unwrap()
-                .authenticate(Some("Bearer abc123")),
-            Some("pixel".to_owned())
-        );
+        // Legacy access tokens are accepted for migration but discarded, not authenticated.
+        assert!(config.auth.enabled);
+        assert!(config.auth.has_legacy_tokens());
+        assert!(!format!("{:?}", config.auth).contains("abc123"));
         assert_eq!(
             config.translation.api_key().unwrap(),
             "relay-translation-key"

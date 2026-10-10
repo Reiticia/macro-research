@@ -32,7 +32,7 @@ cp config.example.toml config.toml   # 真实配置不入库，密钥写在这�
 cargo run
 ```
 
-配置全部在 **一个 TOML 文件** 里，包括令牌、中转站密钥与 Telegram 凭据。`config.toml` 已进
+服务配置在 **一个 TOML 文件** 里，包括中转站密钥与 Telegram 凭据；客户端 API Key 由 Bot 发放，摘要与设备绑定状态保存在 SQLite，不写入配置。`config.toml` 已进
 `.gitignore`（仓库只跟踪模板 `config.example.toml`）。查找顺序：
 
 1. `APP_CONFIG` 环境变量指向的文件（唯一可选的环境变量，通常不用设）；
@@ -53,7 +53,7 @@ log_level = ""                       # 留空用 info；RUST_LOG 环境变量仍
 
 [auth]
 enabled = true
-tokens = "pixel:9f2c…,emulator:5a1d…"   # 客户端令牌，一台设备一个名字，便于审计区分
+# API Key 通过 Telegram Bot 申请；旧 auth.tokens 已废弃并被忽略
 
 [translation]
 api_key = "sk-relay-…"               # 中转站密钥直接写在这里
@@ -88,14 +88,14 @@ te_api_key = ""                      # 仅 --backfill 需要
 
 规则：
 
-- **凭据只从配置文件读**，不再有 `API_TOKENS` / `OPENAI_API_KEY` 这类环境变量；只剩
+- **模型/Bot 凭据只从配置文件读**（客户端 API Key 除外），不再有 `API_TOKENS` / `OPENAI_API_KEY` 这类环境变量；只剩
   `APP_CONFIG`（路径）与 `RUST_LOG`（日志）两个普通变量，都不是凭据；
 - 缺某个密钥只关闭对应的子系统并打印缺哪个键，服务本身照常启动：
-  日历、行情、历史仍可用，只是没有翻译/AI/告警/鉴权；
+  内部日历、行情、历史采集仍可用，只是没有相应翻译/AI/告警；客户端访问仍受鉴权保护；
 - 文件里是明文密钥：仓库只放模板，`config.toml` 被忽略；服务器上部署脚本会把它设为
   `0640 root:market`。
 
-缺少令牌/密钥时的行为：`[auth]` 自动关闭并在日志与部署脚本中告警；Telegram 未配置时告警
+缺少凭据时的行为：`[auth] enabled=true` 即使密钥库为空也保持鉴权，绝不自动开放接口；Telegram 未配置时告警
 只写日志；翻译与 AI 未配置密钥则拒绝启动该子系统（服务本身仍能起来）。市场选择依赖 `[typesafe]`；配置不完整时记录警告并按类别或全标的兜底。
 
 ## 出网代理
@@ -116,47 +116,38 @@ request_timeout_seconds = 20
 
 ## 鉴权与配额
 
-- `[auth] enabled = true`，令牌来自配置文件的 `auth.tokens`（`name:token,name:token`），
-  常量时间比较；`GET /health` 与 `GET /api/v1/meta` 免鉴权，其余全部要求
-  `Authorization: Bearer <token>`。
-- 令牌是配额与审计身份：共享 AI 分析首次请求时才生成，并计入该令牌的每日预算；缓存命中
-  不消耗配额。客户端自带 Key 的分析直接请求模型，不经过服务端。进程内的
-  `ai_concurrency` 信号量仍限制同时打给模型的请求数。
-- 错误统一为 `{"error":{"code","message"}}`，客户端按 `code` 本地化。
-- 错误统一为 `{"error":{"code","message"}}`，客户端按 `code` 本地化。
+- `[auth] enabled = true`，访问密钥由 Telegram Bot 发放，服务端 SQLite 只保存 SHA-256 摘要、遮罩标识及状态。密钥为 CSPRNG 生成的 256 位随机值，不允许申请者自行选择。
+- 保护路由使用 `Authorization: Bearer <api_key>`。`/health`、`/api/v1/meta` 和只读 `/api/v1/translations/names` 仍公开；公开读取不能触发模型或绑定设备。
+- **通用密钥（general）**无需设备标识，可在多个设备使用；**设备密钥（device）**必须携带两个头：`X-Installation-Id`（安装 UUID）和 `X-Android-Id-Hash`（客户端对 ANDROID_ID 做应用域分隔 SHA-256）。首次成功鉴权以原子条件更新绑定这对标识，后续任意一个不同/缺失均返回 401，不自动重新绑定。REST 与 WebSocket 握手使用同一校验。
+- 服务端只保存两者组合摘要，不保存原始 ANDROID_ID。标识可由定制客户端伪造，**不是硬件证明或设备私钥签名**；不能承诺抵抗主动克隆。密钥不得泄露，公网使用 HTTPS。
+- 配额/审计身份为稳定的 `api_key:<数据库编号>`，共享 AI 缓存命中仍不消耗生成配额，个人模型 Key 不经过后端。
+- 错误统一为 `{"error":{"code","message"}}`；数据库故障拒绝鉴权，不退回公开接口。只有明确设置 `auth.enabled=false` 才禁用校验，仅限本机调试。
 
-### 令牌怎么发放、吊销
+### Telegram 申请、审批、查看与撤销
 
-令牌不在线上申请，由管理员自己生成并写进配置文件（或环境变量）；App 里填的就是这个字符串。
+先配置启用 Telegram Bot，并将管理员的**私人 Telegram 用户 ID**写入 `telegram.admin_chat_ids`。密钥操作只允许私聊，不使用群组 ID；管理员操作同时校验 Telegram 发件人和私聊身份。
 
-1. 生成一段随机值（不要用可猜的词）：
+| 命令 | 权限/用途 |
+|---|---|
+| `/request_key device` | 用户申请设备密钥；不带类型默认 device |
+| `/request_key general` | 用户申请不绑定设备的通用密钥 |
+| `/my_keys [页码]` | 用户查看自己的分发记录 |
+| `/key_requests [页码]` | 管理员查看待批申请、按钮选择批准通用/设备密钥或拒绝 |
+| `/keys [页码]` | 管理员查看所有已分发密钥的遮罩标识、编号、类型、领取者、绑定、状态和时间 |
+| `/revoke_key 编号` | 管理员撤销指定密钥，不需要重启 |
 
-   ```bash
-   openssl rand -hex 24        # Linux / Git Bash / WSL
-   ```
+完整密钥仅向申请者私聊发送一次，复制到 App「设置 → 数据来源 → 后端 → API Key」。查看记录不会重显完整密钥；丢失后撤销并重新申请。每人最多一条未决申请、每天最多三条新申请；分页每页十条。重复消息/审批不会重复生成已批准密钥，多个管理员并发审批只允许一人领取发放权。
 
-   ```powershell
-   # Windows PowerShell
-   -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
-   ```
+发放流程为 `pending → delivering → approved`：新密钥在 `delivery_pending` 状态不能鉴权，Telegram 接受私聊发送后才激活；发送失败则作废该密钥并将申请回到待审批。进程重启将未完成投递的密钥作废、申请重新待批，管理员可重试。崩溃发生在送达但未激活之间时，申请者可能收到无法使用的旧密钥，应通过 Bot 再审批生成新密钥；不保存明文密钥做重发队列。
 
-2. 以 `名字:令牌` 写进服务器上的配置文件（一台设备一个名字，审计时才能分清是谁用的）：
+撤销后新的 REST/握手请求返回 401；既有 WebSocket 在发送事件前检查状态，并每五秒检查一次，失效时关闭。正在执行的 HTTP 请求不会因此被强制中断。清除客户端数据/卸载会改变 UUID，签名或用户/系统重置可能改变 ANDROID_ID，因此设备密钥需撤销后重新申请，不提供解绑后转给其他设备。
 
-   ```bash
-   sudo nano /opt/market-analyzer/config.toml   # [auth] tokens = "pixel:…,emulator:…"
-   sudo systemctl restart market-event-analyzer
-   ```
+### 从 auth.tokens 升级
 
-   升级时 deploy.sh 会保留已填的密钥，不会被仓库里的模板覆盖。
-
-3. 把令牌填进 App（设置 → 数据来源 → 后端 → 访问令牌）。
-
-- **吊销**：从 `auth.tokens` 里删掉对应条目并重启服务即可，旧 App 立即收到 401。
-- **审计**：`/api/v1/usage` 与 Telegram `/usage` 按令牌名字区分消耗，所以建议按设备命名。
-- **本机调试**不想发令牌：`config.toml` 里 `[auth] enabled = false`，接口完全公开，
-  仅限回环或内网使用。
-- 注意：`auth.enabled = true` 而 `auth.tokens` 为空时，服务会告警并自动关闭鉴权（不会
-  默默公开接口而无人知晓）；部署脚本也会明确提示。
+- SQLx 迁移 `021_api_keys.sql` 在启动时创建密钥/申请表，保留现有事件和模型分析。
+- 旧 `auth.tokens` 字段兼容读入但直接丢弃，旧令牌**不再有效，不自动导入**；只废弃客户端访问令牌，`translation.api_key`、`ai.api_key` 等上游模型凭据不变。
+- 升级前确保 Bot 凭据和管理员私聊 ID 可用；升级后保持 `auth.enabled=true`，通过 Bot 发放新密钥并更新客户端。历史上因缺少 tokens 被部署脚本写成 false 的配置需要重新启用鉴权；新版手动部署脚本始终写 true，不携带旧自动关闭状态。
+- 此次配置模板改变，现有自动部署的模板校验可能要求人工更新部署基线；不要为了绕过校验删除数据库或关掉鉴权。旧二进制回滚还需与迁移前的数据库备份配套。
 
 ## API
 
@@ -625,7 +616,7 @@ location / {
 ```
 
 两种拓扑下客户端填的都是 `https://<域名>`，设备端在「设置 → 数据来源 → 后端」填地址与管理员
-发放的令牌，点「测试连接」调 `/api/v1/meta` 校验地址、证书与协议版本。
+在 Bot 申请并经管理员批准的 API Key，点「测试连接」调 `/api/v1/meta` 校验地址、证书与协议版本，再通过 `/api/v1/status` 验证 Key（设备密钥在此可能首次绑定）。
 
 ## 部署
 
@@ -636,7 +627,7 @@ cd backend/deploy
 sudo ./deploy.sh deploy --proxy http://127.0.0.1:7890 \
                         --tls-cert /tmp/fullchain.pem --tls-key /tmp/privkey.pem
 # 然后填密钥并重启：
-sudo nano /opt/market-analyzer/config.toml   # auth.tokens / translation.api_key / ai.api_key / telegram.*
+sudo nano /opt/market-analyzer/config.toml   # auth.enabled / translation.api_key / ai.api_key / telegram.*
 sudo systemctl restart market-event-analyzer
 sudo ./deploy.sh check-ai                    # 验证中转站连通
 ```

@@ -115,7 +115,6 @@ async fn app() -> TestApp {
     let mut config =
         AppConfig::from_path("config.example.toml").expect("config.example.toml is present");
     config.auth.enabled = true;
-    config.auth.tokens = "alice:secret-token".into();
     config.ai.enabled = false;
     config.translation.enabled = false;
     config.telegram.enabled = false;
@@ -126,6 +125,12 @@ async fn app() -> TestApp {
         .await
         .unwrap();
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    // Test-only credential, persisted as a digest exactly like a Telegram-issued key.
+    sqlx::query("INSERT INTO api_key_request (id, requester_id, message_id, requested_kind, state) VALUES (1, 42, 1, 'general', 'approved')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO api_key (request_id, owner_id, kind, token_hash, token_prefix, issued_by, status) VALUES (1, 42, 'general', ?, 'test', 42, 'active')")
+        .bind(market_event_analyzer::access_keys::hash("secret-token"))
+        .execute(&pool).await.unwrap();
 
     let events = EventRepository::new(pool.clone());
     let market = MarketRepository::new(pool.clone());
@@ -172,7 +177,7 @@ async fn app() -> TestApp {
     ));
     let quota = Arc::new(QuotaService::new(pool.clone(), config.limits.clone()));
     let auth = AuthState {
-        store: Arc::new(TokenStore::from_config(&config.auth).unwrap()),
+        store: Arc::new(TokenStore::new(config.auth.enabled, pool.clone())),
         quota: quota.clone(),
     };
     let (event_bus, _) = broadcast::channel(16);
@@ -608,4 +613,78 @@ async fn events_are_resolvable_by_provider_identity_and_names_by_cache() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn websocket_binds_the_same_device_and_revocation_closes_an_idle_connection() {
+    use market_event_analyzer::access_keys::{AccessKeys, KeyKind};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpStream,
+    };
+    const UUID_A: &str = "11111111-1111-4111-8111-111111111111";
+    const UUID_B: &str = "22222222-2222-4222-8222-222222222222";
+    async fn handshake(
+        address: std::net::SocketAddr,
+        secret: &str,
+        uuid: Option<&str>,
+    ) -> (TcpStream, String) {
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        let identity = uuid
+            .map(|uuid| {
+                format!(
+                    "X-Installation-Id: {uuid}\r\nX-Android-Id-Hash: {}\r\n",
+                    "a".repeat(64)
+                )
+            })
+            .unwrap_or_default();
+        let request = format!(
+            "GET /api/v1/ws HTTP/1.1\r\nHost: {address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nAuthorization: Bearer {secret}\r\n{identity}\r\n"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let response = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                headers.push(stream.read_u8().await.unwrap());
+                assert!(headers.len() < 8192);
+            }
+            String::from_utf8(headers).unwrap()
+        })
+        .await
+        .unwrap();
+        (stream, response)
+    }
+    let app = app().await;
+    let keys = AccessKeys::new(app.state.events.pool().clone());
+    let (request, _) = keys.request(99, 1, KeyKind::Device).await.unwrap();
+    let key = keys
+        .approve(request.id, 42, KeyKind::Device)
+        .await
+        .unwrap()
+        .unwrap();
+    keys.finish_delivery(&key, true).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, api::router(app.state)).await.unwrap();
+    });
+    let (_, missing) = handshake(address, &key.secret, None).await;
+    assert!(missing.starts_with("HTTP/1.1 401"));
+    let (mut socket, authorized) = handshake(address, &key.secret, Some(UUID_A)).await;
+    assert!(authorized.starts_with("HTTP/1.1 101"));
+    let (_, other) = handshake(address, &key.secret, Some(UUID_B)).await;
+    assert!(other.starts_with("HTTP/1.1 401"));
+    keys.revoke(key.id, 42).await.unwrap();
+    let mut frame = [0u8; 2];
+    tokio::time::timeout(
+        std::time::Duration::from_secs(7),
+        socket.read_exact(&mut frame),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(frame[0] & 0x0f, 8); // WebSocket Close, even when the event bus is idle.
+    let (_, revoked) = handshake(address, &key.secret, Some(UUID_A)).await;
+    assert!(revoked.starts_with("HTTP/1.1 401"));
+    server.abort();
 }

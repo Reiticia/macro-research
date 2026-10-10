@@ -1257,6 +1257,7 @@ dependencies = [
  "futures-util",
  "jsonwebtoken",
  "reqwest",
+ "ring",
  "rust_decimal",
  "rustls",
  "scraper",

@@ -431,20 +431,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let quota = Arc::new(QuotaService::new(pool.clone(), config.limits.clone()));
-    let token_store = match TokenStore::from_config(&config.auth) {
-        Ok(store) => Arc::new(store),
-        Err(error) => {
-            // Missing tokens leave the API open, so say it loudly on every boot.
-            tracing::warn!(%error, "auth disabled; the API is public, set auth.tokens to lock it");
-            Arc::new(
-                TokenStore::from_config(&crate::config::AuthConfig {
-                    enabled: false,
-                    tokens: config.auth.tokens.clone(),
-                })
-                .expect("a disabled auth store always resolves"),
-            )
-        }
-    };
+    if config.auth.has_legacy_tokens() {
+        tracing::warn!(
+            "auth.tokens is deprecated and ignored; request access keys through Telegram"
+        );
+    }
+    if !config.auth.enabled {
+        tracing::warn!("auth explicitly disabled; protected API routes are public");
+    }
+    let token_store = Arc::new(TokenStore::new(config.auth.enabled, pool.clone()));
     let auth = AuthState {
         store: token_store,
         quota: quota.clone(),

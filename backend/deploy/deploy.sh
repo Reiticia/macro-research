@@ -16,7 +16,7 @@
 # 说明:
 #   * 迁移文件通过 sqlx::migrate! 编译进二进制，首次启动自动建库/迁移。
 #   * config.toml 与 rules.toml 必须与二进制同目录 (WorkingDirectory)。
-#   * 密钥只写入 EnvironmentFile (/etc/market-analyzer/market-analyzer.env)，权限 0640。
+#   * 模型/Bot 凭据写入 config.toml，权限 0640；客户端 API Key 摘要保存在 SQLite。
 #   * 重复执行 deploy 即为升级：先停服 -> 备份 SQLite -> 替换二进制 -> 启动并健康检查。
 
 set -Eeuo pipefail
@@ -43,6 +43,9 @@ OUTBOUND_PROXY=""           # http://127.0.0.1:7890 或 socks5://...
 BINARY_SRC=""
 CONFIG_SRC=""   # 安装时使用的配置来源，由 require_source_tree 决定
 RUN_TESTS=0
+TLS_CERT=""
+TLS_KEY=""
+HOST_EXPLICIT=0
 
 # ---------------------------------------------------------------------------
 # 输出工具
@@ -75,8 +78,8 @@ usage() {
   --keep <N>            保留最近 N 份备份 (默认 10)
   -h, --help            显示帮助
 
-密钥（全部写在安装目录的 config.toml 里，文件权限 0640；不再使用环境变量）:
-  [auth] tokens                客户端访问令牌，格式 name:token,name:token
+配置（模型/Bot 凭据写在 config.toml，权限 0640；客户端 API Key 不写入配置）:
+  [auth] enabled              默认启用；客户端 API Key 通过 Telegram Bot 申请
   [translation] api_key        事件名翻译
   [ai] api_key                 AI 市场简报（可与翻译用不同中转站/不同 Key）
   [telegram] bot_token         Telegram 机器人令牌
@@ -105,7 +108,9 @@ parse_global() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --port)          PORT="${2:?--port 需要参数}"; shift 2 ;;
-            --host)          HOST="${2:?--host 需要参数}"; shift 2 ;;
+            --host)          HOST="${2:?--host 需要参数}"; HOST_EXPLICIT=1; shift 2 ;;
+            --tls-cert)      TLS_CERT="${2:?--tls-cert 需要参数}"; shift 2 ;;
+            --tls-key)       TLS_KEY="${2:?--tls-key 需要参数}"; shift 2 ;;
             --dir)           APP_DIR="${2:?--dir 需要参数}"; shift 2 ;;
             --user)          APP_USER="${2:?--user 需要参数}"; shift 2 ;;
             --binary)        BINARY_SRC="${2:?--binary 需要参数}"; shift 2 ;;
@@ -401,9 +406,8 @@ cmd_deploy() {
 
     # 既有配置里已经写好的密钥与开关先读出来（install 会用仓库版覆盖该文件）。
     local prev_config="${APP_DIR}/config.toml"
-    local prev_tokens prev_translation_key prev_ai_key prev_bot_token prev_chat_ids prev_te_key
-    local prev_enabled_translation prev_enabled_ai prev_enabled_telegram prev_enabled_auth
-    prev_tokens="$(toml_get "${prev_config}" auth tokens)"
+    local prev_translation_key prev_ai_key prev_bot_token prev_chat_ids prev_te_key
+    local prev_enabled_translation prev_enabled_ai prev_enabled_telegram
     prev_translation_key="$(toml_get "${prev_config}" translation api_key)"
     prev_ai_key="$(toml_get "${prev_config}" ai api_key)"
     prev_bot_token="$(toml_get "${prev_config}" telegram bot_token)"
@@ -412,7 +416,6 @@ cmd_deploy() {
     prev_enabled_translation="$(toml_get "${prev_config}" translation enabled)"
     prev_enabled_ai="$(toml_get "${prev_config}" ai enabled)"
     prev_enabled_telegram="$(toml_get "${prev_config}" telegram enabled)"
-    prev_enabled_auth="$(toml_get "${prev_config}" auth enabled)"
 
     # 停服 -> 备份
     log "停止服务 ${SERVICE_NAME}"
@@ -437,7 +440,6 @@ cmd_deploy() {
 
     # 配置文件是唯一事实来源：升级时把已配置的密钥与开关原样写回新文件（仓库版是空值）。
     # 首次部署后直接编辑 ${APP_DIR}/config.toml 填密钥并重启即可，无需重跑部署。
-    set_toml_secret "${APP_DIR}/config.toml" auth tokens "${prev_tokens}" ""
     set_toml_secret "${APP_DIR}/config.toml" translation api_key "${prev_translation_key}" ""
     set_toml_secret "${APP_DIR}/config.toml" ai api_key "${prev_ai_key}" ""
     set_toml_secret "${APP_DIR}/config.toml" telegram bot_token "${prev_bot_token}" ""
@@ -454,12 +456,10 @@ cmd_deploy() {
         set_toml_value "${APP_DIR}/config.toml" telegram enabled "${prev_enabled_telegram:-false}"
         warn "[telegram] 未配置 bot_token / admin_chat_ids：告警关闭，数据源异常只写日志"
     fi
-    if [[ -n "${prev_tokens}" ]]; then
-        set_toml_value "${APP_DIR}/config.toml" auth enabled "${prev_enabled_auth:-true}"
-    else
-        set_toml_value "${APP_DIR}/config.toml" auth enabled "${prev_enabled_auth:-false}"
-        warn "[auth] tokens 未配置：鉴权关闭，数据接口公开"
-    fi
+    # Do not carry forward the old installer's automatic false when auth.tokens was empty.
+    # Dynamic keys are persisted in SQLite; an empty key store must stay closed.
+    set_toml_value "${APP_DIR}/config.toml" auth enabled "true"
+    info "API Key 由 Telegram Bot 发放，旧 auth.tokens 不再使用；鉴权保持启用"
     info "配置与密钥保留于 ${APP_DIR}/config.toml（权限 0640）"
 
     # 直出 HTTPS：证书与私钥只读给运行用户，私钥不放在仓库与安装目录之外
@@ -541,7 +541,8 @@ cmd_status() {
         echo
         info "配置文件: ${APP_DIR}/config.toml（值不回显）"
         local section name key
-        for key in "auth:tokens" "translation:api_key" "ai:api_key" \
+        info "  [auth] API Key 由 Telegram Bot 管理，不存入配置文件"
+        for key in "translation:api_key" "ai:api_key" \
                    "telegram:bot_token" "telegram:admin_chat_ids" "backfill:te_api_key"; do
             section="${key%%:*}"
             name="${key##*:}"

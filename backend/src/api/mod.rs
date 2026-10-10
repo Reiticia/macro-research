@@ -78,6 +78,7 @@ async fn meta(State(state): State<AppState>) -> Json<serde_json::Value> {
             "translation",
             "translationCorrection",
             "ws",
+            "deviceBoundApiKeys",
         ],
         "aiEnabled": state.ai_analysis_service.is_some(),
         "serverTime": chrono::Utc::now().to_rfc3339(),
