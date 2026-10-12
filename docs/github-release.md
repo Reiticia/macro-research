@@ -1,10 +1,12 @@
-# GitHub Actions Release 构建
+# GitHub Actions 统一 Release 与客户端更新
 
 工作流：`.github/workflows/android-release.yml`。
 
-- **手动构建**：Actions → Android Release → Run workflow，选择分支或 Tag。成功后从该次运行的 `macro-research-release-<run_number>` Artifact 下载 APK；APK 文件名也包含 `versionName`，例如 `macro-research-0.6.1.apk`。手动构建不创建 GitHub Release。
-- **Tag 构建**：推送 Tag 不会自动运行；在 Actions → Android Release 对该 Tag 手动 Run workflow 后，测试、lint、构建签名 APK，并创建同名 GitHub Release，上传 APK 和 SHA-256 校验文件。
-- 重跑已发布 Tag 的构建会覆盖同名附件，保留原 Release 说明。正式版本推荐使用新 Tag，避免覆盖已分发的安装包。
+- **Tag 自动发布**：推送 `vX.Y.Z` 自动运行 **Unified Release**，校验 Tag 与客户端版本及三语说明，分别测试构建签名 APK 和同一提交的 Linux x86_64 glibc 后端；两者全部成功后才发布同一个 Release。
+- **手动运行**：Actions → Unified Release → Run workflow。选择 Tag 时同样发布；选择分支时只构建 Artifact，不创建 Release，也不部署后端。
+- Android/后端构建 Artifact 分别为 `unified-android-<run_id>`、`unified-backend-<run_id>`；完整校验后的发行 Artifact 为 `unified-release-<run_id>`，手动分支构建也会生成。APK 使用 `macro-research-<versionName>.apk` 文件名。
+- 发布先创建 draft，完整上传并重新校验附件后才转为正式 Release。已发布且相同提交、附件完整一致时重跑无操作；不完整、提交不同或校验失败时拒绝覆盖，必须使用新版本/新 Tag。未发布的同提交 draft 可重跑恢复。
+- `.github/workflows/backend-release.yml` 仅保留分支/PR 测试构建、手动 Artifact 和 main 自动部署，不单独创建 Release。统一发行后端包版本与客户端一致，但不修改 Rust Cargo crate 版本。
 
 ## 首次配置签名
 
@@ -60,6 +62,28 @@ Windows PowerShell 下编码到剪贴板（避免把私钥内容写入命令日�
 启用 Google Services 插件并在构建结束时删除。后端使用的 Firebase service-account JSON 是另一份
 包含私钥的文件，不能放入 Android Secret 或 GitHub 仓库。
 
+## 人工维护三语更新说明
+
+唯一内容源是 `android/release-notes/<versionName>.json`，例如：
+
+```json
+{
+  "schemaVersion": 1,
+  "versionName": "x.y.z",
+  "notes": {
+    "en": {"client": ["Client changes"], "backend": []},
+    "zh-CN": {"client": ["客户端变更"], "backend": []},
+    "zh-TW": {"client": ["用戶端變更"], "backend": []}
+  }
+}
+```
+
+每种语言 client 至少一条；无后端行为变化时 backend 留空。每组最多 30 条、每条最多 1000 个 UTF-16 字符，内容为纯文本，不能依赖链接或 HTML 才能理解。请人工审阅，不自动从提交记录或模型生成说明。
+
+Gradle 校验语言、版本和长度，添加 versionCode 后生成 `assets/release-notes.json`，Debug/Release 均打包。缺文件或格式错误会使构建失败。Action 从实际 APK 提取同一文件，用于发布附件、更新清单和三语 Release 正文，不使用 GitHub 自动提交说明。
+
+客户端全新安装/覆盖升级后第一次打开，无需联网即可展示当前版本说明；点击“知道了”才记录确认。跨版本升级只显示当前版本，不汇总跳过的版本。确认状态不备份、不迁移；设置页可随时重看。
+
 ## 发布版本
 
 先修改 `android/app/build.gradle.kts` 的 `versionCode` 和 `versionName`。**Tag 名不会自动修改 APK 内部版本**，每个新版本应递增 `versionCode`，以允许覆盖升级。
@@ -72,7 +96,7 @@ git tag -a "v${VERSION}" -m "Macro Research ${VERSION}"
 git push origin "v${VERSION}"
 ```
 
-推送 Tag 不会触发自动构建；随后到 **Actions → Android Release → Run workflow** 选择刚推送的 Tag 手动运行。
+推送匹配的新 Tag 即触发自动构建发布；失败时可在 **Actions → Unified Release → Run workflow** 选择该 Tag 重试。不要对已经发布的 Tag 移动提交或替换二进制。手动选择分支仅构建 Artifact。正式发布前还必须新增与 versionName 对应的三语说明文件。
 
 工作流使用 JDK 17、Android SDK 和仓库内的 Gradle Wrapper，执行：
 
@@ -82,8 +106,16 @@ bash ./gradlew --no-daemon :app:testReleaseUnitTest :app:lintRelease :app:assemb
 
 成功后，GitHub Release 包含：
 
-- `macro-research-release.apk`：正式签名安装包。
-- `SHA256SUMS.txt`：APK 校验和。
+- `macro-research-<versionName>.apk`：正式签名 APK。
+- `market-event-analyzer-<versionName>-x86_64-unknown-linux-gnu.tar.gz` 和 `.tar.gz.sha256`：同提交后端及其校验和（Ubuntu 22.04/glibc 2.35+）。
+- `release-notes.json`：与 APK 中一致的三语说明。
+- `update.json`：schemaVersion、packageName、versionCode/versionName、minSdk、apkAssetName/apkSize/apkSha256、releaseNotes。
+- `release.json`：统一版本、gitCommit、附件 name/size/sha256 清单（不含自身及总校验文件）。
+- `SHA256SUMS.txt`：全部数据附件的校验和，不包含自身。
+
+包名、版本、minSdk 从实际 APK 读取，不从 Tag 推测；后端包通过显式 `--version` 指定统一发行版本，其 README 记录同一 Git 提交，只包含安全配置模板。正式 Release 必须公开，客户端不嵌入 GitHub Token。
+
+发布辅助工具为 `scripts/release_tools.py`；可用 `python3 -m unittest discover -s scripts -p 'test_*.py'` 验证契约和发布幂等性。
 
 发布使用 GitHub 自带的 `GITHUB_TOKEN`，仅发布任务请求 `contents: write` 权限，无需配置 PAT。若组织策略限制 Actions 写权限，需由管理员放行。
 
@@ -99,3 +131,11 @@ bash ./gradlew --no-daemon :app:testReleaseUnitTest :app:lintRelease :app:assemb
 - `ANDROID_KEY_PASSWORD`
 
 签名不改变 `applicationId`，也不会把用户配置的 AI API Key 打包到 APK。
+
+## 应用内检查与安装
+
+设置页可手动检查或打开 GitHub 发布页。正式版默认每日前台检查一次（可关闭），Debug 默认关闭；后台不定时唤醒，未确认不会下载或安装。检查失败、限流或 GitHub 不可达不影响宏观数据功能。只接受完整正式统一 Release，忽略 draft、预发布及缺新清单的旧 Release；没有合格发布会明确提示，而不是声称最新版。
+
+用户确认后由 Android DownloadManager 下载，支持后台继续、前台进度与取消/重试；不允许漫游。APK 写入应用专属目录，最多 512 MiB，完成后复制到私有缓存校验 SHA-256、包名、版本、最低系统版本和当前安装签名。签名轮换首版不支持；Debug/正式签名不匹配时拒绝安装，不引导卸载或清数据。哈希不替代签名身份校验。
+
+只有用户点击安装才请求“允许此来源安装应用”，返回后再次核验 APK，通过限定缓存目录的 FileProvider 授予临时读取权限并调用系统安装器。下载完成不会后台弹出安装器；拒绝授权或取消安装均可重试。更新偏好及外部 APK 排除备份；安装后清理旧下载，缓存被清理时需重新下载。

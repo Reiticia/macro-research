@@ -1,41 +1,60 @@
-name: Android Release
+name: Unified Release
 
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Avoid two runs publishing different binaries to the same tag at the same time.
 concurrency:
-  group: android-release-${{ github.ref }}
+  group: unified-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      skip: ${{ steps.release.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Test release tooling and inspect immutable publication
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          args=()
+          if [[ "$REF_TYPE" == tag ]]; then args+=(--tag "$REF_NAME"); fi
+          python3 scripts/release_tools.py preflight "${args[@]}" --commit "$GITHUB_SHA"
+
   build:
-    name: Build signed release APK
+    name: Signed Android APK
+    needs: preflight
+    if: needs.preflight.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
         with:
-          # Override the default "tools platform-tools": the legacy tools package is unavailable.
           packages: platform-tools
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Test, lint and build signed APK
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test, lint and sign APK
         working-directory: android
         shell: bash
         env:
@@ -57,67 +76,118 @@ jobs:
           umask 077
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
           printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
-          # Use bash so the build does not depend on the executable bit from a Windows checkout.
           bash ./gradlew --no-daemon :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease
           test -s app/build/outputs/apk/release/app-release.apk
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           "$APKSIGNER" verify --verbose app/build/outputs/apk/release/app-release.apk
-
-      - name: Prepare release files
-        shell: bash
+      - name: Extract actual APK metadata and embedded notes
         run: |
           set -euo pipefail
-          mkdir -p dist
-          VERSION_NAME="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -n 1)"
-          if [[ -z "$VERSION_NAME" ]]; then
-            echo "::error::Unable to read versionName from android/app/build.gradle.kts"
-            exit 1
-          fi
-          APK_NAME="macro-research-${VERSION_NAME}.apk"
-          cp android/app/build/outputs/apk/release/app-release.apk "dist/${APK_NAME}"
-          cd dist
-          sha256sum "$APK_NAME" > SHA256SUMS.txt
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          python3 scripts/release_tools.py apk --apk android/app/build/outputs/apk/release/app-release.apk --aapt "$AAPT" --out dist
+      - uses: actions/upload-artifact@v4
         with:
-          name: macro-research-release-${{ github.run_number }}
+          name: unified-android-${{ github.run_id }}
+          overwrite: true
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  backend:
+    name: Linux x86_64 backend from the same commit
+    needs: preflight
+    if: needs.preflight.outputs.skip != 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend -> target
+          key: unified-x86_64-unknown-linux-gnu
+      - name: Test backend and package unified version
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          BACKEND_GIT_COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          bash backend/deploy/test-auto-deploy.sh
+          bash backend/scripts/test-release-version.sh
+          cd backend
+          cargo fmt --all -- --check
+          cargo test --locked
+          bash ./scripts/build-release.sh --version "$RELEASE_VERSION" --target x86_64-unknown-linux-gnu --out "$GITHUB_WORKSPACE/dist" --no-tests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unified-backend-${{ github.run_id }}
+          overwrite: true
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  bundle:
+    name: Verify complete unified distribution
+    needs: [preflight, build, backend]
+    if: needs.preflight.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      # Fixed per-run names plus replaceable INTERNAL artifacts support both full and failed-job reruns.
+      # Never merge an earlier bundled artifact over the two current build outputs.
+      - uses: actions/download-artifact@v4
+        with:
+          name: unified-android-${{ github.run_id }}
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: unified-backend-${{ github.run_id }}
+          path: dist
+      - name: Assemble and verify all attachments, including manual branch builds
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ "$REF_TYPE" == tag ]]; then args+=(--tag "$REF_NAME"); fi
+          python3 scripts/release_tools.py assemble "${args[@]}" --commit "$GITHUB_SHA" --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unified-release-${{ github.run_id }}
+          overwrite: true
           path: dist/*
           if-no-files-found: error
           retention-days: 30
 
   publish:
-    name: Publish GitHub Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    name: Verify all attachments and publish together
+    needs: [preflight, bundle]
+    if: github.ref_type == 'tag' && needs.preflight.outputs.skip != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
-      - name: Download release files
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          name: macro-research-release-${{ github.run_number }}
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: unified-release-${{ github.run_id }}
           path: dist
-
-      - name: Create release and upload assets
-        shell: bash
+      - name: Publish only a verified complete draft
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG_NAME: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          # Re-running a tag build updates the attachments without replacing release notes.
-          APK_PATH="$(find dist -maxdepth 1 -type f -name 'macro-research-*.apk' -print -quit)"
-          if [[ -z "$APK_PATH" ]]; then
-            echo "::error::Versioned APK artifact was not found"
-            exit 1
-          fi
-          if gh release view "$TAG_NAME" > /dev/null 2>&1; then
-            gh release upload "$TAG_NAME" "$APK_PATH" dist/SHA256SUMS.txt --clobber
-          else
-            gh release create "$TAG_NAME" "$APK_PATH" dist/SHA256SUMS.txt \
-              --verify-tag --title "$TAG_NAME" --generate-notes
-          fi
+          python3 scripts/release_tools.py verify --tag "$RELEASE_TAG" --commit "$GITHUB_SHA" --out dist
+          python3 scripts/release_tools.py publish --tag "$RELEASE_TAG" --commit "$GITHUB_SHA" --out dist

@@ -13,7 +13,7 @@
 #   market-event-analyzer-<version>-<target>.tar.gz          二进制 + config.toml + rules.toml
 #   market-event-analyzer-<version>-<target>.tar.gz.sha256   校验和
 #
-# 版本号优先级: --version > $RELEASE_VERSION > git tag (CI 的 tag) > Cargo.toml
+# 版本号优先级: --version > $RELEASE_VERSION > Cargo.toml (统一 Release 显式传入客户端版本)
 
 set -Eeuo pipefail
 
@@ -82,18 +82,14 @@ info "target: ${TARGET}"
 # ---------------------------------------------------------------------------
 # 版本号
 # ---------------------------------------------------------------------------
-resolve_version() {
-    if [[ -n "${VERSION}" ]]; then printf '%s' "${VERSION}"; return; fi
-    if [[ -n "${RELEASE_VERSION:-}" ]]; then printf '%s' "${RELEASE_VERSION}"; return; fi
-    if [[ "${GITHUB_REF_TYPE:-}" == "tag" && -n "${GITHUB_REF_NAME:-}" ]]; then
-        printf '%s' "${GITHUB_REF_NAME#v}"; return
-    fi
-    local tag
-    tag="$(git -C "${BACKEND_DIR}" describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)"
-    if [[ -n "${tag}" ]]; then printf '%s' "${tag#v}"; return; fi
-    awk -F'"' '/^version[[:space:]]*=/{ print $2; exit }' "${BACKEND_DIR}/Cargo.toml"
-}
-VERSION="$(resolve_version)"
+source "${SCRIPT_DIR}/release-version.sh"
+VERSION="$(resolve_release_version "${BACKEND_DIR}/Cargo.toml" "${VERSION}")"
+BUILD_COMMIT="${BACKEND_GIT_COMMIT:-$(git -C "${BACKEND_DIR}" rev-parse HEAD 2>/dev/null || printf unknown)}"
+if [[ "${BUILD_COMMIT}" == unknown ]]; then
+    unset BACKEND_GIT_COMMIT
+else
+    export BACKEND_GIT_COMMIT="${BUILD_COMMIT}"
+fi
 [[ -n "${VERSION}" ]] || die "无法确定版本号，请用 --version 指定"
 
 # ---------------------------------------------------------------------------
@@ -169,6 +165,8 @@ install -m 0644 "${BACKEND_DIR}/rules.toml"  "${pkg_dir}/rules.toml"
 cat > "${pkg_dir}/README.txt" <<EOF
 ${PKG_NAME} ${VERSION} (${TARGET})
 构建时间: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+构建提交: ${BUILD_COMMIT}
+发行包版本与 Rust Cargo crate 版本独立。
 
 文件:
   ${BIN_NAME}    后端可执行文件
@@ -183,14 +181,12 @@ ${PKG_NAME} ${VERSION} (${TARGET})
 环境变量:
   APP_CONFIG                指定配置文件路径 (默认 ./config.toml)
   RUST_LOG                  日志级别，如 market_event_analyzer=info,tower_http=info
-  API_TOKENS                客户端访问令牌 name:token,name:token (auth.enabled = true 时必需)
-  OPENAI_API_KEY            事件名翻译与 AI 分析 (translation / ai 开启时必需)
-  TELEGRAM_BOT_TOKEN        Telegram 机器人令牌
-  TELEGRAM_ADMIN_CHAT_IDS   管理员 chat id 白名单，逗号分隔
-  TE_API_KEY                仅 --backfill 历史补采需要
+模型、Telegram 等凭据只从部署配置读取。config.toml 为安全模板，请自行填写。
+客户端 API Key 通过配置好的 Telegram Bot 申请、经管理员批准后发放。
 
 用 systemd 安装 (推荐，需要仓库的 deploy/deploy.sh):
-  sudo API_TOKENS="alice:$(openssl rand -hex 24)" ./deploy.sh deploy --binary /path/to/${BIN_NAME} --proxy http://127.0.0.1:7890
+  sudo ./deploy.sh deploy --binary /path/to/${BIN_NAME}
+详细配置、网络代理与运维说明参见仓库 docs/backend.md。
 EOF
 
 tar -C "${OUT_DIR}" -czf "${archive}" "$(basename "${pkg_dir}")"

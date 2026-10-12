@@ -659,7 +659,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 ### GitHub Actions
 
 `.github/workflows/backend-release.yml`：后端/工作流文件推送、PR 与手动触发都会构建验证
-Linux x86_64；Tag 运行还会创建 Release。`main` 推送构建成功后，最后的 job 引用独立的
+Linux x86_64；不再单独创建 Release，push 仅匹配分支。客户端 `vX.Y.Z` Tag 由 `.github/workflows/android-release.yml` 同时构建同提交 Android APK 与后端，全部校验后发布统一 Release。后端发行包版本通过 `--version` 显式采用统一版本，不联动修改 Rust Cargo 版本；普通构建只按显式参数、RELEASE_VERSION、Cargo.toml 解析，不读取 Android Tag。更新说明和附件契约见 [统一 Release](github-release.md)。`main` 推送构建成功后，最后的 job 引用独立的
 `.github/workflows/backend-deploy.yml`，使用 SSH 在 `macro-research` tmux 窗格中停止旧后端、
 备份，再替换并启动 `/root/macro-research/market-event-analyzer`，检查新进程持续运行。配置模板变化
 或未确认服务器配置基线时跳过部署、要求人工处理。SSH Secrets、tmux 目标、首次配置基线

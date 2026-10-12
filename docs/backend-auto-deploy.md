@@ -2,7 +2,8 @@
 
 ## 工作流结构
 
-- 构建：`.github/workflows/backend-release.yml`。
+- 分支构建与自动部署：`.github/workflows/backend-release.yml`；该工作流不单独创建 Release。
+- 统一发布：`.github/workflows/android-release.yml`，客户端 `vX.Y.Z` Tag 同时构建同提交 APK 与 Linux 后端。统一 Release 不部署生产；分支 main 的部署行为保持不变。
 - 部署：独立的可复用工作流 `.github/workflows/backend-deploy.yml`，仅提供 `workflow_call`。
 - 构建工作流最后的 `deploy` job 使用 `needs: build` 和 `uses: ./.github/workflows/backend-deploy.yml` 引用部署工作流。
 - **仅推送 `main` 且测试、构建、上传 Artifact 全部成功后自动部署**。PR、其他分支、Tag 和手动构建不会部署。
