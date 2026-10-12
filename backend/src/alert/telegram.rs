@@ -1,4 +1,10 @@
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
 use serde_json::{Value, json};
+use tokio::sync::Mutex;
 
 use crate::error::AppError;
 
@@ -12,6 +18,8 @@ pub struct TelegramClient {
     client: reqwest::Client,
     api_base: String,
     token: String,
+    /// Cache successful and failed discovery; concurrent public requests share one lookup.
+    bot_link: Arc<Mutex<Option<(Instant, Option<String>)>>>,
 }
 
 /// One button of an inline keyboard row.
@@ -31,7 +39,48 @@ impl TelegramClient {
             client,
             api_base: api_base.into().trim_end_matches('/').to_owned(),
             token: token.into(),
+            bot_link: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Only a validated public username leaves the server, never the Bot API token or URL.
+    pub async fn public_bot_url(&self) -> Option<String> {
+        let mut cached = self.bot_link.lock().await;
+        if let Some((checked_at, url)) = cached.as_ref()
+            && checked_at.elapsed() < Duration::from_secs(300)
+        {
+            return url.clone();
+        }
+        let url = self.discover_bot_url().await;
+        *cached = Some((Instant::now(), url.clone()));
+        url
+    }
+
+    async fn discover_bot_url(&self) -> Option<String> {
+        let response = self
+            .client
+            .post(self.url("getMe"))
+            .json(&json!({}))
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        let body: Value = response.json().await.ok()?;
+        if body["ok"].as_bool() != Some(true) || body["result"]["is_bot"].as_bool() != Some(true) {
+            return None;
+        }
+        let username = body["result"]["username"].as_str()?;
+        if !(5..=32).contains(&username.len())
+            || !username
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'_')
+        {
+            return None;
+        }
+        Some(format!("https://t.me/{username}"))
     }
 
     fn url(&self, method: &str) -> String {

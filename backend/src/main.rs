@@ -499,6 +499,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         analysis_service,
         ai_analysis_service,
         health: health.clone(),
+        telegram: telegram.clone(),
         llm_usage: llm_usage.clone(),
         auth,
         quota,

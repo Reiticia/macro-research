@@ -117,11 +117,15 @@ request_timeout_seconds = 20
 ## 鉴权与配额
 
 - `[auth] enabled = true`，访问密钥由 Telegram Bot 发放，服务端 SQLite 只保存 SHA-256 摘要、遮罩标识及状态。密钥为 CSPRNG 生成的 256 位随机值，不允许申请者自行选择。
-- 保护路由使用 `Authorization: Bearer <api_key>`。`/health`、`/api/v1/meta` 和只读 `/api/v1/translations/names` 仍公开；公开读取不能触发模型或绑定设备。
+- 保护路由使用 `Authorization: Bearer <api_key>`。`/health`、`/api/v1/meta`、`/api/v1/access-key-bot` 和只读 `/api/v1/translations/names` 仍公开；公开读取不能触发模型或绑定设备。
 - **通用密钥（general）**无需设备标识，可在多个设备使用；**设备密钥（device）**必须携带两个头：`X-Installation-Id`（安装 UUID）和 `X-Android-Id-Hash`（客户端对 ANDROID_ID 做应用域分隔 SHA-256）。首次成功鉴权以原子条件更新绑定这对标识，后续任意一个不同/缺失均返回 401，不自动重新绑定。REST 与 WebSocket 握手使用同一校验。
 - 服务端只保存两者组合摘要，不保存原始 ANDROID_ID。标识可由定制客户端伪造，**不是硬件证明或设备私钥签名**；不能承诺抵抗主动克隆。密钥不得泄露，公网使用 HTTPS。
 - 配额/审计身份为稳定的 `api_key:<数据库编号>`，共享 AI 缓存命中仍不消耗生成配额，个人模型 Key 不经过后端。
 - 错误统一为 `{"error":{"code","message"}}`；数据库故障拒绝鉴权，不退回公开接口。只有明确设置 `auth.enabled=false` 才禁用校验，仅限本机调试。公开 meta 与所有受保护路由响应带 `Cache-Control: no-store`，避免旧 HTTP 响应掩盖协议/鉴权变化。
+
+### Telegram 机器人公开入口
+
+`GET /api/v1/access-key-bot` 无需鉴权，返回 `{"telegramBotUrl":"https://t.me/<username>"}`；未启用/未配置 Telegram 或发现失败时返回 `{"telegramBotUrl":null}`。客户端在 API Key 旁点击「获取 API Key」即可打开，无需先取得 Key。服务端根据现有 `[telegram]` 配置通过 Bot API `getMe` 自动读取公开用户名，不需要额外填写机器人地址，也不会返回 Bot token、API 地址或管理员信息。查询使用现有 Telegram HTTP 客户端/代理，单次超时 10 秒，成功与失败均缓存 5 分钟并合并并发请求；此接口不发放 Key、不绑定设备、不调用模型，响应为 `Cache-Control: no-store`。旧后端需升级后才能使用按钮。
 
 ### Telegram 申请、审批、查看与撤销
 
@@ -157,6 +161,7 @@ request_timeout_seconds = 20
 |---|---|---|
 | GET | `/health` | 存活检查 |
 | GET | `/api/v1/meta` | `{name, apiVersion:1, languages, capabilities, aiEnabled, serverTime}`，不返回软件版本号 |
+| GET | `/api/v1/access-key-bot` | 公开 `{telegramBotUrl}`，已配置 Bot 的 Telegram HTTPS 链接或 `null` |
 | POST | `/api/v1/translations/names` | 批量读取已缓存的事件名译名（最多 100 个；只读、不触发模型） |
 
 需要 Bearer：

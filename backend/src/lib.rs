@@ -46,6 +46,7 @@ pub struct AppState {
     pub analysis_service: Arc<AnalysisService>,
     pub ai_analysis_service: Option<Arc<AiAnalysisService>>,
     pub health: Arc<HealthRegistry>,
+    pub telegram: Option<Arc<alert::TelegramClient>>,
     /// Model-call audit log; absent only when auditing is switched off.
     pub llm_usage: Option<Arc<LlmUsageRepository>>,
     pub auth: AuthState,

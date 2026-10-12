@@ -191,6 +191,7 @@ async fn app() -> TestApp {
         analysis_service,
         ai_analysis_service: None::<Arc<AiAnalysisService>>,
         health,
+        telegram: None,
         llm_usage: None,
         auth,
         quota,
@@ -315,6 +316,52 @@ async fn release_timeout_does_not_end_market_collection_or_delete_evidence() {
     let active = app.state.events.market_active().await.unwrap();
     assert!(active.iter().any(|event| event.id == pending_id));
     assert!(active.iter().all(|event| event.id != finished_id));
+}
+
+#[tokio::test]
+async fn access_key_bot_discovery_is_public_and_optional() {
+    let app = app().await;
+    let response = api::router(app.state)
+        .oneshot(request("GET", "/api/v1/access-key-bot", None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body, serde_json::json!({"telegramBotUrl": null}));
+}
+
+#[tokio::test]
+async fn access_key_bot_returns_configured_bots_public_link_without_authentication() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let telegram = axum::Router::new().route("/botfake-token/getMe", axum::routing::post(|| async {
+        axum::Json(serde_json::json!({"ok": true, "result": {"is_bot": true, "username": "example_bot"}}))
+    }));
+    let task = tokio::spawn(async move { axum::serve(listener, telegram).await.unwrap() });
+    let mut app = app().await;
+    app.state.telegram = Some(Arc::new(market_event_analyzer::alert::TelegramClient::new(
+        reqwest::Client::new(),
+        base,
+        "fake-token",
+    )));
+    let response = api::router(app.state)
+        .oneshot(request("GET", "/api/v1/access-key-bot", None))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 8192)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({"telegramBotUrl": "https://t.me/example_bot"})
+    );
+    task.abort();
 }
 
 #[tokio::test]

@@ -50,6 +50,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/meta", get(meta))
+        .route("/api/v1/access-key-bot", get(access_key_bot))
         // Existing event-name translations contain no private or quota-bearing data. Keeping
         // this lookup public lets direct-mode readers localize names without a full data-source
         // token; the bounded request cannot trigger model work or mutate the cache.
@@ -86,6 +87,18 @@ async fn meta(State(state): State<AppState>) -> impl IntoResponse {
             "aiEnabled": state.ai_analysis_service.is_some(),
             "serverTime": chrono::Utc::now().to_rfc3339(),
         })),
+    )
+}
+
+/// Public discovery is needed before the user has an API Key. It cannot issue keys or bind devices.
+async fn access_key_bot(State(state): State<AppState>) -> impl IntoResponse {
+    let url = match state.telegram.as_ref() {
+        Some(telegram) => telegram.public_bot_url().await,
+        None => None,
+    };
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({"telegramBotUrl": url})),
     )
 }
 

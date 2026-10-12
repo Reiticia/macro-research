@@ -6,6 +6,8 @@ pub mod state;
 pub mod telegram;
 
 #[cfg(test)]
+mod telegram_tests;
+#[cfg(test)]
 mod test_support;
 
 pub use service::{AlertService, Severity};
