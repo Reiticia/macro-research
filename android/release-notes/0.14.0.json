@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "versionName": "0.14.0",
+  "notes": {
+    "en": {
+      "client": [
+        "Check for updates in Settings, with optional daily foreground checks and verified in-app APK downloads.",
+        "Read this version’s release notes offline after installing or upgrading, or revisit them in Settings.",
+        "Open the configured Telegram bot from the backend API Key field to request a key."
+      ],
+      "backend": ["Expose the configured Telegram bot’s public link without exposing bot credentials."]
+    },
+    "zh-CN": {
+      "client": [
+        "设置页新增检查更新，支持每日前台自动检查和校验后的应用内 APK 下载。",
+        "安装或升级后首次打开可离线查看本次更新内容，也可在设置页重新查看。",
+        "后端 API Key 旁新增获取按钮，可打开已配置的 Telegram 机器人申请密钥。"
+      ],
+      "backend": ["提供已配置 Telegram 机器人的公开链接，不暴露机器人凭据。"]
+    },
+    "zh-TW": {
+      "client": [
+        "設定頁新增檢查更新，支援每日前景自動檢查及驗證後的應用程式內 APK 下載。",
+        "安裝或升級後首次開啟可離線查看本次更新內容，也可在設定頁重新查看。",
+        "後端 API Key 旁新增取得按鈕，可開啟已設定的 Telegram 機器人申請金鑰。"
+      ],
+      "backend": ["提供已設定 Telegram 機器人的公開連結，不暴露機器人憑證。"]
+    }
+  }
+}

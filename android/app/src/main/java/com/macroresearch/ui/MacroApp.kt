@@ -58,6 +58,9 @@ fun MacroApp(
     repository: MacroRepository,
     notificationEventId: Long? = null,
     onNotificationHandled: () -> Unit = {},
+    updates: com.macroresearch.update.UpdateCoordinator? = null,
+    onShowWhatsNew: () -> Unit = {},
+    onInstallUpdate: () -> Unit = {},
 ) {
     val navController = rememberNavController()
     val initialNotificationEventId = remember { notificationEventId }
@@ -149,7 +152,7 @@ fun MacroApp(
             composable("history") {
                 HistoryScreen(repository, padding) { navController.navigate("event/$it") }
             }
-            composable("settings") { SettingsScreen(repository, padding) }
+            composable("settings") { SettingsScreen(repository, padding, updates, onShowWhatsNew, onInstallUpdate) }
             composable("followed") {
                 FollowedEventsScreen(
                     repository = repository,

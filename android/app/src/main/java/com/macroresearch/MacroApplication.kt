@@ -39,6 +39,10 @@ class MacroApplication : Application() {
         private set
     lateinit var notificationCenter: NotificationCenter
         private set
+    lateinit var updates: com.macroresearch.update.UpdateCoordinator
+        private set
+    lateinit var whatsNew: com.macroresearch.update.WhatsNewCoordinator
+        private set
     private lateinit var backendPreferences: BackendPreferences
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -141,6 +145,18 @@ class MacroApplication : Application() {
             pushTopicManager = pushTopicManager,
         )
         notificationCenter = NotificationCenter(this)
+        val notes = assets.open("release-notes.json").use {
+            com.macroresearch.update.UpdateContract.parseNotes(com.macroresearch.update.UpdateContract.json(it.readBytes()))
+        }
+        check(notes.versionCode == BuildConfig.VERSION_CODE.toLong() && notes.versionName == BuildConfig.VERSION_NAME)
+        whatsNew = com.macroresearch.update.WhatsNewCoordinator(notes, com.macroresearch.update.AtomicWhatsNewStore(noBackupFilesDir))
+        updates = com.macroresearch.update.UpdateCoordinator(
+            checker = com.macroresearch.update.GitHubUpdateClient(com.macroresearch.update.GitHubTransport()),
+            store = com.macroresearch.update.UpdatePreferences(this, BuildConfig.DEBUG),
+            downloader = com.macroresearch.update.AndroidUpdateDownloader(this, BuildConfig.VERSION_CODE.toLong()),
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+            installedCode = BuildConfig.VERSION_CODE.toLong(), sdk = android.os.Build.VERSION.SDK_INT,
+        )
     }
 
     /** Reconciles the local star list with FCM topics when backend mode becomes active. */

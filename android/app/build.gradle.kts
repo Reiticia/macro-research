@@ -1,3 +1,6 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -54,6 +57,40 @@ android {
     }
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
 }
+
+// One reviewed, versioned source supplies both the APK and the public Release notes.
+val notesVersion = android.defaultConfig.versionName!!
+val notesCode = android.defaultConfig.versionCode!!
+val notesSource = rootProject.file("release-notes/$notesVersion.json")
+val generatedNotes = layout.buildDirectory.dir("generated/releaseNotes/assets")
+val generateReleaseNotes = tasks.register("generateReleaseNotes") {
+    inputs.file(notesSource)
+    inputs.property("versionCode", notesCode)
+    outputs.dir(generatedNotes)
+    doLast {
+        @Suppress("UNCHECKED_CAST")
+        val document = JsonSlurper().parse(notesSource) as Map<String, Any?>
+        require(document["schemaVersion"] == 1 && document["versionName"] == notesVersion) {
+            "Release notes schema/version does not match this build"
+        }
+        val languages = document["notes"] as? Map<*, *> ?: error("Missing release notes")
+        require(languages.keys == setOf("en", "zh-CN", "zh-TW")) { "All three release-note languages are required" }
+        languages.values.forEach { language ->
+            val groups = language as? Map<*, *> ?: error("Invalid release notes language")
+            require(groups.keys == setOf("client", "backend"))
+            groups.forEach { (group, content) ->
+                val items = content as? List<*> ?: error("Notes must be arrays")
+                require(items.size <= 30 && (group != "client" || items.isNotEmpty()))
+                require(items.all { it is String && it.isNotBlank() && it.length <= 1000 })
+            }
+        }
+        val output = generatedNotes.get().file("release-notes.json").asFile
+        output.parentFile.mkdirs()
+        output.writeText(JsonOutput.toJson(document + ("versionCode" to notesCode)), Charsets.UTF_8)
+    }
+}
+android.sourceSets.getByName("main").assets.srcDir(generatedNotes)
+tasks.named("preBuild").configure { dependsOn(generateReleaseNotes) }
 
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))

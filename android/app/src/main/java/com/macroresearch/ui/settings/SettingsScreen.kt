@@ -58,7 +58,13 @@ import com.macroresearch.ui.theme.ResearchLayout
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen(repository: MacroRepository, padding: PaddingValues) {
+fun SettingsScreen(
+    repository: MacroRepository,
+    padding: PaddingValues,
+    updates: com.macroresearch.update.UpdateCoordinator? = null,
+    onShowWhatsNew: () -> Unit = {},
+    onInstallUpdate: () -> Unit = {},
+) {
     val selectedCountries by repository.selectedCountries.collectAsStateWithLifecycle()
     val countries = CountryPreferences.SUPPORTED_COUNTRIES.associateWith { it in selectedCountries }
     val selectedMarkets by repository.selectedMarkets.collectAsStateWithLifecycle()
@@ -89,6 +95,7 @@ fun SettingsScreen(repository: MacroRepository, padding: PaddingValues) {
         ) {
             item { DataSourceSettings(repository) }
             item { DisplaySettingsCard() }
+            if (updates != null) item { AppUpdateSettings(updates, onShowWhatsNew, onInstallUpdate) }
             if (dataSource.mode == DataSourceMode.DIRECT) {
                 item { DataNetworkSettings(repository) }
             }
