@@ -93,6 +93,9 @@ interface DataSource {
 
     suspend fun quotes(symbols: List<String>): MarketQuotesResponse
 
+    /** Optional public key-application link for an address that has not been saved yet. */
+    suspend fun keyRequestBotUrl(address: String): String? = null
+
     /** Public protocol metadata; this does not authenticate a Key. */
     suspend fun meta(): com.macroresearch.data.remote.BackendMeta
 
@@ -257,6 +260,8 @@ class BackendDataSource(
         client.marketQuotes(symbols)
 
     override suspend fun meta(): com.macroresearch.data.remote.BackendMeta = client.meta()
+
+    override suspend fun keyRequestBotUrl(address: String) = client.keyRequestBotUrl(address)
 
     override suspend fun verifyConnection(expectedApiVersion: Int) = client.verifyConnection(expectedApiVersion)
 }

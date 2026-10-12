@@ -52,6 +52,37 @@ class BackendClientTest {
     """.trimIndent()
 
     @Test
+    fun keyRequestUsesUnsavedAddressWithoutCredentialsOrDeviceIdentity() = runBlocking {
+        val backend = BackendClient(
+            OkHttpClient(), gson, { "https://saved.example" }, { token },
+            { com.macroresearch.data.BackendDeviceIdentity("installation", "hash") },
+        )
+        server.enqueue(MockResponse().setBody("""{"telegramBotUrl":"https://t.me/example_bot"}"""))
+        assertEquals("https://t.me/example_bot", backend.keyRequestBotUrl(server.url("/").toString().trimEnd('/')))
+        val request = server.takeRequest()
+        assertEquals("/api/v1/access-key-bot", request.path)
+        assertNull(request.getHeader("authorization"))
+        assertNull(request.getHeader("X-Installation-Id"))
+        assertNull(request.getHeader("X-Android-Id-Hash"))
+        assertTrue(request.getHeader("Cache-Control").orEmpty().contains("no-store"))
+    }
+
+    @Test
+    fun keyRequestRejectsMissingAndUnsafeLinks() = runBlocking {
+        val urls = listOf(
+            null, "tg://resolve?domain=example_bot", "https://evil.example/example_bot",
+            "http://t.me/example_bot", "https://user:pass@t.me/example_bot",
+            "https://t.me/example_bot?start=secret", "https://t.me/example_bot#fragment",
+            "https://t.me/example_bot/extra", "https://t.me:8443/example_bot", "https://t.me/+invite",
+        )
+        for (url in urls) {
+            server.enqueue(MockResponse().setBody(gson.toJson(mapOf("telegramBotUrl" to url))))
+            assertNull(client().keyRequestBotUrl(server.url("/").toString().trimEnd('/')))
+            server.takeRequest()
+        }
+    }
+
+    @Test
     fun requestsCarryTheBearerTokenAndDecodeCamelCaseEvents() = runBlocking {
         server.enqueue(MockResponse().setBody("[${eventJson()}]"))
         val events = client().upcoming(days = 3)

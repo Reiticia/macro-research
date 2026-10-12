@@ -136,6 +136,10 @@
     <string name="data_source_backend_note">All data, event-name translations and AI analysis come from your server. No personal API key is needed.</string>
     <string name="backend_address">Backend address</string>
     <string name="backend_token">API Key</string>
+    <string name="backend_get_api_key">Get API Key</string>
+    <string name="backend_key_bot_unavailable">Unable to find the Telegram bot. Check the backend connection and bot configuration; older servers may need an update.</string>
+    <string name="backend_key_bot_open_failed">No app can open this link. Install Telegram or a browser.</string>
+    <string name="backend_key_address_invalid">Enter a valid backend address; enable plain-HTTP access first if needed.</string>
     <string name="backend_token_note">Request via Telegram Bot: /request_key device or /request_key general. Administrator approval is required. Device keys bind on first authorization; reinstalling or clearing app data requires a new key. Stored encrypted and excluded from backups.</string>
     <string name="backend_token_missing">Enter the API Key issued through Telegram Bot.</string>
     <string name="backend_test">Test connection</string>

@@ -77,6 +77,24 @@ class BackendClient(
     private val token: () -> String?,
     private val deviceIdentity: () -> BackendDeviceIdentity? = { null },
 ) {
+    /** Uses the unsaved address without sending any saved Key or device identity. */
+    suspend fun keyRequestBotUrl(address: String): String? = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$address/api/v1/access-key-bot")
+            .header("accept", "application/json")
+            .cacheControl(okhttp3.CacheControl.Builder().noCache().noStore().build())
+            .get().build()
+        val value = execute(request).asJsonObject.stringOrNull("telegramBotUrl") ?: return@withContext null
+        // Do not let a server response launch arbitrary schemes, hosts, paths or credentials.
+        val url = runCatching { value.toHttpUrl() }.getOrNull() ?: return@withContext null
+        val username = url.pathSegments.singleOrNull() ?: return@withContext null
+        if (url.scheme != "https" || url.host != "t.me" || url.port != 443 ||
+            url.username.isNotEmpty() || url.password.isNotEmpty() || url.query != null || url.fragment != null ||
+            !username.matches(Regex("[A-Za-z0-9_]{5,32}"))
+        ) return@withContext null
+        "https://t.me/$username"
+    }
+
     suspend fun meta(): BackendMeta = withContext(Dispatchers.IO) {
         val root = getJson("/api/v1/meta", authenticated = false).asJsonObject
         BackendMeta(

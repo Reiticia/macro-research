@@ -175,6 +175,14 @@ class MacroRepository(
         }
     }
 
+    /** Discover without saving settings, switching data modes, authorizing or binding the device. */
+    suspend fun backendKeyRequestBotUrl(address: String): String? {
+        val normalized = BackendPreferences.normalizeBaseUrl(
+            address, allowsCleartext = dataSourceSettings.value.allowCleartext,
+        )
+        return backendSource.keyRequestBotUrl(normalized)
+    }
+
     /** Marks verified only after live protocol and credential checks; no software version result. */
     suspend fun verifyBackend(): BackendVerificationResult {
         backendPreferences.clearVerification()

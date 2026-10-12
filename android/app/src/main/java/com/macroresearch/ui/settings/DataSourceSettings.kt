@@ -1,5 +1,8 @@
 package com.macroresearch.ui.settings
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,7 +26,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -49,6 +55,7 @@ fun DataSourceSettings(repository: MacroRepository) {
     val settings by repository.dataSourceSettings.collectAsStateWithLifecycle()
     val translationError by repository.translationError.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var baseUrl by rememberSaveable(settings.baseUrl) { mutableStateOf(settings.baseUrl) }
     var token by rememberSaveable { mutableStateOf("") }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
@@ -69,6 +76,10 @@ fun DataSourceSettings(repository: MacroRepository) {
     val protocolMismatchLabel = stringResource(R.string.backend_protocol_mismatch)
     val unreachableLabel = stringResource(R.string.backend_unreachable)
     val incompleteLabel = stringResource(R.string.data_source_incomplete)
+    val botUnavailableLabel = stringResource(R.string.backend_key_bot_unavailable)
+    val botOpenFailedLabel = stringResource(R.string.backend_key_bot_open_failed)
+    val addressInvalidLabel = stringResource(R.string.backend_key_address_invalid)
+    val tokenLabel = stringResource(R.string.backend_token)
 
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -158,15 +169,49 @@ fun DataSourceSettings(repository: MacroRepository) {
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(tokenLabel, modifier = Modifier.weight(1f))
+                    TextButton(
+                        enabled = !busy && baseUrl.isNotBlank(),
+                        onClick = {
+                            busy = true
+                            error = null
+                            status = null
+                            scope.launch {
+                                try {
+                                    val url = repository.backendKeyRequestBotUrl(baseUrl)
+                                    if (url == null) {
+                                        error = botUnavailableLabel
+                                    } else {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                    }
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: ActivityNotFoundException) {
+                                    error = botOpenFailedLabel
+                                } catch (_: IllegalArgumentException) {
+                                    error = addressInvalidLabel
+                                } catch (_: Exception) {
+                                    error = botUnavailableLabel
+                                } finally {
+                                    busy = false
+                                }
+                            }
+                        },
+                    ) { Text(stringResource(R.string.backend_get_api_key)) }
+                }
                 OutlinedTextField(
                     enabled = !busy,
                     value = token,
                     onValueChange = { token = it; error = null; status = null },
-                    label = { Text(stringResource(R.string.backend_token)) },
                     supportingText = { Text(stringResource(R.string.backend_token_note)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = tokenLabel },
                 )
                 if (!settings.tokenConfigured && token.isBlank()) {
                     Text(

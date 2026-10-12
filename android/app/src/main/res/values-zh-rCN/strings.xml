@@ -135,6 +135,10 @@
     <string name="data_source_backend_note">数据、事件名翻译与 AI 分析全部来自你的服务器，无需填写个人 API Key。</string>
     <string name="backend_address">后端地址</string>
     <string name="backend_token">API Key</string>
+    <string name="backend_get_api_key">获取 API Key</string>
+    <string name="backend_key_bot_unavailable">无法获取 Telegram 机器人，请检查后端连接及机器人配置；旧版后端可能需要升级。</string>
+    <string name="backend_key_bot_open_failed">没有应用可打开此链接，请安装 Telegram 或浏览器。</string>
+    <string name="backend_key_address_invalid">请填写有效的后端地址；如需 HTTP，请先开启明文访问。</string>
     <string name="backend_token_note">通过 Telegram Bot 发送 /request_key device 或 /request_key general 申请，需管理员批准。设备密钥首次授权后绑定；卸载或清除应用数据后需重新申请。使用 Keystore 加密保存，不进入备份。</string>
     <string name="backend_token_missing">请填写 Telegram Bot 发放的 API Key。</string>
     <string name="backend_test">测试连接</string>
