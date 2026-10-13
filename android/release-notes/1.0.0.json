@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.0.0",
+  "notes": {
+    "en": {
+      "client": [
+        "Check for official GitHub releases in Settings. Release builds also support optional daily checks while the app is in the foreground.",
+        "Download updates in the app with progress, cancellation and retry. APK integrity, package, version, Android compatibility and signing identity are verified before installation; installation always requires your confirmation.",
+        "Read this version’s release notes offline on first launch after installation or upgrade, and revisit them at any time in Settings. English, Simplified Chinese and Traditional Chinese are supported.",
+        "Open the configured Telegram bot from the backend API Key field to request a key. Update checking works independently of the backend and the selected data mode."
+      ],
+      "backend": [
+        "Android and the Linux x86_64 backend are distributed together from the same Git commit, with SHA-256 checksum files. This release does not change backend runtime APIs."
+      ]
+    },
+    "zh-CN": {
+      "client": [
+        "可在设置页检查 GitHub 正式版本；正式版还支持可关闭的每日前台自动检查。",
+        "支持应用内下载更新、查看进度、取消与重试。安装前校验 APK 完整性、包名、版本、Android 兼容性和签名身份，始终由用户确认安装。",
+        "全新安装或升级后首次打开，可离线查看本次更新内容；设置页可随时重新查看，支持英文、简体中文和繁体中文。",
+        "可从后端 API Key 旁打开已配置的 Telegram 机器人申请密钥。检查更新不依赖后端，也不受当前数据模式影响。"
+      ],
+      "backend": [
+        "客户端与 Linux x86_64 后端从同一 Git 提交统一发行，并提供 SHA-256 校验文件；本次发布不改变后端运行接口。"
+      ]
+    },
+    "zh-TW": {
+      "client": [
+        "可在設定頁檢查 GitHub 正式版本；正式版也支援可關閉的每日前景自動檢查。",
+        "支援應用程式內下載更新、查看進度、取消與重試。安裝前驗證 APK 完整性、套件名稱、版本、Android 相容性及簽章身分，一律由使用者確認安裝。",
+        "全新安裝或升級後首次開啟，可離線查看本次更新內容；設定頁可隨時重新查看，支援英文、簡體中文及繁體中文。",
+        "可從後端 API Key 旁開啟已設定的 Telegram 機器人申請金鑰。檢查更新不依賴後端，也不受目前資料模式影響。"
+      ],
+      "backend": [
+        "用戶端與 Linux x86_64 後端從同一 Git 提交統一發行，並提供 SHA-256 校驗檔案；本次發行不變更後端執行介面。"
+      ]
+    }
+  }
+}
