@@ -400,4 +400,10 @@
     <string name="whats_new_acknowledge">知道了</string>
     <string name="update_client_notes">用戶端</string>
     <string name="update_backend_notes">後端</string>
+    <string name="settings_data_group">資料</string>
+    <string name="settings_ai_group">AI 與分析</string>
+    <string name="settings_interface_group">介面</string>
+    <string name="settings_enabled">開啟</string>
+    <string name="settings_disabled">關閉</string>
+    <string name="settings_language_summary">系統預設</string>
 </resources>

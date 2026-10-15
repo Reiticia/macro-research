@@ -10,13 +10,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
 import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.automirrored.outlined.ShowChart
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -31,6 +40,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
+import com.macroresearch.ui.common.appLocale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,6 +55,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -70,6 +83,22 @@ fun SettingsScreen(
     val selectedMarkets by repository.selectedMarkets.collectAsStateWithLifecycle()
     val markets = MarketPreferences.SUPPORTED_MARKETS.associateWith { it in selectedMarkets }
     val dataSource by repository.dataSourceSettings.collectAsStateWithLifecycle()
+    val translation by repository.translationSettings.collectAsStateWithLifecycle()
+    var selectedSetting by rememberSaveable { mutableStateOf<String?>(null) }
+    androidx.activity.compose.BackHandler(enabled = selectedSetting != null) { selectedSetting = null }
+    val settingTitle = when (selectedSetting) {
+        "source" -> R.string.data_source
+        "countries" -> R.string.countries_regions
+        "markets" -> R.string.market_tracking
+        "display" -> R.string.display_size
+        "network" -> R.string.data_network
+        "api" -> R.string.translation_api
+        "method" -> R.string.ai_analysis_method
+        "news" -> R.string.ai_news_context
+        "language" -> R.string.language
+        "updates" -> R.string.app_update
+        else -> R.string.nav_settings
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -77,48 +106,98 @@ fun SettingsScreen(
             .padding(horizontal = ResearchLayout.pagePadding, vertical = ResearchLayout.gap),
         verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
     ) {
-        Column {
-            Text(
-                stringResource(R.string.nav_settings),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                stringResource(R.string.settings_subtitle),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(bottom = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
-        ) {
-            item { DataSourceSettings(repository) }
-            item { DisplaySettingsCard() }
-            if (updates != null) item { AppUpdateSettings(updates, onShowWhatsNew, onInstallUpdate) }
-            if (dataSource.mode == DataSourceMode.DIRECT) {
-                item { DataNetworkSettings(repository) }
-            }
-            // Personal AI generation is available in either data-source mode.
-            item { TranslationApiSettings(repository) }
-            item { AnalysisMethodSettings(repository) }
-            item { NewsContextSettings(repository) }
-            // Interface localization is independent of event-name translation. Without a
-            // translation API, direct mode can still use a Chinese interface while event names
-            // remain in their source language.
-            item { LanguageSettings() }
-            item {
-                SettingsGroup(
-                    stringResource(R.string.countries_regions),
-                    countries,
-                    { countryLabel(it) },
-                ) { key, checked -> repository.setCountryEnabled(key, checked) }
-            }
-            item {
-                MarketSettingsGroup(markets) { key, checked ->
-                    repository.setMarketEnabled(key, checked)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (selectedSetting != null) {
+                IconButton(onClick = { selectedSetting = null }) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = stringResource(R.string.back))
                 }
             }
+            Column {
+                Text(
+                    stringResource(if (selectedSetting == null) R.string.nav_settings else settingTitle),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    stringResource(if (selectedSetting == null) R.string.settings_subtitle else settingTitle),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (selectedSetting == null) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
+            ) {
+                item { SettingsSectionTitle(stringResource(R.string.settings_data_group)) }
+                item { SettingsMenuRow(stringResource(R.string.data_source), dataSource.mode.let { if (it == DataSourceMode.BACKEND) stringResource(R.string.data_source_backend) else stringResource(R.string.data_source_direct) }) { selectedSetting = "source" } }
+                item { SettingsMenuRow(stringResource(R.string.countries_regions), "${selectedCountries.size} / ${CountryPreferences.SUPPORTED_COUNTRIES.size}", Icons.Outlined.Public) { selectedSetting = "countries" } }
+                item { SettingsMenuRow(stringResource(R.string.market_tracking), "${selectedMarkets.size} / ${MarketPreferences.SUPPORTED_MARKETS.size}", Icons.AutoMirrored.Outlined.ShowChart) { selectedSetting = "markets" } }
+                item { SettingsSectionTitle(stringResource(R.string.settings_ai_group)) }
+                item { SettingsMenuRow(stringResource(R.string.translation_api), stringResource(if (translation.configured) R.string.api_key_configured else R.string.api_key_not_configured), Icons.Outlined.Key) { selectedSetting = "api" } }
+                item { SettingsMenuRow(stringResource(R.string.ai_analysis_method), stringResource(when (repository.analysisMethod.collectAsStateWithLifecycle().value) { com.macroresearch.data.AnalysisMethod.NUMBERS_ONLY -> R.string.ai_method_numbers_only; com.macroresearch.data.AnalysisMethod.EX_ANTE_THEN_COMPARE -> R.string.ai_method_two_stage; com.macroresearch.data.AnalysisMethod.SINGLE_PASS -> R.string.ai_method_single_pass }), Icons.Outlined.Tune) { selectedSetting = "method" } }
+                item { SettingsMenuRow(stringResource(R.string.ai_news_context), stringResource(if (repository.newsSettings.collectAsStateWithLifecycle().value.enabled) R.string.settings_enabled else R.string.settings_disabled), Icons.Outlined.Language) { selectedSetting = "news" } }
+                item { SettingsSectionTitle(stringResource(R.string.settings_interface_group)) }
+                item { SettingsMenuRow(stringResource(R.string.display_size), stringResource(when (com.macroresearch.ui.theme.LocalDisplaySettings.current.mode) { com.macroresearch.data.DisplayMode.AUTO -> R.string.display_auto; com.macroresearch.data.DisplayMode.COMPACT -> R.string.display_compact; com.macroresearch.data.DisplayMode.SYSTEM -> R.string.display_system }), Icons.Outlined.Tune) { selectedSetting = "display" } }
+                item { SettingsMenuRow(stringResource(R.string.language), AppLanguage.fromLocale(appLocale()).nativeName, Icons.Outlined.Language) { selectedSetting = "language" } }
+                if (dataSource.mode == DataSourceMode.DIRECT) item { SettingsMenuRow(stringResource(R.string.data_network), stringResource(R.string.data_proxy_note)) { selectedSetting = "network" } }
+                if (updates != null) item { SettingsMenuRow(stringResource(R.string.app_update), stringResource(R.string.update_current_version, com.macroresearch.BuildConfig.VERSION_NAME, com.macroresearch.BuildConfig.VERSION_CODE)) { selectedSetting = "updates" } }
+            }
+        } else {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap)) {
+                when (selectedSetting) {
+                    "source" -> DataSourceSettings(repository)
+                    "countries" -> SettingsGroup(stringResource(R.string.countries_regions), countries, { countryLabel(it) }) { key, checked -> repository.setCountryEnabled(key, checked) }
+                    "markets" -> MarketSettingsGroup(markets) { key, checked -> repository.setMarketEnabled(key, checked) }
+                    "display" -> DisplaySettingsCard()
+                    "network" -> DataNetworkSettings(repository)
+                    "api" -> TranslationApiSettings(repository)
+                    "method" -> AnalysisMethodSettings(repository)
+                    "news" -> NewsContextSettings(repository)
+                    "language" -> LanguageSettings()
+                    "updates" -> updates?.let { AppUpdateSettings(it, onShowWhatsNew, onInstallUpdate) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSectionTitle(title: String) {
+    Text(
+        title,
+        modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = FontWeight.SemiBold,
+    )
+}
+
+@Composable
+private fun SettingsMenuRow(
+    title: String,
+    summary: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Outlined.Settings,
+    onClick: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            Text(
+                summary,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+                maxLines = 1,
+            )
+            Icon(Icons.AutoMirrored.Outlined.ArrowForwardIos, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

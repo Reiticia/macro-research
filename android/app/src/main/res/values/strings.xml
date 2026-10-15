@@ -401,4 +401,10 @@
     <string name="whats_new_acknowledge">Got it</string>
     <string name="update_client_notes">Client</string>
     <string name="update_backend_notes">Backend</string>
+    <string name="settings_data_group">Data</string>
+    <string name="settings_ai_group">AI &amp; analysis</string>
+    <string name="settings_interface_group">Interface</string>
+    <string name="settings_enabled">On</string>
+    <string name="settings_disabled">Off</string>
+    <string name="settings_language_summary">System default</string>
 </resources>
