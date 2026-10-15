@@ -3,32 +3,20 @@ package com.macroresearch.ui.common
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
-import com.macroresearch.ui.theme.Upcoming
+import com.macroresearch.ui.common.terminal.TerminalFilterChip
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ImportanceFilters(selected: Set<Int>, onToggle: (Int) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(3, 2, 1).forEach { level ->
-            FilterChip(
+            TerminalFilterChip(
                 selected = level in selected,
                 onClick = { onToggle(level) },
-                leadingIcon = {
-                    Text(
-                        "●",
-                        color = when (level) {
-                            3 -> Upcoming
-                            2 -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                },
-                label = { Text(importanceLabel(level)) },
+                label = importanceLabel(level),
+                leadingIcon = { ImportanceDots(level, decorative = true) },
             )
         }
     }

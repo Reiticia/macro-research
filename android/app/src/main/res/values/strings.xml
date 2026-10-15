@@ -20,9 +20,6 @@
     <string name="actual">Actual</string>
     <string name="surprise">Surprise</string>
     <string name="waiting_quotes">Awaiting quotes</string>
-    <string name="live_snapshot">Live snapshot</string>
-    <string name="previous_value">Previous %1$s</string>
-    <string name="consensus_value">Consensus %1$s</string>
     <string name="actual_consensus">Actual %1$s · Consensus %2$s</string>
     <string name="surprise_above">↑ Above consensus %1$s</string>
     <string name="surprise_below">↓ Below consensus %1$s</string>
@@ -303,8 +300,8 @@
     <string name="ai_followup_send">Send</string>
     <string name="ai_followup_loading">Thinking…</string>
     <string name="ai_reset_conversation">Reset conversation</string>
-    <string name="ai_you">You: %1$s</string>
-    <string name="ai_assistant">AI: %1$s</string>
+    <string name="ai_you_prefix">You ›</string>
+    <string name="ai_assistant_prefix">AI ›</string>
     <string name="ai_chain">Transmission chain</string>
     <string name="ai_data_analysis">Data read</string>
     <string name="ai_market_outlook">Market outlook</string>
@@ -401,4 +398,12 @@
     <string name="whats_new_acknowledge">Got it</string>
     <string name="update_client_notes">Client</string>
     <string name="update_backend_notes">Backend</string>
+    <string name="table_time">Time</string>
+    <string name="table_event">Event</string>
+    <string name="table_previous">Prev.</string>
+    <string name="table_expectation">Exp.</string>
+    <string name="table_actual">Act.</string>
+    <string name="table_price">Price</string>
+    <string name="progress_done">Done</string>
+    <string name="progress_pending">Pending</string>
 </resources>

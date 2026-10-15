@@ -32,6 +32,7 @@ import com.macroresearch.data.local.asEntity
 import com.macroresearch.data.local.asExternalModel
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.ui.event.ReleaseDataCard
+import com.macroresearch.ui.common.terminal.EventRow
 import com.macroresearch.ui.home.NextEventCard
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -54,7 +55,7 @@ class ReleaseImpactUiTest {
 
     @Test fun publishedListsKeepPreviousExpectationAndActualAndStillOpenDetail() {
         var clicks = 0
-        compose.setContent { MaterialTheme { EventCard(event(), { clicks++ }, showDate = true) } }
+        compose.setContent { MaterialTheme { EventRow(event(), { clicks++ }, showDate = true) } }
         compose.onNodeWithText("Core CPI MoM").assertIsDisplayed().performClick()
         assertEquals(1, clicks)
         for (value in listOf("0.31%", "0.3%", "0.2%")) {
@@ -65,7 +66,7 @@ class ReleaseImpactUiTest {
     }
 
     @Test fun upcomingListsKeepPreviousAndExpectationWithoutImpactPredictions() {
-        compose.setContent { MaterialTheme { EventCard(event(null), {}) } }
+        compose.setContent { MaterialTheme { EventRow(event(null), {}) } }
         compose.onNodeWithText("Core CPI MoM").assertIsDisplayed()
         compose.onNodeWithText("0.3%", substring = true).assertIsDisplayed()
         compose.onNodeWithText("0.2%", substring = true).assertIsDisplayed()
@@ -94,7 +95,7 @@ class ReleaseImpactUiTest {
     }
 
     @Test fun listExpectationFallsBackToForecast() {
-        compose.setContent { MaterialTheme { EventCard(event().copy(consensus = null, forecast = "0.5"), {}) } }
+        compose.setContent { MaterialTheme { EventRow(event().copy(consensus = null, forecast = "0.5"), {}) } }
         compose.onNodeWithText("0.5%", substring = true).assertIsDisplayed()
         compose.onNodeWithText("0.31%", substring = true).assertIsDisplayed()
     }

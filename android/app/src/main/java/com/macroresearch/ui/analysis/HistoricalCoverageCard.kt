@@ -4,8 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -16,19 +14,22 @@ import androidx.compose.ui.unit.dp
 import com.macroresearch.R
 import com.macroresearch.data.model.HistoricalEvidence
 import com.macroresearch.ui.common.assetLabel
+import com.macroresearch.ui.common.terminal.Hairline
+import com.macroresearch.ui.common.terminal.SectionHeader
+import com.macroresearch.ui.theme.ResearchLayout
 import com.macroresearch.ui.theme.Upcoming
 
 @Composable
 fun HistoricalCoverageCard(evidence: HistoricalEvidence) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.historical_coverage), fontWeight = FontWeight.Bold)
+    Column(Modifier.fillMaxWidth()) {
+        SectionHeader(stringResource(R.string.historical_coverage))
+        Column(Modifier.padding(horizontal = ResearchLayout.pagePadding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.historical_method), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (evidence.revisedDataPossible) {
                 Text(stringResource(R.string.historical_revision_warning), style = MaterialTheme.typography.bodySmall, color = Upcoming)
             }
             evidence.coverage.forEach { coverage ->
-                HorizontalDivider()
+                Hairline()
                 val state = when (coverage.status) {
                     "complete" -> R.string.coverage_complete
                     "partial" -> R.string.coverage_partial

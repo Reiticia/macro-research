@@ -11,6 +11,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private val numericDateFormatter = DateTimeFormatter.ofPattern("MM/dd")
 
 fun EconomicEvent.localizedName(locale: Locale): String = localizedEventName(
     event,
@@ -28,6 +29,11 @@ private fun localizedEventName(source: String, zhCn: String?, zhTw: String?, loc
 fun EconomicEvent.localTime(): String = runCatching {
     Instant.parse(eventTime).atZone(ZoneId.systemDefault()).format(timeFormatter)
 }.getOrDefault("--:--")
+
+/** 表格时间列使用与语言无关的数字日期，避免"10月14日"挤占窄列。 */
+fun EconomicEvent.localNumericDate(zone: ZoneId = ZoneId.systemDefault()): String = runCatching {
+    Instant.parse(eventTime).atZone(zone).format(numericDateFormatter)
+}.getOrDefault("--/--")
 
 fun EconomicEvent.localDate(locale: Locale, pattern: String): String = runCatching {
     Instant.parse(eventTime).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern(pattern, locale))

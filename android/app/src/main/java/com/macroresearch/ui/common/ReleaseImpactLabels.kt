@@ -45,13 +45,21 @@ import com.macroresearch.ui.theme.AssetUp
 
 /** Detail-only single-column asset list. Strength is rule-based, not a price-move forecast. */
 @Composable
-fun ReleaseImpactLabels(event: EconomicEvent, modifier: Modifier = Modifier, detailed: Boolean = false) {
+fun ReleaseImpactLabels(
+    event: EconomicEvent,
+    modifier: Modifier = Modifier,
+    detailed: Boolean = false,
+    showTitle: Boolean = true,
+) {
     val impact = remember(event) { ReleaseImpactEvaluator.evaluate(event) }
     var evidenceExpanded by rememberSaveable(event.id) { mutableStateOf(false) }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(stringResource(R.string.release_impact_title), style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold)
+            // 详情页由外层 SectionHeader 显示标题。
+            if (showTitle) {
+                Text(stringResource(R.string.release_impact_title), style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold)
+            }
             if (impact.status == ReleaseImpactStatus.DIRECTIONAL) {
                 Text(stringResource(if (impact.strength == ReleaseImpactStrength.LIMITED)
                     R.string.release_impact_limited else R.string.release_impact_rule_note),

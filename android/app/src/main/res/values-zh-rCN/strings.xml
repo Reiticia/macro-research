@@ -19,9 +19,6 @@
     <string name="actual">实际值</string>
     <string name="surprise">预期差</string>
     <string name="waiting_quotes">等待行情</string>
-    <string name="live_snapshot">实时快照</string>
-    <string name="previous_value">前值 %1$s</string>
-    <string name="consensus_value">预期 %1$s</string>
     <string name="actual_consensus">实际 %1$s · 预期 %2$s</string>
     <string name="surprise_above">↑ 高于预期 %1$s</string>
     <string name="surprise_below">↓ 低于预期 %1$s</string>
@@ -302,8 +299,8 @@
     <string name="ai_followup_send">发送</string>
     <string name="ai_followup_loading">思考中…</string>
     <string name="ai_reset_conversation">重置对话</string>
-    <string name="ai_you">你：%1$s</string>
-    <string name="ai_assistant">AI：%1$s</string>
+    <string name="ai_you_prefix">你 ›</string>
+    <string name="ai_assistant_prefix">AI ›</string>
     <string name="ai_chain">传导链路</string>
     <string name="ai_data_analysis">数据分析</string>
     <string name="ai_market_outlook">市场走势</string>
@@ -400,4 +397,12 @@
     <string name="whats_new_acknowledge">知道了</string>
     <string name="update_client_notes">客户端</string>
     <string name="update_backend_notes">后端</string>
+    <string name="table_time">时间</string>
+    <string name="table_event">事件</string>
+    <string name="table_previous">前值</string>
+    <string name="table_expectation">预期</string>
+    <string name="table_actual">公布</string>
+    <string name="table_price">价格</string>
+    <string name="progress_done">已完成</string>
+    <string name="progress_pending">未完成</string>
 </resources>

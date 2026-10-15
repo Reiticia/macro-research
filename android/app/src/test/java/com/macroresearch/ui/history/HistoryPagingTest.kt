@@ -20,4 +20,24 @@ class HistoryPagingTest {
         assertFalse(shouldLoadOlder(7, 8, scrolledFromTop = true, hasMore = true, loading = false, failed = true))
         assertFalse(shouldLoadOlder(-1, 0, scrolledFromTop = true, hasMore = true, loading = false, failed = false))
     }
+
+    @Test fun listEndIsNotReachedAtTopWhenContentCanScroll() {
+        assertFalse(reachedListEnd(0, 0, canScrollForward = true, hasRows = true))
+    }
+
+    @Test fun listEndIsReachedWhenScrolledPastFirstItem() {
+        assertTrue(reachedListEnd(1, 0, canScrollForward = true, hasRows = true))
+    }
+
+    @Test fun listEndIsReachedWhenFirstItemIsPartlyScrolled() {
+        assertTrue(reachedListEnd(0, 12, canScrollForward = true, hasRows = true))
+    }
+
+    @Test fun listEndIsReachedWhenContentFitsViewport() {
+        assertTrue(reachedListEnd(0, 0, canScrollForward = false, hasRows = true))
+    }
+
+    @Test fun listEndIsNotReachedWithoutRows() {
+        assertFalse(reachedListEnd(0, 0, canScrollForward = false, hasRows = false))
+    }
 }
