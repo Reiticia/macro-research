@@ -34,7 +34,7 @@ class EventRowUiTest {
     @Test fun stackedLayoutKeepsAllValuesAndSurpriseDescription() {
         var clicks = 0
         compose.setContent {
-            CompositionLocalProvider(LocalAdaptiveLayout provides AdaptiveLayout(stackMetadata = true)) {
+            CompositionLocalProvider(LocalAdaptiveLayout provides AdaptiveLayout(stackEventRows = true)) {
                 MaterialTheme { EventRow(event, { clicks++ }, showDate = true) }
             }
         }
@@ -50,7 +50,7 @@ class EventRowUiTest {
 
     @Test fun wideRowValuesCarryColumnLabelsForScreenReaders() {
         compose.setContent {
-            CompositionLocalProvider(LocalAdaptiveLayout provides AdaptiveLayout(stackMetadata = false)) {
+            CompositionLocalProvider(LocalAdaptiveLayout provides AdaptiveLayout(stackEventRows = false)) {
                 MaterialTheme { EventRow(event, {}) }
             }
         }
@@ -70,7 +70,7 @@ class EventRowUiTest {
         compose.setContent {
             CompositionLocalProvider(
                 LocalDensity provides Density(density, 1.3f),
-                LocalAdaptiveLayout provides AdaptiveLayout(stackMetadata = false),
+                LocalAdaptiveLayout provides AdaptiveLayout(stackEventRows = false),
             ) {
                 MaterialTheme { EventRow(signed, {}) }
             }

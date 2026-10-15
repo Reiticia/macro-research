@@ -63,7 +63,7 @@ internal fun surpriseMarker(event: EconomicEvent): SurpriseMarker = when (event.
 /** 宽屏表头；窄屏/大字体时数值折到事件名下方并自带标签，因此不显示表头。 */
 @Composable
 fun EventTableHeader(modifier: Modifier = Modifier) {
-    if (ResearchLayout.stackMetadata) return
+    if (ResearchLayout.stackEventRows) return
     val columns = eventColumns()
     Column(modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
         Row(
@@ -115,7 +115,7 @@ fun EventRow(
     )
     // clickable 会合并子节点语义，读屏时整行作为一个可点击项。
     Column(modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        if (ResearchLayout.stackMetadata) StackedEventRow(event, values, showDate) else WideEventRow(event, values, showDate)
+        if (ResearchLayout.stackEventRows) StackedEventRow(event, values, showDate) else WideEventRow(event, values, showDate)
         Hairline()
     }
 }

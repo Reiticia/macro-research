@@ -16,6 +16,8 @@ data class AdaptiveLayout(
     val fontFactor: Float = 1f,
     val spacingFactor: Float = 1f,
     val stackMetadata: Boolean = false,
+    /** 事件表格有 5 列，比其它元信息更早需要堆叠。 */
+    val stackEventRows: Boolean = false,
 ) {
     val pagePadding: Dp get() = (16 * spacingFactor).dp
     val cardPadding: Dp get() = (16 * spacingFactor).dp
@@ -43,6 +45,7 @@ internal fun adaptiveLayout(widthDp: Float, fontScale: Float, mode: DisplayMode)
         fontFactor = scale,
         spacingFactor = if (scale < 1f) (scale - 0.10f).coerceAtLeast(0.75f) else 1f,
         stackMetadata = width / fontScale.coerceAtLeast(1f) < 340f,
+        stackEventRows = width / fontScale.coerceAtLeast(1f) < 380f,
     )
 }
 

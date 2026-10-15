@@ -26,6 +26,15 @@ class AdaptiveLayoutTest {
         assertEquals(1f, adaptiveLayout(0f, 1f, DisplayMode.AUTO).fontFactor)
     }
 
+    @Test fun eventRowsStackEarlierThanOtherMetadata() {
+        val phone360 = adaptiveLayout(360f, 1f, DisplayMode.AUTO)
+        assertTrue(phone360.stackEventRows)
+        assertFalse(phone360.stackMetadata)
+        assertFalse(adaptiveLayout(393f, 1f, DisplayMode.AUTO).stackEventRows)
+        assertTrue(adaptiveLayout(412f, 1.15f, DisplayMode.AUTO).stackEventRows)
+        assertFalse(adaptiveLayout(840f, 1f, DisplayMode.AUTO).stackEventRows)
+    }
+
     @Test fun explicitModesArePredictableAndPreferencesFallBackSafely() {
         assertEquals(1f, adaptiveLayout(320f, 1f, DisplayMode.SYSTEM).fontFactor)
         assertEquals(16f, adaptiveLayout(320f, 1f, DisplayMode.SYSTEM).cardPadding.value)
