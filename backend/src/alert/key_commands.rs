@@ -58,10 +58,11 @@ fn request_text(request: &KeyRequest) -> String {
     let username = request
         .requester_username
         .as_deref()
-        .map(|value| format!("@{}", escape(value)))
-        .unwrap_or_else(|| "未设置或未记录用户名".into());
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("\n用户名：@{}", escape(value)))
+        .unwrap_or_default();
     format!(
-        "<b>API Key 申请 #{}</b>\n申请者：{}\n用户名：{}\n用户 ID：<code>{}</code>\n申请类型：{}\n状态：{}",
+        "<b>API Key 申请 #{}</b>\n申请者：{}{}\n用户 ID：<code>{}</code>\n申请类型：{}\n状态：{}",
         request.id,
         name,
         username,

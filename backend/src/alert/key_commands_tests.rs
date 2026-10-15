@@ -104,14 +104,14 @@ async fn pending_identity_refreshes_without_duplicate_requests_and_handles_missi
     let requests = mock.requests.lock().await;
     let text = requests[0].1["text"].as_str().unwrap();
     assert!(text.contains("申请者：小明"));
-    assert!(text.contains("用户名：未设置或未记录用户名"));
+    assert!(!text.contains("用户名："));
     assert!(text.contains("用户 ID：<code>99</code>"));
     assert!(!text.contains("old_name"));
 }
 
 #[test]
 fn identity_text_is_bounded_and_html_escaped() {
-    let request = KeyRequest {
+    let mut request = KeyRequest {
         id: 1,
         requester_id: 99,
         requester_username: Some("<b>&user".into()),
@@ -122,6 +122,12 @@ fn identity_text_is_bounded_and_html_escaped() {
     let text = request_text(&request);
     assert!(text.contains("申请者：未记录昵称"));
     assert!(text.contains("用户名：@&lt;b&gt;&amp;user"));
+    for username in [None, Some(String::new()), Some("  ".into())] {
+        request.requester_username = username;
+        let text = request_text(&request);
+        assert!(!text.contains("用户名："));
+        assert!(text.contains("申请者：未记录昵称\n用户 ID：<code>99</code>"));
+    }
     assert_eq!(
         identity_field(&json!("  小明\n研究  ")),
         Some("小明 研究".into())
