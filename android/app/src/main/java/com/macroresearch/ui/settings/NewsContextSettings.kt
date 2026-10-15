@@ -1,12 +1,15 @@
 package com.macroresearch.ui.settings
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -21,12 +24,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.macroresearch.R
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.NewsPreferences
+import com.macroresearch.ui.theme.ResearchLayout
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /** Opt-in RSS retrieval is only used for personal AI requests, never shared backend analysis. */
@@ -41,9 +44,15 @@ fun NewsContextSettings(repository: MacroRepository) {
         value.toHttpUrlOrNull()?.isHttps == true
     }
 
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(stringResource(R.string.ai_news_context), fontWeight = FontWeight.Bold)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(ResearchLayout.cardCorner),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(ResearchLayout.cardPadding), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsSectionHeader(stringResource(R.string.ai_news_context))
             Text(
                 stringResource(R.string.ai_news_context_note),
                 style = MaterialTheme.typography.bodySmall,

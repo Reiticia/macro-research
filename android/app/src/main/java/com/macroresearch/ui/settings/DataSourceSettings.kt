@@ -3,16 +3,20 @@ package com.macroresearch.ui.settings
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -41,15 +45,10 @@ import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.remote.BackendAuthenticationDisabledException
 import com.macroresearch.data.remote.BackendProtocolException
 import com.macroresearch.data.remote.BackendUnauthorizedException
+import com.macroresearch.ui.theme.ResearchLayout
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-/**
- * Data-source selection.
- *
- * Switching modes must be confirmed because the two id spaces cannot be mixed: the local event
- * cache and the follow list are dropped, and the user has to re-follow events on the other side.
- */
 @Composable
 fun DataSourceSettings(repository: MacroRepository) {
     val settings by repository.dataSourceSettings.collectAsStateWithLifecycle()
@@ -62,12 +61,9 @@ fun DataSourceSettings(repository: MacroRepository) {
     var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var pendingMode by remember { mutableStateOf<DataSourceMode?>(null) }
-    // The backend fields must be reachable *before* the mode switches, otherwise a first-time
-    // user would be asked for an address they cannot enter anywhere.
     var showBackendConfig by rememberSaveable {
         mutableStateOf(settings.mode == DataSourceMode.BACKEND)
     }
-    // Strings must be resolved in composition; the click handler runs in a coroutine.
     val verifiedLabel = stringResource(R.string.backend_verified)
     val backendAiEnabledLabel = stringResource(R.string.backend_ai_enabled)
     val backendAiDisabledLabel = stringResource(R.string.backend_ai_disabled)
@@ -81,27 +77,48 @@ fun DataSourceSettings(repository: MacroRepository) {
     val addressInvalidLabel = stringResource(R.string.backend_key_address_invalid)
     val tokenLabel = stringResource(R.string.backend_token)
 
-    Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(stringResource(R.string.data_source), fontWeight = FontWeight.Bold)
+    Card(
+        shape = RoundedCornerShape(ResearchLayout.cardCorner),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(ResearchLayout.cardPadding), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsSectionHeader(stringResource(R.string.data_source))
             Text(
                 stringResource(R.string.data_source_note),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val isDirect = settings.mode == DataSourceMode.DIRECT
                 FilterChip(
                     enabled = !busy,
-                    selected = settings.mode == DataSourceMode.DIRECT,
+                    selected = isDirect,
                     onClick = { pendingMode = DataSourceMode.DIRECT },
-                    label = { Text(stringResource(R.string.data_source_direct)) },
+                    shape = RoundedCornerShape(ResearchLayout.innerCorner),
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (isDirect) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        else MaterialTheme.colorScheme.outlineVariant,
+                    ),
+                    label = {
+                        Text(
+                            stringResource(R.string.data_source_direct),
+                            fontWeight = if (isDirect) FontWeight.Bold else FontWeight.Medium,
+                        )
+                    },
                 )
+                val isBackend = settings.mode == DataSourceMode.BACKEND
                 FilterChip(
                     enabled = !busy,
-                    selected = settings.mode == DataSourceMode.BACKEND,
+                    selected = isBackend,
                     onClick = {
-                        // First tap: open the configuration. Switching still goes through the
-                        // confirmation dialog, and only once address and token are usable.
                         showBackendConfig = true
                         val incomplete = baseUrl.isBlank() ||
                             (token.isBlank() && !settings.tokenConfigured)
@@ -112,7 +129,23 @@ fun DataSourceSettings(repository: MacroRepository) {
                             pendingMode = DataSourceMode.BACKEND
                         }
                     },
-                    label = { Text(stringResource(R.string.data_source_backend)) },
+                    shape = RoundedCornerShape(ResearchLayout.innerCorner),
+                    colors = FilterChipDefaults.filterChipColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (isBackend) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        else MaterialTheme.colorScheme.outlineVariant,
+                    ),
+                    label = {
+                        Text(
+                            stringResource(R.string.data_source_backend),
+                            fontWeight = if (isBackend) FontWeight.Bold else FontWeight.Medium,
+                        )
+                    },
                 )
             }
             Text(
@@ -143,8 +176,6 @@ fun DataSourceSettings(repository: MacroRepository) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (settings.allowCleartext || BackendPreferences.usesPlainHttp(baseUrl)) {
-                    // Escape hatch for an IP:port endpoint with no certificate. Off by default
-                    // because the token travels in the clear, including on public networks.
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -226,8 +257,6 @@ fun DataSourceSettings(repository: MacroRepository) {
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
-                // A failed event-name lookup must be visible where the backend is configured;
-                // otherwise readers only see English names and never learn why.
                 if (settings.baseUrl.isNotBlank()) {
                     translationError?.let {
                         Text(
@@ -291,7 +320,6 @@ fun DataSourceSettings(repository: MacroRepository) {
                 Button(onClick = {
                     val target = mode
                     pendingMode = null
-                    // Leaving the backend collapses its configuration block again.
                     if (target == DataSourceMode.DIRECT) showBackendConfig = false
                     scope.launch { repository.setDataSourceMode(target) }
                 }) { Text(stringResource(R.string.data_source_switch_confirm)) }

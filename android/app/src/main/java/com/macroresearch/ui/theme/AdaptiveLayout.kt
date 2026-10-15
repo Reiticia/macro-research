@@ -25,7 +25,12 @@ data class AdaptiveLayout(
     /** Tighter rhythm for the home hero and mini cards, so the event list keeps the remaining height. */
     val denseGap: Dp get() = (6 * spacingFactor).dp
     val miniCardPadding: Dp get() = (8 * spacingFactor).dp
+    val cardCorner: Dp get() = 10.dp
+    val innerCorner: Dp get() = 6.dp
 }
+
+/** Tabular numerals so financial columns, prices, and countdowns never jitter or misalign. */
+val TabularStyle: TextStyle = TextStyle(fontFeatureSettings = "tnum")
 
 /** Uses window dp (not physical pixels): rotation, split-screen and display zoom work naturally. */
 internal fun adaptiveLayout(widthDp: Float, fontScale: Float, mode: DisplayMode): AdaptiveLayout {

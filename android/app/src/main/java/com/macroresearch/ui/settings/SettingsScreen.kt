@@ -1,17 +1,23 @@
 package com.macroresearch.ui.settings
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Key
@@ -20,6 +26,7 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -41,11 +48,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.macroresearch.R
 import com.macroresearch.data.CountryPreferences
@@ -56,6 +65,28 @@ import com.macroresearch.ui.common.assetLabel
 import com.macroresearch.ui.common.countryLabel
 import com.macroresearch.ui.theme.ResearchLayout
 import kotlinx.coroutines.launch
+
+@Composable
+internal fun SettingsSectionHeader(title: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(3.5.dp)
+                .height(14.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
 
 @Composable
 fun SettingsScreen(
@@ -77,16 +108,29 @@ fun SettingsScreen(
             .padding(horizontal = ResearchLayout.pagePadding, vertical = ResearchLayout.gap),
         verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
     ) {
-        Column {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                stringResource(R.string.nav_settings),
-                style = MaterialTheme.typography.headlineSmall,
+                text = "CONFIGURATION",
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.4.sp),
                 fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
             )
-            Text(
-                stringResource(R.string.settings_subtitle),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    stringResource(R.string.nav_settings),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+                Text(
+                    stringResource(R.string.settings_subtitle),
+                    modifier = Modifier.padding(bottom = 2.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         LazyColumn(
             modifier = Modifier.weight(1f),
@@ -99,13 +143,9 @@ fun SettingsScreen(
             if (dataSource.mode == DataSourceMode.DIRECT) {
                 item { DataNetworkSettings(repository) }
             }
-            // Personal AI generation is available in either data-source mode.
             item { TranslationApiSettings(repository) }
             item { AnalysisMethodSettings(repository) }
             item { NewsContextSettings(repository) }
-            // Interface localization is independent of event-name translation. Without a
-            // translation API, direct mode can still use a Chinese interface while event names
-            // remain in their source language.
             item { LanguageSettings() }
             item {
                 SettingsGroup(
@@ -129,11 +169,19 @@ private fun DataNetworkSettings(repository: MacroRepository) {
     var address by rememberSaveable(configured) { mutableStateOf(configured) }
     var invalid by rememberSaveable { mutableStateOf(false) }
     var saved by rememberSaveable { mutableStateOf(false) }
-    Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(stringResource(R.string.data_network), fontWeight = FontWeight.Bold)
-            Text(stringResource(R.string.data_proxy_note), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Card(
+        shape = RoundedCornerShape(ResearchLayout.cardCorner),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(ResearchLayout.cardPadding), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SettingsSectionHeader(stringResource(R.string.data_network))
+            Text(
+                stringResource(R.string.data_proxy_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(
                 value = address,
                 onValueChange = { address = it; invalid = false; saved = false },
@@ -146,17 +194,21 @@ private fun DataNetworkSettings(repository: MacroRepository) {
             if (invalid) Text(stringResource(R.string.data_proxy_invalid), color = MaterialTheme.colorScheme.error)
             if (saved) Text(stringResource(R.string.data_proxy_saved), color = MaterialTheme.colorScheme.primary)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = {
-                    repository.saveCalendarProxy("")
-                    address = ""
-                    invalid = false
-                    saved = true
-                }) { Text(stringResource(R.string.data_proxy_clear)) }
-                Button(onClick = {
-                    runCatching { repository.saveCalendarProxy(address) }
-                        .onSuccess { invalid = false; saved = true }
-                        .onFailure { invalid = true }
-                }) { Text(stringResource(R.string.save)) }
+                TextButton(
+                    onClick = {
+                        repository.saveCalendarProxy("")
+                        address = ""
+                        invalid = false
+                        saved = true
+                    },
+                ) { Text(stringResource(R.string.data_proxy_clear)) }
+                Button(
+                    onClick = {
+                        runCatching { repository.saveCalendarProxy(address) }
+                            .onSuccess { invalid = false; saved = true }
+                            .onFailure { invalid = true }
+                    },
+                ) { Text(stringResource(R.string.save)) }
             }
         }
     }
@@ -182,9 +234,14 @@ private fun TranslationApiSettings(repository: MacroRepository) {
         model = settings.model
     }
 
-    Card {
+    Card(
+        shape = RoundedCornerShape(ResearchLayout.cardCorner),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
         Column(
-            Modifier.padding(16.dp),
+            Modifier.padding(ResearchLayout.cardPadding),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(
@@ -195,7 +252,11 @@ private fun TranslationApiSettings(repository: MacroRepository) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Column {
-                        Text(stringResource(R.string.translation_api), fontWeight = FontWeight.Bold)
+                        Text(
+                            stringResource(R.string.translation_api),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
                         Text(
                             stringResource(
                                 if (settings.configured) R.string.api_key_configured
@@ -211,7 +272,7 @@ private fun TranslationApiSettings(repository: MacroRepository) {
                     }
                 }
             }
-            HorizontalDivider()
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             OutlinedTextField(
                 value = apiKey,
                 onValueChange = { apiKey = it; saved = false; localError = null },
@@ -394,9 +455,14 @@ private fun SettingsGroup(
     labelFor: @Composable (String) -> String,
     onChange: (String, Boolean) -> Unit,
 ) {
-    Card {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, fontWeight = FontWeight.Bold)
+    Card(
+        shape = RoundedCornerShape(ResearchLayout.cardCorner),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(ResearchLayout.cardPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            SettingsSectionHeader(title)
             values.forEach { (label, checked) ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked, { onChange(label, it) })
@@ -413,9 +479,14 @@ private fun MarketSettingsGroup(
     onChange: (String, Boolean) -> Unit,
 ) {
     val selectedCount = values.count { it.value }
-    Card {
-        Column(Modifier.padding(16.dp)) {
-            Text(stringResource(R.string.market_tracking), fontWeight = FontWeight.Bold)
+    Card(
+        shape = RoundedCornerShape(ResearchLayout.cardCorner),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(ResearchLayout.cardPadding), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            SettingsSectionHeader(stringResource(R.string.market_tracking))
             values.forEach { (market, checked) ->
                 val enabled = if (checked) {
                     selectedCount > MarketPreferences.MIN_SELECTIONS

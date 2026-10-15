@@ -1,29 +1,36 @@
 package com.macroresearch.ui.home
 
-import androidx.compose.ui.res.stringResource
-import com.macroresearch.R
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,15 +40,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.macroresearch.R
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.data.model.LiveMarketQuote
@@ -50,21 +58,24 @@ import com.macroresearch.ui.common.EventCard
 import com.macroresearch.ui.common.ImportanceDots
 import com.macroresearch.ui.common.assetLabel
 import com.macroresearch.ui.common.calendarWarningMessage
-import com.macroresearch.ui.common.importanceLabel
-import com.macroresearch.ui.common.localizedCountdown as countdown
+import com.macroresearch.ui.common.countryLabel
 import com.macroresearch.ui.common.flag
-import com.macroresearch.ui.common.localizedDate as localDate
+import com.macroresearch.ui.common.importanceLabel
 import com.macroresearch.ui.common.localTime
+import com.macroresearch.ui.common.localizedCountdown as countdown
+import com.macroresearch.ui.common.localizedDate as localDate
 import com.macroresearch.ui.common.localizedName
 import com.macroresearch.ui.common.localizedValue as value
 import com.macroresearch.ui.market.formatMarketPrice
-import com.macroresearch.ui.theme.Upcoming
+import com.macroresearch.ui.theme.AssetUp
 import com.macroresearch.ui.theme.ResearchLayout
+import com.macroresearch.ui.theme.TabularStyle
+import com.macroresearch.ui.theme.Upcoming
 import com.macroresearch.ui.viewModelFactory
-import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlinx.coroutines.delay
 
 @Composable
 fun HomeScreen(
@@ -77,8 +88,6 @@ fun HomeScreen(
     val events by vm.events.collectAsStateWithLifecycle()
     val refresh by vm.refresh.collectAsStateWithLifecycle()
     val warning by repository.calendarWarning.collectAsStateWithLifecycle()
-    // The repository publishes a typed reason; the raw provider error stays in the log. A failure
-    // without one is not calendar-related, so fall back to the generic wording.
     val notice = warning?.let { calendarWarningMessage(it) }
         ?: if (refresh.error != null) stringResource(R.string.calendar_warning_offline) else null
     val liveMarket by vm.liveMarket.collectAsStateWithLifecycle()
@@ -97,56 +106,161 @@ fun HomeScreen(
         }
     }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(padding)
-            .padding(horizontal = ResearchLayout.pagePadding, vertical = ResearchLayout.gap),
+            .padding(padding),
+        contentPadding = PaddingValues(
+            horizontal = ResearchLayout.pagePadding,
+            vertical = ResearchLayout.gap,
+        ),
         verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column {
-                Text(
-                    buildAnnotatedString {
-                        append("Mac")
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) { append("ro") }
-                    },
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(next?.localDate() ?: stringResource(R.string.research_tagline), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            IconButton(onClick = onFollowedEvents) {
-                Icon(
-                    Icons.Outlined.Notifications,
-                    stringResource(R.string.followed_events),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        // 1. Architectural Masthead
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(width = 10.dp, height = 10.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(MaterialTheme.colorScheme.primary),
+                        )
+                        Text(
+                            text = "MACRO DESK",
+                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.4.sp),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Text(
+                        text = next?.localDate() ?: stringResource(R.string.research_tagline),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Surface(
+                    onClick = onFollowedEvents,
+                    shape = RoundedCornerShape(ResearchLayout.innerCorner),
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Notifications,
+                            contentDescription = stringResource(R.string.followed_events),
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = stringResource(R.string.followed_events),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
             }
         }
 
-        if (next != null) NextEventCard(next) { onEvent(next.id) }
-        MarketOverview(
-            liveMarket?.quotes.orEmpty(),
-            selectedMarkets,
-        )
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(stringResource(R.string.today_events), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(stringResource(R.string.event_count, today.size), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // 2. Unified Live Market Ticker Ribbon
+        item {
+            MarketOverview(
+                liveQuotes = liveMarket?.quotes.orEmpty(),
+                selectedMarkets = selectedMarkets,
+            )
         }
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
-            contentPadding = PaddingValues(bottom = 4.dp),
-        ) {
-            if (refresh.loading && events.isEmpty()) item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator() }
+
+        // 3. Asymmetric Spotlight Dossier for Next Key Release
+        if (next != null) {
+            item {
+                NextEventCard(next) { onEvent(next.id) }
             }
-            // The repository publishes a typed reason; the raw provider error stays in the log.
-            // A failure without one is not calendar-related, so fall back to the generic wording.
-            notice?.let { item { Text(it, color = Upcoming) } }
-            items(today, key = { it.id }) { event -> EventCard(event, { onEvent(event.id) }) }
+        }
+
+        // 4. Today's Schedule Section Header
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(4.dp)
+                            .height(16.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                    Text(
+                        stringResource(R.string.today_events),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                ) {
+                    Text(
+                        stringResource(R.string.event_count, today.size),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall.merge(TabularStyle),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
+        }
+
+        if (refresh.loading && events.isEmpty()) {
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+        }
+
+        notice?.let {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(ResearchLayout.innerCorner),
+                    color = Upcoming.copy(alpha = 0.10f),
+                    border = BorderStroke(1.dp, Upcoming.copy(alpha = 0.35f)),
+                ) {
+                    Text(
+                        it,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        color = Upcoming,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        }
+
+        items(today, key = { it.id }) { event ->
+            EventCard(event, { onEvent(event.id) })
         }
     }
 }
@@ -158,15 +272,69 @@ private fun MarketOverview(
 ) {
     val live = liveQuotes.associateBy { it.symbol }
     val rows = marketOverviewRows(selectedMarkets)
-    // Glanceable strip: compact header and one dense row per market line, so the event list below
-    // keeps most of the screen.
-    Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
-        Text(stringResource(R.string.market_overview), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-        Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
-            rows.forEach { rowMarkets ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
-                    rowMarkets.forEach { symbol ->
-                        MarketMiniCard(
+    Card(
+        shape = RoundedCornerShape(ResearchLayout.cardCorner),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.market_overview),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(if (liveQuotes.isNotEmpty()) AssetUp else MaterialTheme.colorScheme.outline),
+                    )
+                    Text(
+                        stringResource(
+                            if (liveQuotes.isNotEmpty()) R.string.live_snapshot
+                            else R.string.waiting_quotes,
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            rows.forEachIndexed { rowIndex, rowMarkets ->
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(IntrinsicSize.Min),
+                ) {
+                    rowMarkets.forEachIndexed { colIndex, symbol ->
+                        if (colIndex > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .width(0.5.dp)
+                                    .fillMaxHeight()
+                                    .background(MaterialTheme.colorScheme.outlineVariant),
+                            )
+                        }
+                        MarketMiniTile(
                             label = assetLabel(symbol),
                             liveQuote = live[symbol],
                             modifier = Modifier.weight(1f),
@@ -193,60 +361,119 @@ internal fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
     }
     Card(
         onClick = onClick,
+        shape = RoundedCornerShape(ResearchLayout.cardCorner),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+            contentColor = MaterialTheme.colorScheme.onSurface,
         ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(ResearchLayout.cardPadding), verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Top Accent Header Strip
             Row(
-                Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     stringResource(R.string.next_event),
                     modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                Text(
-                    countdown(event.eventTime, now),
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    maxLines = 1,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                ) {
+                    Text(
+                        countdown(event.eventTime, now),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        style = MaterialTheme.typography.labelLarge.merge(TabularStyle),
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            // Main Spotlight Body
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            "${flag(event.country)} ${countryLabel(event.country)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "· ${event.localTime()}",
+                            style = MaterialTheme.typography.labelMedium.merge(TabularStyle),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            importanceLabel(event.importance),
+                            color = Upcoming,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        ImportanceDots(event.importance)
+                    }
+                }
+
+                Text(
+                    event.localizedName(locale),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                "${flag(event.country)}  ${event.localizedName(locale)}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
+
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant,
             )
-            // Keep the source values in the compact summary, separate from detail-only impact.
+
+            // Bottom 3-Column Metric Matrix
             FlowRow(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap),
-                verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
                 maxItemsInEachRow = if (ResearchLayout.stackMetadata) 1 else Int.MAX_VALUE,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(event.localTime(), style = MaterialTheme.typography.labelLarge)
-                    Text(" · ${importanceLabel(event.importance)}", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelLarge)
-                    Spacer(Modifier.width(ResearchLayout.smallGap))
-                    ImportanceDots(event.importance)
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
-                    InlineValue(stringResource(R.string.previous), event.value(event.previous))
-                    InlineValue(stringResource(R.string.consensus), event.value(event.consensus))
-                    InlineValue(stringResource(R.string.forecast), event.value(event.forecast))
-                    if (!event.actual.isNullOrBlank()) {
-                        InlineValue(stringResource(R.string.actual), event.value(event.actual))
-                    }
+                InlineValue(stringResource(R.string.previous), event.value(event.previous))
+                InlineValue(stringResource(R.string.consensus), event.value(event.consensus))
+                InlineValue(stringResource(R.string.forecast), event.value(event.forecast))
+                if (!event.actual.isNullOrBlank()) {
+                    InlineValue(stringResource(R.string.actual), event.value(event.actual))
                 }
             }
         }
@@ -254,57 +481,67 @@ internal fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
 }
 
 @Composable
-private fun InlineValue(label: String, value: String) = Row(verticalAlignment = Alignment.CenterVertically) {
-    Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Spacer(Modifier.width(4.dp))
-    Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+private fun InlineValue(label: String, value: String) = Column(
+    verticalArrangement = Arrangement.spacedBy(1.dp),
+) {
+    Text(
+        label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+        value,
+        style = MaterialTheme.typography.bodyMedium.merge(TabularStyle),
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
 }
 
 @Composable
-private fun MarketMiniCard(
+private fun MarketMiniTile(
     label: String,
     liveQuote: LiveMarketQuote?,
     modifier: Modifier = Modifier,
 ) {
     val locale = LocalConfiguration.current.locales[0]
     val price = liveQuote?.price
-    Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+    val isLive = price != null && liveQuote.stale != true
+    Column(
+        modifier = modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
         Row(
-            modifier = Modifier.padding(
-                horizontal = ResearchLayout.miniCardPadding,
-                vertical = ResearchLayout.denseGap,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    stringResource(
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Box(
+                modifier = Modifier
+                    .size(5.dp)
+                    .clip(CircleShape)
+                    .background(
                         when {
-                            price == null -> R.string.waiting_quotes
-                            liveQuote?.stale == true -> R.string.market_stale
-                            else -> R.string.live_snapshot
+                            isLive -> AssetUp
+                            price != null -> Upcoming
+                            else -> MaterialTheme.colorScheme.outlineVariant
                         },
                     ),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Text(
-                price?.let { formatMarketPrice(it, locale) } ?: "--",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
             )
         }
+        Text(
+            price?.let { formatMarketPrice(it, locale) } ?: "--",
+            style = MaterialTheme.typography.titleSmall.merge(TabularStyle),
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+        )
     }
 }

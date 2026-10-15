@@ -1,27 +1,49 @@
 package com.macroresearch.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
-import androidx.compose.ui.res.stringResource
-import com.macroresearch.R
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.activity.compose.BackHandler
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -29,13 +51,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.macroresearch.R
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.ui.analysis.AnalysisScreen
 import com.macroresearch.ui.calendar.CalendarScreen
 import com.macroresearch.ui.event.EventDetailScreen
+import com.macroresearch.ui.followed.FollowedEventsScreen
 import com.macroresearch.ui.history.HistoryScreen
 import com.macroresearch.ui.home.HomeScreen
-import com.macroresearch.ui.followed.FollowedEventsScreen
 import com.macroresearch.ui.market.MarketScreen
 import com.macroresearch.ui.settings.SettingsScreen
 
@@ -65,9 +88,6 @@ fun MacroApp(
     val navController = rememberNavController()
     val initialNotificationEventId = remember { notificationEventId }
     val backStackEntry by navController.currentBackStackEntryAsState()
-    // Wait until NavHost has installed its graph and produced a back-stack entry. On a cold
-    // start the notification intent can arrive before navigation is ready; navigating earlier
-    // can be dropped or fail because the destination is not registered yet.
     LaunchedEffect(notificationEventId, backStackEntry?.destination?.route) {
         val eventId = notificationEventId ?: return@LaunchedEffect
         val entry = backStackEntry ?: return@LaunchedEffect
@@ -77,8 +97,6 @@ fun MacroApp(
         onNotificationHandled()
     }
     val currentDestination = backStackEntry?.destination
-    // A notification-launched event is the start destination and therefore has no nav entry
-    // behind it. Intercept the system Back key and return Home rather than finishing the app.
     BackHandler(
         enabled = initialNotificationEventId != null &&
             currentDestination?.route == "event/{eventId}",
@@ -90,49 +108,100 @@ fun MacroApp(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             if (showBottomBar) {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
                     tonalElevation = 0.dp,
                 ) {
-                    destinations.forEach { destination ->
-                        val selected = currentDestination?.hierarchy?.any {
-                            it.route == destination.route
-                        } == true
-                        NavigationBarItem(
-                            selected = selected,
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                            onClick = {
-                                val startDestination = navController.graph.findStartDestination()
-                                if (destination.route == startDestination.route) {
-                                    navController.popBackStack(startDestination.id, inclusive = false)
-                                } else {
-                                    navController.navigate(destination.route) {
-                                        popUpTo(startDestination.id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                }
-                            },
-                            icon = { Icon(destination.icon, stringResource(destination.label)) },
-                            label = { Text(stringResource(destination.label)) },
+                    Column(modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
+                        HorizontalDivider(
+                            thickness = 1.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant,
                         )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(58.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            destinations.forEach { destination ->
+                                val isSelected = currentDestination?.hierarchy?.any {
+                                    it.route == destination.route
+                                } == true
+                                val label = stringResource(destination.label)
+                                val tint = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(58.dp)
+                                        .semantics { selected = isSelected }
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            role = Role.Tab,
+                                            onClick = {
+                                                val startDestination = navController.graph.findStartDestination()
+                                                if (destination.route == startDestination.route) {
+                                                    navController.popBackStack(startDestination.id, inclusive = false)
+                                                } else {
+                                                    navController.navigate(destination.route) {
+                                                        popUpTo(startDestination.id) {
+                                                            saveState = true
+                                                        }
+                                                        launchSingleTop = true
+                                                        restoreState = true
+                                                    }
+                                                }
+                                            },
+                                        ),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(28.dp)
+                                            .height(3.dp)
+                                            .clip(RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp))
+                                            .background(
+                                                if (isSelected) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.surfaceContainerLowest,
+                                            ),
+                                    )
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = destination.icon,
+                                            contentDescription = label,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = tint,
+                                        )
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = tint,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                }
+                            }
+                        }
                     }
                 }
             }
         },
     ) { padding ->
-        // Use the notification destination as the graph's initial route on cold start. This
-        // avoids racing an early navigate() against NavHost graph installation.
         NavHost(
             navController,
             startDestination = initialNotificationEventId?.let { "event/$it" } ?: "home",
@@ -167,9 +236,6 @@ fun MacroApp(
                     id = id,
                     repository = repository,
                     onBack = {
-                        // A notification can make the event the graph's initial destination,
-                        // leaving no previous entry. In that case Back should return home
-                        // instead of exiting the app.
                         if (!navController.popBackStack()) {
                             navController.navigate("home") { launchSingleTop = true }
                         }
@@ -189,4 +255,3 @@ fun MacroApp(
         }
     }
 }
-
