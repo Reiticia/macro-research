@@ -9,12 +9,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,7 +31,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -41,6 +41,8 @@ import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.remote.BackendAuthenticationDisabledException
 import com.macroresearch.data.remote.BackendProtocolException
 import com.macroresearch.data.remote.BackendUnauthorizedException
+import com.macroresearch.ui.common.terminal.TerminalButton
+import com.macroresearch.ui.theme.ResearchLayout
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -50,6 +52,7 @@ import kotlinx.coroutines.launch
  * Switching modes must be confirmed because the two id spaces cannot be mixed: the local event
  * cache and the follow list are dropped, and the user has to re-follow events on the other side.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DataSourceSettings(repository: MacroRepository) {
     val settings by repository.dataSourceSettings.collectAsStateWithLifecycle()
@@ -81,39 +84,50 @@ fun DataSourceSettings(repository: MacroRepository) {
     val addressInvalidLabel = stringResource(R.string.backend_key_address_invalid)
     val tokenLabel = stringResource(R.string.backend_token)
 
-    Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(stringResource(R.string.data_source), fontWeight = FontWeight.Bold)
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = ResearchLayout.pagePadding, vertical = ResearchLayout.gap),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
             Text(
                 stringResource(R.string.data_source_note),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    enabled = !busy,
-                    selected = settings.mode == DataSourceMode.DIRECT,
-                    onClick = { pendingMode = DataSourceMode.DIRECT },
-                    label = { Text(stringResource(R.string.data_source_direct)) },
-                )
-                FilterChip(
-                    enabled = !busy,
-                    selected = settings.mode == DataSourceMode.BACKEND,
-                    onClick = {
-                        // First tap: open the configuration. Switching still goes through the
-                        // confirmation dialog, and only once address and token are usable.
-                        showBackendConfig = true
-                        val incomplete = baseUrl.isBlank() ||
-                            (token.isBlank() && !settings.tokenConfigured)
-                        if (incomplete) {
-                            error = incompleteLabel
-                            status = null
-                        } else {
-                            pendingMode = DataSourceMode.BACKEND
-                        }
-                    },
-                    label = { Text(stringResource(R.string.data_source_backend)) },
-                )
+            val modes = listOf(
+                DataSourceMode.DIRECT to R.string.data_source_direct,
+                DataSourceMode.BACKEND to R.string.data_source_backend,
+            )
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                modes.forEachIndexed { index, (mode, label) ->
+                    SegmentedButton(
+                        selected = settings.mode == mode,
+                        onClick = {
+                            if (mode == DataSourceMode.DIRECT) {
+                                pendingMode = DataSourceMode.DIRECT
+                            } else {
+                                // First tap: open the configuration. Switching still goes through the
+                                // confirmation dialog, and only once address and token are usable.
+                                showBackendConfig = true
+                                val incomplete = baseUrl.isBlank() ||
+                                    (token.isBlank() && !settings.tokenConfigured)
+                                if (incomplete) {
+                                    error = incompleteLabel
+                                    status = null
+                                } else {
+                                    pendingMode = DataSourceMode.BACKEND
+                                }
+                            }
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index, modes.size, MaterialTheme.shapes.small),
+                        enabled = !busy,
+                        colors = SegmentedButtonDefaults.colors(
+                            activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            activeBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                        label = { Text(stringResource(label)) },
+                    )
+                }
             }
             Text(
                 stringResource(
@@ -250,7 +264,7 @@ fun DataSourceSettings(repository: MacroRepository) {
                             }
                         },
                     ) { Text(stringResource(R.string.backend_clear)) }
-                    Button(
+                    TerminalButton(
                         enabled = !busy,
                         onClick = {
                             busy = true
@@ -279,7 +293,6 @@ fun DataSourceSettings(repository: MacroRepository) {
                     ) { Text(stringResource(R.string.backend_test)) }
                 }
             }
-        }
     }
 
     pendingMode?.let { mode ->
@@ -288,7 +301,7 @@ fun DataSourceSettings(repository: MacroRepository) {
             title = { Text(stringResource(R.string.data_source_switch_title)) },
             text = { Text(stringResource(R.string.data_source_switch_body)) },
             confirmButton = {
-                Button(onClick = {
+                TerminalButton(onClick = {
                     val target = mode
                     pendingMode = null
                     // Leaving the backend collapses its configuration block again.

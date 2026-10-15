@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -34,6 +32,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.macroresearch.BuildConfig
 import com.macroresearch.R
+import com.macroresearch.ui.common.terminal.TerminalButton
+import com.macroresearch.ui.theme.ResearchLayout
 import com.macroresearch.update.*
 import java.text.DateFormat
 import java.util.Date
@@ -43,9 +43,10 @@ fun AppUpdateSettings(updates: UpdateCoordinator, onShowNotes: () -> Unit, onIns
     val state by updates.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val automaticLabel = stringResource(R.string.update_auto_check)
-    Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(stringResource(R.string.app_update), fontWeight = FontWeight.Bold)
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = ResearchLayout.pagePadding, vertical = ResearchLayout.gap),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
             Text(stringResource(R.string.update_current_version, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE), style = MaterialTheme.typography.bodyMedium)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(automaticLabel, modifier = Modifier.weight(1f))
@@ -80,21 +81,20 @@ fun AppUpdateSettings(updates: UpdateCoordinator, onShowNotes: () -> Unit, onIns
                 }
                 UpdateErrorText(download.error)
             }
-            Button(enabled = state.check.phase != CheckPhase.CHECKING, onClick = { updates.check() }) { Text(stringResource(R.string.update_check)) }
+            TerminalButton(enabled = state.check.phase != CheckPhase.CHECKING, onClick = { updates.check() }) { Text(stringResource(R.string.update_check)) }
             val target = state.downloadRelease ?: state.check.release
             when (download.phase) {
                 DownloadPhase.DOWNLOADING, DownloadPhase.PAUSED, DownloadPhase.VERIFYING -> TextButton(onClick = updates::cancelDownload) { Text(stringResource(R.string.update_cancel_download)) }
                 DownloadPhase.READY -> {
-                    Button(onClick = onInstall) { Text(stringResource(R.string.update_install)) }
+                    TerminalButton(onClick = onInstall) { Text(stringResource(R.string.update_install)) }
                     TextButton(onClick = updates::cancelDownload) { Text(stringResource(R.string.update_cancel_download)) }
                 }
                 else -> if (target != null && target.manifest.versionCode > BuildConfig.VERSION_CODE && state.check.error != UpdateError.UNSUPPORTED_ANDROID) {
-                    Button(onClick = { updates.download(target) }) { Text(stringResource(if (download.phase == DownloadPhase.FAILED) R.string.update_retry_download else R.string.update_download)) }
+                    TerminalButton(onClick = { updates.download(target) }) { Text(stringResource(if (download.phase == DownloadPhase.FAILED) R.string.update_retry_download else R.string.update_download)) }
                 }
             }
             TextButton(onClick = onShowNotes) { Text(stringResource(R.string.whats_new)) }
             TextButton(onClick = { openReleasePage(context) }) { Text(stringResource(R.string.update_release_page)) }
-        }
     }
 }
 

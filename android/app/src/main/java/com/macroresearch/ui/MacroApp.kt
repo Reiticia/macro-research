@@ -44,7 +44,9 @@ import com.macroresearch.ui.history.HistoryScreen
 import com.macroresearch.ui.home.HomeScreen
 import com.macroresearch.ui.followed.FollowedEventsScreen
 import com.macroresearch.ui.market.MarketScreen
+import com.macroresearch.ui.settings.SettingsDetailScreen
 import com.macroresearch.ui.settings.SettingsScreen
+import com.macroresearch.ui.settings.SettingsSection
 
 private data class TopDestination(
     val route: String,
@@ -173,7 +175,27 @@ fun MacroApp(
             composable("history") {
                 HistoryScreen(repository, padding) { navController.navigate("event/$it") }
             }
-            composable("settings") { SettingsScreen(repository, padding, updates, onShowWhatsNew, onInstallUpdate) }
+            composable("settings") {
+                SettingsScreen(
+                    repository = repository,
+                    padding = padding,
+                    updates = updates,
+                    onShowWhatsNew = onShowWhatsNew,
+                    onOpen = { navController.navigate("settings/${it.route}") },
+                )
+            }
+            composable("settings/{section}") { entry ->
+                val section = SettingsSection.fromRoute(entry.arguments?.getString("section")) ?: return@composable
+                SettingsDetailScreen(
+                    section = section,
+                    repository = repository,
+                    padding = padding,
+                    updates = updates,
+                    onShowWhatsNew = onShowWhatsNew,
+                    onInstallUpdate = onInstallUpdate,
+                    onBack = navController::popBackStack,
+                )
+            }
             composable("followed") {
                 FollowedEventsScreen(
                     repository = repository,

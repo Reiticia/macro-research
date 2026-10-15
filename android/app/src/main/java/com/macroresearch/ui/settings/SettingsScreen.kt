@@ -1,441 +1,144 @@
 package com.macroresearch.ui.settings
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Functions
 import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.outlined.VisibilityOff
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.outlined.NewReleases
+import androidx.compose.material.icons.outlined.Newspaper
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.QueryStats
+import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.SystemUpdate
+import androidx.compose.material.icons.outlined.TextFields
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.macroresearch.BuildConfig
 import com.macroresearch.R
 import com.macroresearch.data.CountryPreferences
-import com.macroresearch.data.DataSourceMode
 import com.macroresearch.data.MacroRepository
-import com.macroresearch.data.MarketPreferences
-import com.macroresearch.ui.common.assetLabel
-import com.macroresearch.ui.common.countryLabel
+import com.macroresearch.ui.common.appLocale
+import com.macroresearch.ui.common.terminal.Hairline
+import com.macroresearch.ui.common.terminal.PageHeader
+import com.macroresearch.ui.common.terminal.SectionHeader
+import com.macroresearch.ui.common.terminal.SettingsRow
+import com.macroresearch.ui.theme.LocalDisplaySettings
 import com.macroresearch.ui.theme.ResearchLayout
-import kotlinx.coroutines.launch
+import com.macroresearch.update.CheckPhase
+import com.macroresearch.update.UpdateCoordinator
+
+data class SettingsEntry(val section: SettingsSection, val icon: ImageVector, val summary: SettingsSummary?)
+
+data class SettingsGroup(@StringRes val title: Int, val entries: List<SettingsEntry>)
 
 @Composable
 fun SettingsScreen(
     repository: MacroRepository,
     padding: PaddingValues,
-    updates: com.macroresearch.update.UpdateCoordinator? = null,
-    onShowWhatsNew: () -> Unit = {},
-    onInstallUpdate: () -> Unit = {},
+    updates: UpdateCoordinator?,
+    onShowWhatsNew: () -> Unit,
+    onOpen: (SettingsSection) -> Unit,
 ) {
-    val selectedCountries by repository.selectedCountries.collectAsStateWithLifecycle()
-    val countries = CountryPreferences.SUPPORTED_COUNTRIES.associateWith { it in selectedCountries }
-    val selectedMarkets by repository.selectedMarkets.collectAsStateWithLifecycle()
-    val markets = MarketPreferences.SUPPORTED_MARKETS.associateWith { it in selectedMarkets }
     val dataSource by repository.dataSourceSettings.collectAsStateWithLifecycle()
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding)
-            .padding(horizontal = ResearchLayout.pagePadding, vertical = ResearchLayout.gap),
-        verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
-    ) {
-        Column {
-            Text(
-                stringResource(R.string.nav_settings),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                stringResource(R.string.settings_subtitle),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(bottom = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
-        ) {
-            item { DataSourceSettings(repository) }
-            item { DisplaySettingsCard() }
-            if (updates != null) item { AppUpdateSettings(updates, onShowWhatsNew, onInstallUpdate) }
-            if (dataSource.mode == DataSourceMode.DIRECT) {
-                item { DataNetworkSettings(repository) }
-            }
-            // Personal AI generation is available in either data-source mode.
-            item { TranslationApiSettings(repository) }
-            item { AnalysisMethodSettings(repository) }
-            item { NewsContextSettings(repository) }
-            // Interface localization is independent of event-name translation. Without a
-            // translation API, direct mode can still use a Chinese interface while event names
-            // remain in their source language.
-            item { LanguageSettings() }
-            item {
-                SettingsGroup(
-                    stringResource(R.string.countries_regions),
-                    countries,
-                    { countryLabel(it) },
-                ) { key, checked -> repository.setCountryEnabled(key, checked) }
-            }
-            item {
-                MarketSettingsGroup(markets) { key, checked ->
-                    repository.setMarketEnabled(key, checked)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DataNetworkSettings(repository: MacroRepository) {
-    val configured by repository.proxyAddress.collectAsStateWithLifecycle()
-    var address by rememberSaveable(configured) { mutableStateOf(configured) }
-    var invalid by rememberSaveable { mutableStateOf(false) }
-    var saved by rememberSaveable { mutableStateOf(false) }
-    Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(stringResource(R.string.data_network), fontWeight = FontWeight.Bold)
-            Text(stringResource(R.string.data_proxy_note), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedTextField(
-                value = address,
-                onValueChange = { address = it; invalid = false; saved = false },
-                label = { Text(stringResource(R.string.data_proxy)) },
-                placeholder = { Text("host:port") },
-                singleLine = true,
-                isError = invalid,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (invalid) Text(stringResource(R.string.data_proxy_invalid), color = MaterialTheme.colorScheme.error)
-            if (saved) Text(stringResource(R.string.data_proxy_saved), color = MaterialTheme.colorScheme.primary)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = {
-                    repository.saveCalendarProxy("")
-                    address = ""
-                    invalid = false
-                    saved = true
-                }) { Text(stringResource(R.string.data_proxy_clear)) }
-                Button(onClick = {
-                    runCatching { repository.saveCalendarProxy(address) }
-                        .onSuccess { invalid = false; saved = true }
-                        .onFailure { invalid = true }
-                }) { Text(stringResource(R.string.save)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TranslationApiSettings(repository: MacroRepository) {
-    val settings by repository.translationSettings.collectAsStateWithLifecycle()
-    val remoteError by repository.translationError.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope()
-    var apiKey by rememberSaveable { mutableStateOf("") }
-    var baseUrl by rememberSaveable { mutableStateOf(settings.baseUrl) }
-    var model by rememberSaveable { mutableStateOf(settings.model) }
-    var revealKey by rememberSaveable { mutableStateOf(false) }
-    var localError by rememberSaveable { mutableStateOf<String?>(null) }
-    var saved by rememberSaveable { mutableStateOf(false) }
-    var fetchingModels by rememberSaveable { mutableStateOf(false) }
-    var showModelPicker by rememberSaveable { mutableStateOf(false) }
-    var availableModels by remember { mutableStateOf(emptyList<String>()) }
-
-    LaunchedEffect(settings.baseUrl, settings.model) {
-        baseUrl = settings.baseUrl
-        model = settings.model
-    }
-
-    Card {
-        Column(
-            Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Column {
-                        Text(stringResource(R.string.translation_api), fontWeight = FontWeight.Bold)
-                        Text(
-                            stringResource(
-                                if (settings.configured) R.string.api_key_configured
-                                else R.string.api_key_not_configured,
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (settings.configured) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
-                }
-            }
-            HorizontalDivider()
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = { apiKey = it; saved = false; localError = null },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.api_key)) },
-                placeholder = {
-                    Text(
-                        stringResource(
-                            if (settings.configured) R.string.api_key_replace_hint
-                            else R.string.api_key_hint,
-                        ),
+    val countries by repository.selectedCountries.collectAsStateWithLifecycle()
+    val markets by repository.selectedMarkets.collectAsStateWithLifecycle()
+    val translation by repository.translationSettings.collectAsStateWithLifecycle()
+    val method by repository.analysisMethod.collectAsStateWithLifecycle()
+    val news by repository.newsSettings.collectAsStateWithLifecycle()
+    val display = LocalDisplaySettings.current
+    val updateState = updates?.let { it.state.collectAsStateWithLifecycle().value }
+    val groups = listOf(
+        SettingsGroup(
+            R.string.settings_group_data,
+            listOf(
+                SettingsEntry(SettingsSection.DataSource, Icons.Outlined.SwapHoriz, dataSourceSummary(dataSource)),
+                SettingsEntry(
+                    SettingsSection.Countries,
+                    Icons.Outlined.Public,
+                    countriesSummary(countries.size, CountryPreferences.SUPPORTED_COUNTRIES.size),
+                ),
+                SettingsEntry(SettingsSection.Markets, Icons.Outlined.QueryStats, marketsSummary(markets.size)),
+            ),
+        ),
+        SettingsGroup(
+            R.string.settings_group_ai,
+            listOf(
+                SettingsEntry(SettingsSection.AiApi, Icons.Outlined.Key, aiApiSummary(translation.configured)),
+                SettingsEntry(SettingsSection.AnalysisMethod, Icons.Outlined.Functions, analysisMethodSummary(method)),
+                SettingsEntry(SettingsSection.News, Icons.Outlined.Newspaper, newsSummary(news.enabled)),
+            ),
+        ),
+        SettingsGroup(
+            R.string.settings_group_interface,
+            listOf(
+                SettingsEntry(SettingsSection.Display, Icons.Outlined.TextFields, displaySummary(display.mode)),
+                SettingsEntry(SettingsSection.Language, Icons.Outlined.Translate, languageSummary(AppLanguage.fromLocale(appLocale()))),
+            ),
+        ),
+        SettingsGroup(
+            R.string.settings_group_about,
+            listOfNotNull(
+                updateState?.let { state ->
+                    val available = state.check.release?.manifest?.versionName
+                        ?.takeIf { state.check.phase == CheckPhase.AVAILABLE }
+                    SettingsEntry(
+                        SettingsSection.Updates,
+                        Icons.Outlined.SystemUpdate,
+                        updateSummary(BuildConfig.VERSION_NAME, available, state.download.phase),
                     )
                 },
-                singleLine = true,
-                visualTransformation = if (revealKey) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { revealKey = !revealKey }) {
-                        Icon(
-                            if (revealKey) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                            stringResource(if (revealKey) R.string.hide_api_key else R.string.show_api_key),
-                        )
-                    }
-                },
-            )
-            OutlinedTextField(
-                value = baseUrl,
-                onValueChange = { baseUrl = it; saved = false; localError = null },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.api_endpoint)) },
-                supportingText = { Text(stringResource(R.string.api_endpoint_note)) },
-                singleLine = true,
-            )
-            OutlinedTextField(
-                value = model,
-                onValueChange = { model = it; saved = false; localError = null },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.api_model)) },
-                singleLine = true,
-            )
-            if (settings.configured) {
-                OutlinedButton(
-                    onClick = {
-                        scope.launch {
-                            fetchingModels = true
-                            localError = null
-                            runCatching { repository.translationModels(baseUrl) }
-                                .onSuccess { models ->
-                                    availableModels = models
-                                    showModelPicker = true
-                                }
-                                .onFailure { localError = it.message }
-                            fetchingModels = false
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = baseUrl.isNotBlank() && !fetchingModels,
-                ) {
-                    if (fetchingModels) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    } else {
-                        Icon(
-                            Icons.Outlined.CloudDownload,
-                            contentDescription = null,
-                            modifier = Modifier.padding(end = 10.dp),
-                        )
-                    }
-                    Text(
-                        stringResource(
-                            if (fetchingModels) R.string.fetching_models else R.string.fetch_models,
-                        ),
-                    )
-                }
-            }
-            (localError ?: remoteError)?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
-            if (saved) {
-                Text(
-                    stringResource(R.string.api_settings_saved),
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            ) {
-                if (settings.configured) {
-                    TextButton(
-                        onClick = {
-                            repository.clearTranslationSettings()
-                            apiKey = ""
-                            localError = null
-                            saved = false
-                        },
-                    ) { Text(stringResource(R.string.remove_api_key)) }
-                }
-                Button(
-                    onClick = {
-                        runCatching {
-                            if (apiKey.isBlank() && settings.configured) {
-                                repository.updateTranslationProvider(baseUrl, model)
-                            } else {
-                                repository.saveTranslationSettings(apiKey, baseUrl, model)
-                                apiKey = ""
-                            }
-                        }.onSuccess {
-                            localError = null
-                            saved = true
-                        }.onFailure { localError = it.message }
-                    },
-                    enabled = apiKey.isNotBlank() || settings.configured,
-                ) { Text(stringResource(R.string.save)) }
-            }
-            Text(
-                stringResource(R.string.api_key_security_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-
-    if (showModelPicker) {
-        ModelPickerDialog(
-            models = availableModels,
-            selected = model,
-            onSelect = { selected ->
-                model = selected
-                saved = false
-                localError = null
-                showModelPicker = false
-            },
-            onDismiss = { showModelPicker = false },
-        )
-    }
-}
-
-@Composable
-private fun ModelPickerDialog(
-    models: List<String>,
-    selected: String,
-    onSelect: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.available_models)) },
-        text = {
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
-                items(models, key = { it }) { model ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(model) }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(
-                            selected = model == selected,
-                            onClick = null,
-                        )
-                        Text(model, modifier = Modifier.weight(1f))
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-        },
+            ),
+        ),
     )
-}
-
-@Composable
-private fun SettingsGroup(
-    title: String,
-    values: Map<String, Boolean>,
-    labelFor: @Composable (String) -> String,
-    onChange: (String, Boolean) -> Unit,
-) {
-    Card {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, fontWeight = FontWeight.Bold)
-            values.forEach { (label, checked) ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked, { onChange(label, it) })
-                    Text(labelFor(label))
-                }
-            }
-        }
+    Column(Modifier.fillMaxSize().padding(padding)) {
+        PageHeader(title = stringResource(R.string.nav_settings), subtitle = stringResource(R.string.settings_subtitle))
+        // "本次更新内容"与应用更新入口同在：没有更新模块时不显示。
+        SettingsIndex(groups, onOpen, onShowWhatsNew.takeIf { updates != null }, Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun MarketSettingsGroup(
-    values: Map<String, Boolean>,
-    onChange: (String, Boolean) -> Unit,
+fun SettingsIndex(
+    groups: List<SettingsGroup>,
+    onOpen: (SettingsSection) -> Unit,
+    onShowWhatsNew: (() -> Unit)?,
+    modifier: Modifier = Modifier,
 ) {
-    val selectedCount = values.count { it.value }
-    Card {
-        Column(Modifier.padding(16.dp)) {
-            Text(stringResource(R.string.market_tracking), fontWeight = FontWeight.Bold)
-            values.forEach { (market, checked) ->
-                val enabled = if (checked) {
-                    selectedCount > MarketPreferences.MIN_SELECTIONS
-                } else {
-                    selectedCount < MarketPreferences.MAX_SELECTIONS
-                }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = checked,
-                        onCheckedChange = { onChange(market, it) },
-                        enabled = enabled,
-                    )
-                    Text(assetLabel(market))
+    LazyColumn(modifier, contentPadding = PaddingValues(bottom = ResearchLayout.gap)) {
+        groups.forEach { group ->
+            val about = group.title == R.string.settings_group_about
+            if (group.entries.isEmpty() && !(about && onShowWhatsNew != null)) return@forEach
+            item(key = group.title) {
+                Column {
+                    SectionHeader(stringResource(group.title))
+                    Hairline()
+                    group.entries.forEach { entry ->
+                        val summary = entry.summary
+                        SettingsRow(
+                            icon = entry.icon,
+                            title = stringResource(entry.section.title),
+                            summary = summary?.resolve(),
+                            onClick = { onOpen(entry.section) },
+                            summaryColor = if (summary?.highlight == true) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                        )
+                    }
+                    if (about && onShowWhatsNew != null) {
+                        SettingsRow(Icons.Outlined.NewReleases, stringResource(R.string.whats_new), null, onClick = onShowWhatsNew)
+                    }
                 }
             }
-            Text(
-                stringResource(R.string.market_selection_note, selectedCount),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }

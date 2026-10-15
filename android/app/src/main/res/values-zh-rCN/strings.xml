@@ -405,4 +405,15 @@
     <string name="table_price">价格</string>
     <string name="progress_done">已完成</string>
     <string name="progress_pending">未完成</string>
+    <string name="settings_group_data">数据</string>
+    <string name="settings_group_ai">AI 与分析</string>
+    <string name="settings_group_interface">界面</string>
+    <string name="settings_group_about">关于</string>
+    <string name="settings_markets">首页行情品种</string>
+    <string name="settings_summary_ratio">%1$d / %2$d</string>
+    <string name="settings_summary_on">开启</string>
+    <string name="settings_summary_off">关闭</string>
+    <string name="settings_summary_backend_configured">自建后端 · 已配置</string>
+    <string name="settings_summary_backend_incomplete">自建后端 · 未完成配置</string>
+    <string name="settings_summary_update_ready">可安装更新</string>
 </resources>
