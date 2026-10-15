@@ -131,6 +131,7 @@ fun DetailTopBar(title: String, onBack: () -> Unit, actions: @Composable RowScop
                 }
             },
             actions = actions,
+            expandedHeight = 48.dp,
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
         Hairline()

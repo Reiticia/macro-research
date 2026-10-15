@@ -9,27 +9,15 @@ import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.QueryStats
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.foundation.layout.Column
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import com.macroresearch.ui.common.terminal.Hairline
-import androidx.compose.ui.unit.dp
+import com.macroresearch.ui.common.terminal.TerminalNavItem
+import com.macroresearch.ui.common.terminal.TerminalNavigationBar
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -101,56 +89,31 @@ fun MacroApp(
     Scaffold(
         bottomBar = {
             if (showBottomBar) {
-                Column {
-                    Hairline()
-                    NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        tonalElevation = 0.dp,
-                    ) {
-                        destinations.forEach { destination ->
-                            val selected = currentDestination?.hierarchy?.any {
+                TerminalNavigationBar(
+                    items = destinations.map { destination ->
+                        TerminalNavItem(
+                            label = stringResource(destination.label),
+                            icon = destination.icon,
+                            selected = currentDestination?.hierarchy?.any {
                                 it.route == destination.route
-                            } == true
-                            val accent = MaterialTheme.colorScheme.primary
-                            NavigationBarItem(
-                                selected = selected,
-                                // 去掉胶囊指示器，改为选中项顶部 2dp 琥珀细条。
-                                modifier = Modifier.drawBehind {
-                                    if (selected) {
-                                        drawRect(
-                                            accent,
-                                            topLeft = Offset(size.width * 0.3f, 0f),
-                                            size = Size(size.width * 0.4f, 2.dp.toPx()),
-                                        )
-                                    }
-                                },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    indicatorColor = Color.Transparent,
-                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                ),
-                                onClick = {
-                                    val startDestination = navController.graph.findStartDestination()
-                                    if (destination.route == startDestination.route) {
-                                        navController.popBackStack(startDestination.id, inclusive = false)
-                                    } else {
-                                        navController.navigate(destination.route) {
-                                            popUpTo(startDestination.id) {
-                                                saveState = true
-                                            }
-                                            launchSingleTop = true
-                                            restoreState = true
+                            } == true,
+                            onClick = {
+                                val startDestination = navController.graph.findStartDestination()
+                                if (destination.route == startDestination.route) {
+                                    navController.popBackStack(startDestination.id, inclusive = false)
+                                } else {
+                                    navController.navigate(destination.route) {
+                                        popUpTo(startDestination.id) {
+                                            saveState = true
                                         }
+                                        launchSingleTop = true
+                                        restoreState = true
                                     }
-                                },
-                                icon = { Icon(destination.icon, stringResource(destination.label)) },
-                                label = { Text(stringResource(destination.label)) },
-                            )
-                        }
-                    }
-                }
+                                }
+                            },
+                        )
+                    },
+                )
             }
         },
     ) { padding ->
