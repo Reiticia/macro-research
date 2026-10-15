@@ -38,6 +38,8 @@ impl KeyKind {
 pub struct KeyRequest {
     pub id: i64,
     pub requester_id: i64,
+    pub requester_username: Option<String>,
+    pub requester_name: Option<String>,
     pub requested_kind: String,
     pub state: String,
 }
@@ -82,22 +84,44 @@ impl AccessKeys {
         message: i64,
         kind: KeyKind,
     ) -> Result<(KeyRequest, bool), AppError> {
+        self.request_with_identity(owner, message, kind, None, None)
+            .await
+    }
+
+    /// Names are display hints from Telegram, never authorization identities.
+    pub async fn request_with_identity(
+        &self,
+        owner: i64,
+        message: i64,
+        kind: KeyKind,
+        username: Option<&str>,
+        name: Option<&str>,
+    ) -> Result<(KeyRequest, bool), AppError> {
         if owner <= 0 || message <= 0 {
             return Err(AppError::InvalidRequest(
                 "private Telegram identity required".into(),
             ));
         }
+        let mut tx = self.pool.begin().await?;
         let created: Option<i64> = sqlx::query_scalar(
-            "INSERT INTO api_key_request (requester_id, message_id, requested_kind) \
-             SELECT ?, ?, ? WHERE (SELECT COUNT(*) FROM api_key_request WHERE requester_id = ? \
+            "INSERT INTO api_key_request (requester_id, message_id, requested_kind, requester_username, requester_name) \
+             SELECT ?, ?, ?, ?, ? WHERE (SELECT COUNT(*) FROM api_key_request WHERE requester_id = ? \
              AND created_at >= unixepoch('now', 'start of day')) < 3 ON CONFLICT DO NOTHING RETURNING id",
-        ).bind(owner).bind(message).bind(kind.as_str()).bind(owner).fetch_optional(&self.pool).await?;
-        let request = sqlx::query_as::<_, KeyRequest>(
-            "SELECT id, requester_id, requested_kind, state FROM api_key_request WHERE requester_id = ? \
+        ).bind(owner).bind(message).bind(kind.as_str()).bind(username).bind(name).bind(owner).fetch_optional(&mut *tx).await?;
+        let mut request = sqlx::query_as::<_, KeyRequest>(
+            "SELECT id, requester_id, requester_username, requester_name, requested_kind, state FROM api_key_request WHERE requester_id = ? \
              AND (message_id = ? OR state IN ('pending', 'delivering')) \
              ORDER BY (message_id = ?) DESC, id DESC LIMIT 1",
-        ).bind(owner).bind(message).bind(message).fetch_optional(&self.pool).await?
+        ).bind(owner).bind(message).bind(message).fetch_optional(&mut *tx).await?
             .ok_or(AppError::QuotaExceeded { retry_after_seconds: 86400 })?;
+        // A fresh application refreshes only its unresolved request, including removed usernames.
+        if matches!(request.state.as_str(), "pending" | "delivering") {
+            sqlx::query("UPDATE api_key_request SET requester_username = ?, requester_name = ? WHERE id = ?")
+                .bind(username).bind(name).bind(request.id).execute(&mut *tx).await?;
+            request.requester_username = username.map(str::to_owned);
+            request.requester_name = name.map(str::to_owned);
+        }
+        tx.commit().await?;
         Ok((request, created.is_some()))
     }
 
@@ -218,7 +242,7 @@ impl AccessKeys {
         ).bind(owner).bind(owner).bind(offset).fetch_all(&self.pool).await?)
     }
     pub async fn pending(&self, offset: i64) -> Result<Vec<KeyRequest>, AppError> {
-        Ok(sqlx::query_as("SELECT id, requester_id, requested_kind, state FROM api_key_request WHERE state = 'pending' ORDER BY id LIMIT 10 OFFSET ?")
+        Ok(sqlx::query_as("SELECT id, requester_id, requester_username, requester_name, requested_kind, state FROM api_key_request WHERE state = 'pending' ORDER BY id LIMIT 10 OFFSET ?")
             .bind(offset).fetch_all(&self.pool).await?)
     }
 }

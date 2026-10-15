@@ -50,15 +50,39 @@ fn utc_time(timestamp: Option<i64>) -> String {
         .unwrap_or_else(|| "--".into())
 }
 fn request_text(request: &KeyRequest) -> String {
+    let name = request
+        .requester_name
+        .as_deref()
+        .map(escape)
+        .unwrap_or_else(|| "未记录昵称".into());
+    let username = request
+        .requester_username
+        .as_deref()
+        .map(|value| format!("@{}", escape(value)))
+        .unwrap_or_else(|| "未设置或未记录用户名".into());
     format!(
-        "<b>API Key 申请 #{}</b>\n申请者：<code>{}</code>\n申请类型：{}\n状态：{}",
+        "<b>API Key 申请 #{}</b>\n申请者：{}\n用户名：{}\n用户 ID：<code>{}</code>\n申请类型：{}\n状态：{}",
         request.id,
+        name,
+        username,
         request.requester_id,
         KeyKind::parse(&request.requested_kind)
             .map(KeyKind::label)
             .unwrap_or("未知"),
         escape(&request.state)
     )
+}
+fn identity_field(value: &Value) -> Option<String> {
+    let text: String = value
+        .as_str()?
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(128)
+        .collect();
+    (!text.is_empty()).then_some(text)
 }
 
 pub async fn message(state: &BotState, message: &Value) -> Result<bool, AppError> {
@@ -116,7 +140,23 @@ pub async fn message(state: &BotState, message: &Value) -> Result<bool, AppError
             let Some(message_id) = message["message_id"].as_i64() else {
                 return Ok(true);
             };
-            let (request, created) = match keys.request(sender, message_id, kind).await {
+            let username = identity_field(&message["from"]["username"]);
+            let name = ["first_name", "last_name"]
+                .iter()
+                .filter_map(|field| identity_field(&message["from"][field]))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let name = (!name.is_empty()).then_some(name);
+            let (request, created) = match keys
+                .request_with_identity(
+                    sender,
+                    message_id,
+                    kind,
+                    username.as_deref(),
+                    name.as_deref(),
+                )
+                .await
+            {
                 Ok(result) => result,
                 Err(AppError::QuotaExceeded { .. }) => {
                     state

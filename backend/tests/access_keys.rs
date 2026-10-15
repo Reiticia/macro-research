@@ -237,6 +237,54 @@ async fn approval_delivery_replay_failure_and_restart_do_not_duplicate_or_enable
 }
 
 #[tokio::test]
+async fn identity_migration_preserves_legacy_requests_and_keys() {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    sqlx::raw_sql(include_str!("../migrations/021_api_keys.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO api_key_request (id, requester_id, message_id, requested_kind) VALUES (1, 99, 1, 'device'), (2, 98, 1, 'general')")
+        .execute(&pool).await.unwrap();
+    sqlx::query("UPDATE api_key_request SET state = 'approved' WHERE id = 2")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO api_key (request_id, owner_id, kind, token_hash, token_prefix, issued_by, status) VALUES (2, 98, 'general', ?, 'test-prefix', 42, 'active')")
+        .bind("0".repeat(64)).execute(&pool).await.unwrap();
+    sqlx::raw_sql(include_str!("../migrations/022_key_request_identity.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let keys = AccessKeys::new(pool);
+    let pending = keys.pending(0).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].requester_id, 99);
+    assert!(pending[0].requester_username.is_none());
+    assert!(pending[0].requester_name.is_none());
+    let records = keys.list(None, 0).await.unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].status, "active");
+    assert_eq!(records[0].owner_id, 98);
+    let (updated, created) = keys
+        .request_with_identity(
+            99,
+            2,
+            KeyKind::Device,
+            Some("research_user"),
+            Some("研究用户"),
+        )
+        .await
+        .unwrap();
+    assert!(!created);
+    assert_eq!(updated.id, pending[0].id);
+    assert_eq!(updated.requester_username.as_deref(), Some("research_user"));
+}
+
+#[tokio::test]
 async fn quota_and_revocation_during_delivery_are_safe() {
     let (keys, _, pool) = fixture().await;
     for message in 1..=3 {

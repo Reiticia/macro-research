@@ -29,6 +29,114 @@ fn button_from(user: i64, chat: i64, data: &str) -> Value {
 }
 
 #[tokio::test]
+async fn approval_notices_and_pending_lists_show_persisted_escaped_identity() {
+    let mock = TelegramMock::start().await;
+    let state = fixture(&mock).await;
+    let mut ask = message_from(99, "/request_key device", 1);
+    ask["from"]["username"] = json!("research_user");
+    ask["from"]["first_name"] = json!("小明 <研究>");
+    ask["from"]["last_name"] = json!("& Co");
+    // Chat titles must not override the authenticated sender's identity.
+    ask["chat"]["first_name"] = json!("wrong identity");
+    message(&state, &ask).await.unwrap();
+    message(&state, &ask).await.unwrap();
+    let restarted_keys = AccessKeys::new(state.pool.clone());
+    let pending = restarted_keys.pending(0).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(
+        pending[0].requester_username.as_deref(),
+        Some("research_user")
+    );
+    assert_eq!(
+        pending[0].requester_name.as_deref(),
+        Some("小明 <研究> & Co")
+    );
+    message(&state, &message_from(42, "/key_requests", 2))
+        .await
+        .unwrap();
+    let requests = mock.requests.lock().await;
+    let notices: Vec<_> = requests
+        .iter()
+        .filter(|(method, body)| {
+            method == "sendMessage"
+                && body["chat_id"] == 42
+                && body["text"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("<b>API Key 申请 #")
+        })
+        .collect();
+    // One initial notification, one list entry; replay must not notify again.
+    assert_eq!(notices.len(), 2);
+    for (_, body) in notices {
+        let text = body["text"].as_str().unwrap();
+        assert!(text.contains("申请者：小明 &lt;研究&gt; &amp; Co"));
+        assert!(text.contains("用户名：@research_user"));
+        assert!(text.contains("用户 ID：<code>99</code>"));
+        assert!(!text.contains("wrong identity"));
+        assert_eq!(
+            body["reply_markup"]["inline_keyboard"][0][0]["callback_data"],
+            format!("key_approve:general:{}", pending[0].id)
+        );
+    }
+}
+
+#[tokio::test]
+async fn pending_identity_refreshes_without_duplicate_requests_and_handles_missing_username() {
+    let mock = TelegramMock::start().await;
+    let state = fixture(&mock).await;
+    let mut ask = message_from(99, "/request_key general", 1);
+    ask["from"]["username"] = json!("old_name");
+    message(&state, &ask).await.unwrap();
+    ask["message_id"] = json!(2);
+    ask["from"]["username"] = Value::Null;
+    ask["from"]["first_name"] = json!("小明");
+    message(&state, &ask).await.unwrap();
+    let keys = AccessKeys::new(state.pool.clone());
+    let pending = keys.pending(0).await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert!(pending[0].requester_username.is_none());
+    assert_eq!(pending[0].requester_name.as_deref(), Some("小明"));
+    mock.requests.lock().await.clear();
+    message(&state, &message_from(42, "/key_requests", 3))
+        .await
+        .unwrap();
+    let requests = mock.requests.lock().await;
+    let text = requests[0].1["text"].as_str().unwrap();
+    assert!(text.contains("申请者：小明"));
+    assert!(text.contains("用户名：未设置或未记录用户名"));
+    assert!(text.contains("用户 ID：<code>99</code>"));
+    assert!(!text.contains("old_name"));
+}
+
+#[test]
+fn identity_text_is_bounded_and_html_escaped() {
+    let request = KeyRequest {
+        id: 1,
+        requester_id: 99,
+        requester_username: Some("<b>&user".into()),
+        requester_name: None,
+        requested_kind: "device".into(),
+        state: "pending".into(),
+    };
+    let text = request_text(&request);
+    assert!(text.contains("申请者：未记录昵称"));
+    assert!(text.contains("用户名：@&lt;b&gt;&amp;user"));
+    assert_eq!(
+        identity_field(&json!("  小明\n研究  ")),
+        Some("小明 研究".into())
+    );
+    assert!(identity_field(&json!(" \n ")).is_none());
+    assert_eq!(
+        identity_field(&json!("中".repeat(200)))
+            .unwrap()
+            .chars()
+            .count(),
+        128
+    );
+}
+
+#[tokio::test]
 async fn applications_are_private_admin_approved_idempotent_and_lists_are_masked() {
     let mock = TelegramMock::start().await;
     let state = fixture(&mock).await;
