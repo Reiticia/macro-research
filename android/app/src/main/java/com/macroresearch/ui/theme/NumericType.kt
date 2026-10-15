@@ -34,9 +34,9 @@ internal fun numericType(factor: Float, family: FontFamily = JetBrainsMono): Num
         lineHeight = (size * factor * 1.3f).coerceAtLeast(14f).sp,
     )
     return NumericType(
-        hero = style(28f, FontWeight.Bold),
-        large = style(16f, FontWeight.Bold),
-        body = style(13f, FontWeight.Normal),
+        hero = style(24f, FontWeight.Bold),
+        large = style(14f, FontWeight.Bold),
+        body = style(12f, FontWeight.Normal),
         small = style(11f, FontWeight.Normal),
     )
 }

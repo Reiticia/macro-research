@@ -59,8 +59,24 @@ data class DisplaySettings(
 )
 val LocalDisplaySettings = staticCompositionLocalOf { DisplaySettings() }
 
+/** 终端风基准字号：比 Material 默认小一档，以适应高密度表格布局；系统字体缩放仍在其后生效。 */
+internal val TerminalTypography: Typography = Typography().let { d ->
+    d.copy(
+        headlineSmall = d.headlineSmall.copy(fontSize = 20.sp, lineHeight = 26.sp),
+        titleLarge = d.titleLarge.copy(fontSize = 18.sp, lineHeight = 24.sp),
+        titleMedium = d.titleMedium.copy(fontSize = 15.sp, lineHeight = 21.sp),
+        titleSmall = d.titleSmall.copy(fontSize = 13.sp, lineHeight = 18.sp),
+        bodyLarge = d.bodyLarge.copy(fontSize = 14.sp, lineHeight = 20.sp),
+        bodyMedium = d.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
+        bodySmall = d.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp),
+        labelLarge = d.labelLarge.copy(fontSize = 13.sp, lineHeight = 18.sp),
+        labelMedium = d.labelMedium.copy(fontSize = 12.sp, lineHeight = 16.sp),
+        labelSmall = d.labelSmall.copy(fontSize = 11.sp, lineHeight = 15.sp),
+    )
+}
+
 /** Retains sp units, weights and font families; system font scaling still applies afterwards. */
-internal fun adaptiveTypography(factor: Float, base: Typography = Typography()): Typography {
+internal fun adaptiveTypography(factor: Float, base: Typography = TerminalTypography): Typography {
     fun TextStyle.scaled() = copy(
         fontSize = if (fontSize.isSpecified) (fontSize.value * factor).coerceAtLeast(11f).sp else fontSize,
         lineHeight = if (lineHeight.isSpecified) (lineHeight.value * factor).coerceAtLeast(14f).sp else lineHeight,

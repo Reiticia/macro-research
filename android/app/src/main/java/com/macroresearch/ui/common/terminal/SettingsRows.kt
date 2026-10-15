@@ -48,7 +48,7 @@ fun SettingsRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             summary?.takeIf(String::isNotEmpty)?.let {
                 Text(
                     it,
@@ -81,7 +81,7 @@ fun ToggleRow(label: String, checked: Boolean, onToggle: (Boolean) -> Unit, enab
         Checkbox(checked = checked, onCheckedChange = null, enabled = enabled)
         Text(
             label,
-            style = MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyMedium,
             color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }

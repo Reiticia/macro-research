@@ -51,13 +51,29 @@ class AdaptiveLayoutTest {
         assertTrue(largeFont.stackMetadata)
         // sp is scaled by Android after these styles are supplied; we never override LocalDensity.
         val typography = adaptiveTypography(largeFont.fontFactor)
-        assertTrue(typography.bodyLarge.fontSize.value * 2 > Typography().bodyLarge.fontSize.value)
+        assertTrue(typography.bodyLarge.fontSize.value * 2 > TerminalTypography.bodyLarge.fontSize.value)
         assertTrue(typography.labelSmall.fontSize.value >= 11)
         assertTrue(typography.bodyLarge.lineHeight.value > typography.bodyLarge.fontSize.value)
     }
 
-    @Test fun standardRestoresOriginalTypography() {
-        assertEquals(Typography(), adaptiveTypography(1f))
+    @Test fun systemModeUsesTerminalTypography() {
+        assertEquals(TerminalTypography, adaptiveTypography(1f))
+    }
+
+    @Test fun terminalTypographyIsOneStepSmallerThanMaterial() {
+        val material = Typography()
+        assertEquals(14f, TerminalTypography.bodyLarge.fontSize.value)
+        assertEquals(18f, TerminalTypography.titleLarge.fontSize.value)
+        assertEquals(11f, TerminalTypography.labelSmall.fontSize.value)
+        assertTrue(TerminalTypography.bodyLarge.fontSize.value < material.bodyLarge.fontSize.value)
+        assertTrue(TerminalTypography.titleLarge.fontSize.value < material.titleLarge.fontSize.value)
+        assertTrue(TerminalTypography.bodyMedium.fontSize.value < material.bodyMedium.fontSize.value)
+        listOf(
+            TerminalTypography.headlineSmall, TerminalTypography.titleLarge, TerminalTypography.titleMedium,
+            TerminalTypography.titleSmall, TerminalTypography.bodyLarge, TerminalTypography.bodyMedium,
+            TerminalTypography.bodySmall, TerminalTypography.labelLarge, TerminalTypography.labelMedium,
+            TerminalTypography.labelSmall,
+        ).forEach { assertTrue(it.lineHeight.value > it.fontSize.value) }
     }
 
     @Test fun tableRowsKeepTouchTargetsWhileCompact() {
