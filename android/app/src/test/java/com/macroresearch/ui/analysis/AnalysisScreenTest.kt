@@ -10,4 +10,11 @@ class AnalysisScreenTest {
         assertEquals("+0", formatRawSurprise("0", "K"))
         assertEquals("--", formatRawSurprise(null, "%"))
     }
+
+    @Test fun reactionToneFollowsNumericValueAndMissingIsNeutral() {
+        assertEquals(ReactionTone.Neutral, reactionTone(null))
+        assertEquals(ReactionTone.Up, reactionTone(0.0))
+        assertEquals(ReactionTone.Up, reactionTone(0.31))
+        assertEquals(ReactionTone.Down, reactionTone(-0.2))
+    }
 }

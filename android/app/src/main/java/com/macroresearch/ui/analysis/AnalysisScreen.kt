@@ -23,11 +23,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -511,12 +513,11 @@ private fun ObservedTable(report: AnalysisReport) {
                 Row(Modifier.width(tableWidth).padding(vertical = 5.dp)) {
                     Text(assetLabel(reaction.symbol), Modifier.width(AssetColumn), style = MaterialTheme.typography.bodySmall)
                     listOf(reaction.change1m, reaction.change5m, reaction.change15m, reaction.change30m, reaction.change60m).forEach { change ->
-                        val text = formatChange(change, reaction.reactionUnit)
                         Text(
-                            text,
+                            formatChange(change, reaction.reactionUnit),
                             Modifier.width(horizonColumn),
                             style = ResearchType.small,
-                            color = if (text.startsWith("+")) AssetUp else if (text.startsWith("-")) AssetDown else MaterialTheme.colorScheme.onSurface,
+                            color = reactionColor(change),
                         )
                     }
                     val conforms = comparisons[reaction.symbol]?.conforms
@@ -530,6 +531,23 @@ private fun ObservedTable(report: AnalysisReport) {
             }
         }
     }
+}
+
+internal enum class ReactionTone { Up, Down, Neutral }
+
+// 按数值而非格式化文本判断涨跌，缺失值为中性
+internal fun reactionTone(change: Double?): ReactionTone = when {
+    change == null -> ReactionTone.Neutral
+    change >= 0 -> ReactionTone.Up
+    else -> ReactionTone.Down
+}
+
+@Composable
+@ReadOnlyComposable
+private fun reactionColor(change: Double?): Color = when (reactionTone(change)) {
+    ReactionTone.Up -> AssetUp
+    ReactionTone.Down -> AssetDown
+    ReactionTone.Neutral -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 @Composable
@@ -551,7 +569,7 @@ private fun ReactionTimeline(event: EconomicEvent, market: MarketResponse?) {
                     Text(
                         formatChange(change, if (symbol.startsWith("us") && symbol.endsWith("y")) "basis_points" else "percent"),
                         style = ResearchType.body,
-                        color = when { change == null -> MaterialTheme.colorScheme.onSurfaceVariant; change >= 0 -> AssetUp; else -> AssetDown },
+                        color = reactionColor(change),
                     )
                 }
             }
