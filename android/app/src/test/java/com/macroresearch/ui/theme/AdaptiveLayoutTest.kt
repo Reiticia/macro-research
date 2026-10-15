@@ -50,4 +50,13 @@ class AdaptiveLayoutTest {
     @Test fun standardRestoresOriginalTypography() {
         assertEquals(Typography(), adaptiveTypography(1f))
     }
+
+    @Test fun tableRowsKeepTouchTargetsWhileCompact() {
+        val compact = adaptiveLayout(320f, 1f, DisplayMode.COMPACT)
+        val system = adaptiveLayout(320f, 1f, DisplayMode.SYSTEM)
+        assertEquals(8f, system.rowVertical.value)
+        assertEquals(12f, system.sectionTop.value)
+        assertTrue(compact.rowVertical < system.rowVertical)
+        assertTrue(compact.rowVertical.value >= 6f)
+    }
 }

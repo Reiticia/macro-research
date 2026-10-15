@@ -2,6 +2,7 @@ package com.macroresearch.ui.theme
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.max
@@ -66,11 +67,34 @@ class ColorContrastTest {
 
     @Test
     fun featuredEventLabelsStayReadable() {
+        // 下一事件与倒计时色带使用 surfaceContainerLow。
         listOf(LightColors to LightResearchColors, DarkColors to DarkResearchColors)
             .forEach { (colors, research) ->
-                listOf(colors.primary, colors.onPrimaryContainer, colors.onSurfaceVariant, research.upcoming)
-                    .forEach { text -> assertReadable(text, colors.primaryContainer) }
+                listOf(colors.primary, colors.onSurface, colors.onSurfaceVariant, research.upcoming)
+                    .forEach { text -> assertReadable(text, colors.surfaceContainerLow) }
             }
+    }
+
+    @Test
+    fun statusTagsAndErrorsAreReadableOnPageAndBand() {
+        listOf(LightColors to LightResearchColors, DarkColors to DarkResearchColors)
+            .forEach { (colors, research) ->
+                listOf(research.upcoming, research.dovish, research.assetUp, colors.error, colors.onSurfaceVariant)
+                    .forEach { text ->
+                        assertReadable(text, colors.background)
+                        assertReadable(text, colors.surfaceContainerLow)
+                    }
+            }
+    }
+
+    @Test
+    fun terminalPaletteUsesSingleAmberAccentOnNeutralSurfaces() {
+        assertEquals(Color(0xFFF0B90B), DarkColors.primary)
+        assertEquals(Color(0xFF0B0E11), DarkColors.background)
+        assertEquals(DarkColors.background, DarkColors.surface)
+        assertEquals(Color(0xFF8A6100), LightColors.primary)
+        assertEquals(Color(0xFFFFFFFF), LightColors.background)
+        assertEquals(LightColors.primary, LightResearchColors.upcoming)
     }
 
     private fun assertReadable(text: Color, background: Color) {

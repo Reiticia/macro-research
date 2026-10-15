@@ -25,6 +25,10 @@ data class AdaptiveLayout(
     /** Tighter rhythm for the home hero and mini cards, so the event list keeps the remaining height. */
     val denseGap: Dp get() = (6 * spacingFactor).dp
     val miniCardPadding: Dp get() = (8 * spacingFactor).dp
+
+    /** 表格行的上下内边距；行本身仍保持 48dp 最小高度。 */
+    val rowVertical: Dp get() = (8 * spacingFactor).dp
+    val sectionTop: Dp get() = (12 * spacingFactor).dp
 }
 
 /** Uses window dp (not physical pixels): rotation, split-screen and display zoom work naturally. */
