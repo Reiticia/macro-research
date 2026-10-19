@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.1.0",
+  "notes": {
+    "en": {
+      "client": [
+        "Organize Settings into grouped menus with dedicated detail pages for each preference, including clear summaries and directional navigation.",
+        "Show Telegram requester names and usernames in access-key review notices when available, while retaining numeric user IDs for identification and review."
+      ],
+      "backend": [
+        "Persist Telegram requester display names and usernames with pending access-key requests so administrators can identify applicants after a restart."
+      ]
+    },
+    "zh-CN": {
+      "client": [
+        "设置页按类别整理为分组菜单，每项偏好设置均可进入独立详情页，并显示当前设置摘要及导航箭头。",
+        "审核后端 API Key 申请时显示申请者昵称和已设置的用户名，同时保留数字用户 ID 供识别与审核。"
+      ],
+      "backend": [
+        "待审核的 API Key 申请会持久化 Telegram 申请者昵称和用户名，服务重启后管理员仍可识别申请者。"
+      ]
+    },
+    "zh-TW": {
+      "client": [
+        "設定頁依類別整理為分組選單，每項偏好設定均可進入獨立詳細頁，並顯示目前設定摘要與導覽箭頭。",
+        "審核後端 API Key 申請時顯示申請者暱稱及已設定的使用者名稱，同時保留數字使用者 ID 供識別與審核。"
+      ],
+      "backend": [
+        "待審核的 API Key 申請會保存 Telegram 申請者暱稱與使用者名稱，服務重新啟動後管理員仍可識別申請者。"
+      ]
+    }
+  }
+}
