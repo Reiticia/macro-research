@@ -102,6 +102,8 @@ impl TelegramClient {
             {"command": "status", "description": "查看数据源健康状态"},
             {"command": "usage", "description": "查看近24小时模型用量"},
             {"command": "notifications", "description": "按钮控制公布值缺失/数据源通知"},
+            {"command": "events", "description": "按关键词查询事件 ID、名称和公布时间"},
+            {"command": "test_fcm", "description": "验证 FCM 或向事件关注者发送测试通知"},
             {"command": "test_ai", "description": "测试 AI 接口可用性"},
             {"command": "test_market_api", "description": "测试行情 API 连通性"},
             {"command": "test_calendar_api", "description": "测试日历源连通性"},

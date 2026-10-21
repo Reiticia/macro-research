@@ -16,6 +16,7 @@ async fn fixture(mock: &TelegramMock) -> BotState {
         pool,
         config: crate::config::AppConfig::from_path("config.example.toml").unwrap(),
         translation: None,
+        fcm: None,
         direct_http: reqwest::Client::new(),
         proxied_http: reqwest::Client::new(),
         poll_timeout_seconds: 30,

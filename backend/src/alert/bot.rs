@@ -14,6 +14,7 @@ use crate::{
         TradingEconomicsProvider, TradingViewProvider,
     },
     config::AppConfig,
+    fcm::FcmNotifier,
     llm_usage::LlmUsageRepository,
     market::{BinanceProvider, BiquoteProvider, CnbcProvider, MarketDataProvider, YahooProvider},
     translation::TranslationService,
@@ -33,6 +34,7 @@ pub struct BotState {
     pub pool: SqlitePool,
     pub config: AppConfig,
     pub translation: Option<Arc<TranslationService>>,
+    pub fcm: Option<Arc<FcmNotifier>>,
     pub direct_http: reqwest::Client,
     pub proxied_http: reqwest::Client,
     pub poll_timeout_seconds: u64,
@@ -335,6 +337,8 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
             state.telegram.send_message(chat_id, &text, Some(buttons)).await?;
             return Ok(());
         }
+        "/events" => super::event_commands::list(state, text).await?,
+        "/test_fcm" => test_fcm(state, text).await?,
         "/test_market_api" => {
             state.telegram.send_message(chat_id, "请选择要测试的行情 API：", Some(vec![
                 vec![InlineButton { text: "Yahoo Finance".into(), callback_data: "apitest:yahoo".into() }, InlineButton { text: "BiQuote".into(), callback_data: "apitest:biquote".into() }],
@@ -372,12 +376,55 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
             return Ok(());
         }
         "/help" | "/start" => {
-            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试日历源连通性\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
+            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/events [关键词] — 查询事件 ID、名称和公布时间\n/test_fcm [事件ID] — 验证 FCM；指定 ID 向关注者发送测试通知\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试日历源连通性\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
         }
         _ => return Ok(()),
     };
     state.telegram.send_message(chat_id, &reply, None).await?;
     Ok(())
+}
+
+async fn test_fcm(state: &BotState, text: &str) -> Result<String, crate::error::AppError> {
+    let arguments: Vec<_> = text.split_whitespace().skip(1).collect();
+    let event_id = match arguments.as_slice() {
+        [] => None,
+        [id] => match id.parse::<i64>() {
+            Ok(id) if id > 0 => Some(id),
+            _ => return Ok("用法：/test_fcm [正整数事件ID]。不带 ID 仅验证；带 ID 会向所有关注该事件的设备发送测试通知。".into()),
+        },
+        _ => return Ok("用法：/test_fcm [正整数事件ID]。一次只能指定一个事件。".into()),
+    };
+    let Some(fcm) = &state.fcm else {
+        return Ok(if state.config.fcm.enabled {
+            "❌ FCM 已配置启用但发送器未加载。请检查 fcm.service_account_file 和启动日志（服务账号读取/解析/私钥错误）。"
+        } else {
+            "❌ FCM 未启用。请配置 [fcm] enabled = true 和 service_account_file 后重启后端。"
+        }.into());
+    };
+    let event = if let Some(id) = event_id {
+        match crate::repository::EventRepository::new(state.pool.clone())
+            .get(id)
+            .await
+        {
+            Ok(event) => Some(event),
+            Err(crate::error::AppError::NotFound) => {
+                return Ok(format!(
+                    "❌ 未找到事件 {id}，请先用 /events [关键词] 查询当前后端的事件 ID。"
+                ));
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        None
+    };
+    let result = fcm.send_test(event.as_ref()).await;
+    Ok(match result {
+        Ok(()) => match event_id {
+            Some(id) => format!("✅ FCM 已接受测试消息。\n事件 ID：<code>{id}</code>\nTopic：<code>{}</code>\n已向所有关注该事件的设备发送【FCM 测试】通知，不修改事件数据。\n接受请求不代表设备已收到；请确认客户端使用后端模式、已关注该事件、Google Play Services 可用且通知权限已开启。", crate::fcm::topic_name(id)),
+            None => "✅ FCM validate_only 验证通过（OAuth 令牌可用、发送接口接受请求），未向设备推送。\n如需测试手机收件，请先用 /events [关键词] 查询事件 ID，在后端模式关注对应事件，再发送 /test_fcm 事件ID。".into(),
+        },
+        Err(error) => format!("❌ FCM 测试失败：<code>{}</code>\n可用 /status 查看 push.fcm 健康状态。HTTP 401/403 请检查服务账号权限、Firebase 项目和 Cloud Messaging API；OAuth invalid_grant 请检查私钥及服务器时间；连接/超时请检查 Google 出网及 fcm 代理配置。", crate::alert::telegram::escape(&error.to_string())),
+    })
 }
 
 async fn notification_panel(
@@ -708,6 +755,14 @@ async fn usage_text(state: &BotState) -> Result<String, crate::error::AppError> 
 #[cfg(test)]
 #[path = "bot_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "bot_fcm_tests.rs"]
+mod fcm_tests;
+
+#[cfg(test)]
+#[path = "bot_event_tests.rs"]
+mod event_tests;
 
 async fn read_offset(pool: &SqlitePool) -> Result<i64, crate::error::AppError> {
     Ok(

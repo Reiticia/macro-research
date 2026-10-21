@@ -226,6 +226,30 @@ Android 后端模式下，事件详情页点击 ⭐ 会订阅 `macro_event_<even
 3. 启用 `[fcm]` 后重启后端。FCM OAuth 与发送失败只产生 `push.fcm` 健康告警，不影响事件状态和
    WebSocket 广播。
 
+### Telegram 手动测试
+
+管理员可用以下命令诊断（复用正式推送的服务账号、令牌缓存、HTTP 客户端、超时和 `fcm` 代理路由）：
+
+- `/events [关键词]`：只查询本地缓存，不触发抓取、翻译或推送。不带参数列出前后 7 天内距现在最近的事件；
+  带关键词搜索全部已缓存事件的英文名、简/繁译名、国家或货币（英文不区分大小写，例如 `/events CPI`、
+  `/events 非农`、`/events USD`），关键词最多 100 字符。最多显示 10 条，结果过多时提示缩小关键词范围。
+  每条包含当前后端的事件 ID、名称、国家、UTC 公布时间、状态，以及可复制的 `/test_fcm ID` 命令。
+- `/test_fcm`：获取/复用 OAuth 令牌并向 FCM 发送 `validate_only` 请求，**不向设备推送**。
+- `/test_fcm <事件ID>`：使用当前后端已存在的正整数事件 ID，向 `macro_event_<事件ID>` 发送
+  data-only 高优先级测试消息。**所有关注该事件的设备**都可能收到，并非仅管理员手机。
+  标题明确标注「FCM 测试」，不携带虚构公布值，不修改事件、关注、分析或 WebSocket 状态。
+  先在 Android 后端模式关注该事件，再执行命令；客户端沿用现有通知渠道和本地关注检查。
+
+发送器未启用/加载失败时机器人给出配置提示；发送失败会返回 OAuth 或发送阶段、HTTP 状态及
+结构化错误码（例如 `invalid_grant`、`PERMISSION_DENIED`、`SERVICE_DISABLED`），不回显
+上游原始响应体。测试成功/失败也更新 `/status` 的 `push.fcm` 健康记录。
+FCM 接受或验证请求**不代表设备已收到**；仍需检查 Firebase 项目是否一致、topic 订阅、
+Google Play Services、Google 出网、Android 通知权限和系统后台限制。
+日志 `FCM release notification failed` 是摘要，具体原因见同一日志的 `error` 字段。
+HTTP 401/403 检查服务账号权限及 Cloud Messaging API 是否启用；
+OAuth `invalid_grant` 检查私钥有效性及服务器时间。
+不会自动重试测试消息，避免重复通知；重复命令会再次发送。
+
 FCM 默认关闭。Android 不再通过 WebSocket 显示通知，避免 FCM 与 WebSocket 重复提醒；后端仍保留
 WebSocket 供其他客户端兼容使用。没有 Google Play Services 的设备不保证 FCM 可用；用户拒绝
 Android 13+ 通知权限时消息可以到达但不会显示。
@@ -464,7 +488,7 @@ reasoning 混排、schema 回显、截断、`snake_case`、`verdict` 归一化�
 4. 采纳 → 写入 `event_name_translation` 并回写所有同名事件，所有设备下次刷新即生效；
    屏蔽 → 写入 `translation_correction_mute`，该词条不再接受勘正、不再通知。
 
-机器人命令：`/status`（数据源健康）、`/usage`（近 24 小时模型用量）、`/notifications`（通知开关按钮）。
+机器人命令：`/status`（数据源健康）、`/usage`（近 24 小时模型用量）、`/notifications`（通知开关按钮）、`/events [关键词]`（查询事件 ID）、`/test_fcm [事件ID]`（FCM 验证/测试推送）。
 仅配置文件里 `telegram.admin_chat_ids` 白名单中的 chat 会被响应。
 
 ## 告警

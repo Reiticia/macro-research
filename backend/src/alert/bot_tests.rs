@@ -2,7 +2,7 @@ use super::*;
 use crate::alert::test_support::{TelegramMock, test_pool};
 use serde_json::json;
 
-async fn fixture(mock: &TelegramMock) -> BotState {
+pub(super) async fn fixture(mock: &TelegramMock) -> BotState {
     let pool = test_pool().await;
     BotState {
         telegram: mock.client.clone(),
@@ -12,6 +12,7 @@ async fn fixture(mock: &TelegramMock) -> BotState {
         pool,
         config: AppConfig::from_path("config.example.toml").unwrap(),
         translation: None,
+        fcm: None,
         direct_http: reqwest::Client::new(),
         proxied_http: reqwest::Client::new(),
         poll_timeout_seconds: 30,

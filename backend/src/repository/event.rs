@@ -279,6 +279,39 @@ impl EventRepository {
         rows.into_iter().map(event_from_row).collect()
     }
 
+    /// Bounded, read-only Telegram lookup. Blank search covers the surrounding week;
+    /// a literal keyword searches all retained events, nearest occurrence first.
+    /// The eleventh row is a sentinel so the bot can ask users to narrow the search.
+    pub async fn search_for_admin(
+        &self,
+        keyword: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<EconomicEvent>, AppError> {
+        let rows = sqlx::query(
+            r#"SELECT * FROM economic_event
+               WHERE (? <> '' OR (event_time >= ? AND event_time <= ?))
+                 AND (instr(lower(event), lower(?)) > 0
+                   OR instr(event_zh_cn, ?) > 0
+                   OR instr(event_zh_tw, ?) > 0
+                   OR instr(lower(country), lower(?)) > 0
+                   OR instr(lower(currency), lower(?)) > 0)
+               ORDER BY abs(unixepoch(event_time) - ?), event_time, id
+               LIMIT 11"#,
+        )
+        .bind(keyword)
+        .bind((now - Duration::days(7)).to_rfc3339())
+        .bind((now + Duration::days(7)).to_rfc3339())
+        .bind(keyword)
+        .bind(keyword)
+        .bind(keyword)
+        .bind(keyword)
+        .bind(keyword)
+        .bind(now.timestamp())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(event_from_row).collect()
+    }
+
     pub async fn find_provider_event(
         &self,
         provider: &str,

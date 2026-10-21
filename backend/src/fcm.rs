@@ -54,6 +54,8 @@ pub struct FcmNotifier {
     signing_key: EncodingKey,
     access_token: Mutex<Option<CachedToken>>,
     timeout: Duration,
+    token_url: String,
+    send_url: String,
     health: Option<Arc<HealthRegistry>>,
 }
 
@@ -87,12 +89,18 @@ impl FcmNotifier {
         }
         let signing_key = EncodingKey::from_rsa_pem(account.private_key.as_bytes())
             .map_err(|error| AppError::Config(format!("invalid FCM RSA private key: {error}")))?;
+        let send_url = format!(
+            "https://fcm.googleapis.com/v1/projects/{}/messages:send",
+            account.project_id
+        );
         Ok(Self {
             client,
             account,
             signing_key,
             access_token: Mutex::new(None),
             timeout: timeout.max(Duration::from_secs(5)),
+            token_url: TOKEN_URL.into(),
+            send_url,
             health: None,
         })
     }
@@ -103,7 +111,18 @@ impl FcmNotifier {
     }
 
     pub async fn send_release(&self, event: &EconomicEvent) -> Result<(), AppError> {
-        let result = self.send_release_inner(event).await;
+        self.send_payload(release_payload(event)).await
+    }
+
+    /// No event means validate-only: exercise OAuth and FCM without delivering a message.
+    /// An explicit event uses the same data-only topic route as a real release, but is clearly
+    /// marked as a test and carries no fabricated macro values. No event state is changed.
+    pub async fn send_test(&self, event: Option<&EconomicEvent>) -> Result<(), AppError> {
+        self.send_payload(test_payload(event)).await
+    }
+
+    async fn send_payload(&self, payload: Value) -> Result<(), AppError> {
+        let result = self.send_payload_inner(payload).await;
         if let Some(health) = &self.health {
             match &result {
                 Ok(_) => health.record_success(HEALTH_KEY).await,
@@ -113,27 +132,27 @@ impl FcmNotifier {
         result
     }
 
-    async fn send_release_inner(&self, event: &EconomicEvent) -> Result<(), AppError> {
+    async fn send_payload_inner(&self, payload: Value) -> Result<(), AppError> {
         let token = self.access_token().await?;
-        let endpoint = format!(
-            "https://fcm.googleapis.com/v1/projects/{}/messages:send",
-            self.account.project_id
-        );
         let response = self
             .client
-            .post(endpoint)
+            .post(&self.send_url)
             .bearer_auth(token)
             .timeout(self.timeout)
-            .json(&release_payload(event))
+            .json(&payload)
             .send()
-            .await?;
+            .await
+            .map_err(|error| transport_error("send", error))?;
         let status = response.status();
-        let body = response.text().await?;
+        let body = response
+            .text()
+            .await
+            .map_err(|error| transport_error("send response", error))?;
         if !status.is_success() {
             return Err(AppError::Provider(format!(
                 "FCM send failed with HTTP {}: {}",
                 status,
-                response_preview(&body)
+                response_error_codes(&body)
             )));
         }
         Ok(())
@@ -165,33 +184,7 @@ impl FcmNotifier {
             &self.signing_key,
         )
         .map_err(|error| AppError::Internal(format!("FCM service account JWT failed: {error}")))?;
-        let response = self
-            .client
-            .post(TOKEN_URL)
-            .timeout(self.timeout)
-            .form(&[
-                ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
-                ("assertion", assertion.as_str()),
-            ])
-            .send()
-            .await?;
-        let status = response.status();
-        let body = response.text().await?;
-        if !status.is_success() {
-            return Err(AppError::Provider(format!(
-                "FCM OAuth token request failed with HTTP {}: {}",
-                status,
-                response_preview(&body)
-            )));
-        }
-        let token: TokenResponse = serde_json::from_str(&body).map_err(|error| {
-            AppError::Provider(format!("FCM OAuth token response was invalid: {error}"))
-        })?;
-        if token.access_token.trim().is_empty() {
-            return Err(AppError::Provider(
-                "FCM OAuth token response was empty".into(),
-            ));
-        }
+        let token = self.request_access_token(&assertion).await?;
         let value = token.access_token.clone();
         *cached = Some(CachedToken {
             value,
@@ -199,6 +192,63 @@ impl FcmNotifier {
                 + Duration::from_secs(token.expires_in.saturating_sub(60).max(60)),
         });
         Ok(token.access_token)
+    }
+
+    async fn request_access_token(&self, assertion: &str) -> Result<TokenResponse, AppError> {
+        let response = self
+            .client
+            .post(&self.token_url)
+            .timeout(self.timeout)
+            .form(&[
+                ("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer"),
+                ("assertion", assertion),
+            ])
+            .send()
+            .await
+            .map_err(|error| transport_error("OAuth token request", error))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| transport_error("OAuth token response", error))?;
+        if !status.is_success() {
+            return Err(AppError::Provider(format!(
+                "FCM OAuth token request failed with HTTP {}: {}",
+                status,
+                response_error_codes(&body)
+            )));
+        }
+        let token: TokenResponse = serde_json::from_str(&body).map_err(|_| {
+            AppError::Provider("FCM OAuth token response was invalid (body omitted)".into())
+        })?;
+        if token.access_token.trim().is_empty() {
+            return Err(AppError::Provider(
+                "FCM OAuth token response was empty".into(),
+            ));
+        }
+        Ok(token)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(base: &str) -> Self {
+        Self {
+            client: Client::builder().no_proxy().build().unwrap(),
+            account: ServiceAccount {
+                project_id: "test-project".into(),
+                client_email: "test@example.invalid".into(),
+                private_key: String::new(),
+            },
+            // Tests use a cached dummy token, never a real service account or private key.
+            signing_key: EncodingKey::from_secret(b"not-an-rsa-key"),
+            access_token: Mutex::new(Some(CachedToken {
+                value: "test-access-token".into(),
+                expires_at: std::time::Instant::now() + Duration::from_secs(3600),
+            })),
+            timeout: Duration::from_secs(5),
+            token_url: format!("{base}/token"),
+            send_url: format!("{base}/messages:send"),
+            health: None,
+        }
     }
 }
 
@@ -227,59 +277,73 @@ fn release_payload(event: &EconomicEvent) -> Value {
     })
 }
 
-fn response_preview(body: &str) -> String {
-    let mut preview: String = body.chars().take(512).collect();
-    if body.chars().count() > 512 {
-        preview.push('…');
+fn test_payload(event: Option<&EconomicEvent>) -> Value {
+    let mut payload = json!({
+        "message": {
+            "topic": topic_name(event.map_or(0, |event| event.id)),
+            "data": {
+                "type": "economic_event_released",
+                "eventId": event.map_or(0, |event| event.id).to_string(),
+                "event": "[FCM TEST] Test notification",
+                "eventZhCn": "【FCM 测试】测试通知",
+                "eventZhTw": "【FCM 測試】測試通知",
+                "actual": "",
+                "consensus": ""
+            },
+            "android": { "priority": "HIGH" }
+        }
+    });
+    if event.is_none() {
+        payload["validate_only"] = json!(true);
     }
-    preview
+    payload
+}
+
+fn transport_error(stage: &str, error: reqwest::Error) -> AppError {
+    // Do not include URLs or arbitrary proxy error bodies in logs/Telegram.
+    let reason = if error.is_timeout() {
+        "request timed out"
+    } else if error.is_connect() {
+        "connection failed (check DNS, TLS, proxy and Google connectivity)"
+    } else if error.is_body() || error.is_decode() {
+        "could not read response body"
+    } else {
+        "HTTP transport error"
+    };
+    AppError::Provider(format!("FCM {stage} failed: {reason}"))
+}
+
+/// Only return structured error codes, never an upstream body that may echo credentials or
+/// request data. This text is also persisted in health state and sent to Telegram admins.
+fn response_error_codes(body: &str) -> String {
+    let body: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+    let mut codes = Vec::new();
+    let mut add = |value: &Value| {
+        if let Some(code) = value.as_str()
+            && codes.len() < 8
+            && !code.is_empty()
+            && code.len() <= 128
+            && code.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
+            && !codes.iter().any(|existing| existing == code)
+        {
+            codes.push(code.to_owned());
+        }
+    };
+    add(&body["error"]);
+    add(&body["error"]["status"]);
+    if let Some(details) = body["error"]["details"].as_array() {
+        for detail in details {
+            add(&detail["errorCode"]);
+            add(&detail["reason"]);
+        }
+    }
+    if codes.is_empty() {
+        "unrecognized error response (body omitted)".into()
+    } else {
+        codes.join(", ")
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::model::{EconomicEvent, EventStatus};
-    use rust_decimal::Decimal;
-
-    fn event() -> EconomicEvent {
-        EconomicEvent {
-            id: 143,
-            provider: "test".into(),
-            provider_id: "test-143".into(),
-            release_group_id: None,
-            country: "United States".into(),
-            currency: Some("USD".into()),
-            category: "employment".into(),
-            event: "Nonfarm Payrolls".into(),
-            event_zh_cn: Some("非农就业人数".into()),
-            event_zh_tw: Some("非農就業人數".into()),
-            event_time: chrono::Utc::now(),
-            importance: 3,
-            actual: Some(Decimal::new(100, 0)),
-            previous: None,
-            consensus: Some(Decimal::new(90, 0)),
-            forecast: None,
-            unit: None,
-            status: EventStatus::Released,
-            time_exact: true,
-        }
-    }
-
-    #[test]
-    fn topic_names_are_stable_and_scoped() {
-        assert_eq!(topic_name(143), "macro_event_143");
-    }
-
-    #[test]
-    fn release_payload_is_data_only_and_localizable() {
-        let payload = release_payload(&event());
-        assert_eq!(payload["message"]["topic"], "macro_event_143");
-        assert_eq!(
-            payload["message"]["data"]["type"],
-            "economic_event_released"
-        );
-        assert_eq!(payload["message"]["data"]["eventZhCn"], "非农就业人数");
-        assert_eq!(payload["message"]["android"]["priority"], "HIGH");
-        assert!(payload["message"].get("notification").is_none());
-    }
-}
+#[path = "fcm_tests.rs"]
+pub(crate) mod tests;

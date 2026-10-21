@@ -602,6 +602,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 pool: pool.clone(),
                 config: config.clone(),
                 translation: translation_service.clone(),
+                fcm: fcm.clone(),
                 direct_http: direct_http.clone(),
                 proxied_http: proxied_http.clone(),
                 poll_timeout_seconds: config.telegram.poll_timeout_seconds,

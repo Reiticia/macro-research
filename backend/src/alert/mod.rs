@@ -1,4 +1,5 @@
 pub mod bot;
+mod event_commands;
 mod key_commands;
 pub mod preferences;
 pub mod service;
@@ -8,7 +9,7 @@ pub mod telegram;
 #[cfg(test)]
 mod telegram_tests;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 pub use service::{AlertService, Severity};
 pub use state::{HealthRegistry, SourceHealth};
