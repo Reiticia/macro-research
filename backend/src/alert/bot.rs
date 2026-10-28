@@ -10,7 +10,7 @@ use crate::{
         telegram::{InlineButton, TelegramClient},
     },
     calendar::{
-        CalendarProvider, ForexFactoryProvider, TradingEconomicsApiProvider,
+        BiquoteCalendarProvider, CalendarProvider, ForexFactoryProvider, TradingEconomicsApiProvider,
         TradingEconomicsProvider, TradingViewProvider,
     },
     config::AppConfig,
@@ -161,7 +161,7 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
                 if buttons.is_empty() {
                     if !matches!(
                         module,
-                        "tradingview" | "forexfactory" | "tradingeconomics" | "te_api"
+                        "biquote_calendar" | "tradingview" | "forexfactory" | "tradingeconomics" | "te_api"
                     ) {
                         state
                             .telegram
@@ -348,6 +348,7 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
         }
         "/test_calendar_api" => {
             state.telegram.send_message(chat_id, "请选择要测试的日历源：", Some(vec![
+                vec![InlineButton { text: "BiQuote（主源）".into(), callback_data: "apitest:biquote_calendar".into() }],
                 vec![InlineButton { text: "TradingView".into(), callback_data: "apitest:tradingview".into() }, InlineButton { text: "Forex Factory".into(), callback_data: "apitest:forexfactory".into() }],
                 vec![InlineButton { text: "Trading Economics 页面".into(), callback_data: "apitest:tradingeconomics".into() }, InlineButton { text: "Trading Economics API".into(), callback_data: "apitest:te_api".into() }],
             ])).await?;
@@ -460,6 +461,7 @@ fn api_label(provider: &str) -> &'static str {
         "biquote" => "BiQuote",
         "binance" => "Binance",
         "cnbc" => "CNBC",
+        "biquote_calendar" => "BiQuote 日历",
         "tradingview" => "TradingView 日历",
         "forexfactory" => "Forex Factory 日历",
         "tradingeconomics" => "Trading Economics 页面",
@@ -539,7 +541,12 @@ async fn test_market_api(state: &BotState, provider: &str, symbol: &str) -> Resu
 
 async fn test_calendar_api(state: &BotState, provider: &str) -> Result<(), String> {
     use chrono::{Duration, Utc};
-    let client = if state.config.network.proxies(provider) {
+    let network_source = if provider == "biquote_calendar" {
+        "biquote"
+    } else {
+        provider
+    };
+    let client = if state.config.network.proxies(network_source) {
         state.proxied_http.clone()
     } else {
         state.direct_http.clone()
@@ -547,7 +554,11 @@ async fn test_calendar_api(state: &BotState, provider: &str) -> Result<(), Strin
     let end = Utc::now();
     let start = end - Duration::days(1);
     let result = match provider {
-        "tradingview" => TradingViewProvider::new(client, &state.config.calendar.primary_url)
+        "biquote_calendar" => BiquoteCalendarProvider::new(client, &state.config.calendar.biquote_url)
+            .fetch_events(start, end)
+            .await
+            .map(|_| ()),
+        "tradingview" => TradingViewProvider::new(client, &state.config.calendar.tradingview_url)
             .fetch_events(start, end)
             .await
             .map(|_| ()),

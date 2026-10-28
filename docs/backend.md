@@ -9,7 +9,7 @@ Android (direct | backend)
         │  HTTPS + Bearer
 ┌───────┴─────────────────────────────────────────────────────────────┐
 │ Axum REST + WS          auth / quota / meta / status                │
-│ CalendarService         TradingView → Forex Factory 回退            │
+│ CalendarService         BiQuote → TradingView → Forex Factory       │
 │ MarketService           CNBC(美债) → Yahoo / BiQuote / Binance      │
 │ AnalysisService         规则引擎 (rules.toml)                        │
 │ AiAnalysisService       服务端生成并缓存 AI 简报（3 种方法）         │
@@ -281,14 +281,15 @@ fallback_to_all_on_jev_error = true
 
 | 子系统 | 主源 | 回退 |
 |---|---|---|
-| 财经日历 | TradingView `economic-calendar.tradingview.com/events`（免 Key） | Forex Factory 本周 JSON |
+| 财经日历 | BiQuote `biquote.io/api/calendar`（免 Key） | TradingView → Forex Factory 本周 JSON |
 | 美债收益率 | CNBC 报价 + 1 分钟 K 线 | Yahoo `^UST2YR` / `^TNX` |
 | 指数 / 贵金属 / 美元 | BiQuote | Yahoo |
 | 加密 | Binance (`data-api.binance.vision`) | — |
 
+- BiQuote 使用 `[calendar].biquote_url`；TradingView 使用 `tradingview_url`（兼容旧配置名 `primary_url`），Forex Factory 仍使用 `fallback_url`。旧配置无需修改即可启用 BiQuote 主源。详细字段和边界见 [BiQuote 日历接入](biquote-calendar.md)。
 - 回退周历与主源对同一指标使用不同标题，因此维护一份**封闭且逐条核对过的同义表**；
   合并时把主源的公布值补写到**恰好唯一匹配**（国家 + 精确时刻 + 规范化标题）的回退行上，
-  有歧义就不写。主源的行永远不会被回退源覆盖，也不会删除任何行。
+  有歧义就不写。唯一匹配的公共源事件原位升级，保留 ID、观察流水和关联数据；低优先级源只可填补缺失值，不能覆盖已有主源值，也不删除未匹配行。认证历史导入不参与跨源合并。
 - CNBC 请求固定携带 `Accept: application/json`、网页 `Referer` 与应用 User-Agent，避免被
   Akamai 将无来源的接口请求判为爬虫而返回 403。
 - 服务端行情符号固定为客户端可展示的集合（`config.toml` 的 `[market] symbols`）。每个标的的
@@ -509,7 +510,7 @@ quiet_hours = ""                 # 例 "23:00-07:00"，默认关闭
 quiet_hours_timezone = "Asia/Shanghai"
 ```
 
-告警键：`service.startup`、`calendar.primary`、`calendar.fallback`、`calendar.all_sources`、
+告警键：`service.startup`、`calendar.primary`（BiQuote）、`calendar.tradingview`、`calendar.fallback`（Forex Factory）、`calendar.all_sources`、
 `calendar.data_missing`、`market.cnbc`、`market.yahoo`、`market.biquote`、`market.binance`、
 `analysis.ai`、`translation.relay`。
 
@@ -702,7 +703,7 @@ cargo fmt -- --check
 cargo test
 ```
 
-覆盖：TradingView / Forex Factory / CNBC / Yahoo / BiQuote / Binance 解析与降级、
+覆盖：BiQuote 日历 / TradingView / Forex Factory / CNBC / Yahoo / BiQuote 行情 / Binance 解析与降级、
 同义表合并（含歧义不写、主源不被覆盖）、鉴权 401/200、每日配额 429、
 告警状态机（阈值 / 冷却 / 恢复）、翻译勘正（去重、屏蔽、采纳回写）、
 共享语料的 AI 回包解析，以及既有的仓库、历史分页、状态机与补采测试。

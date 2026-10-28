@@ -12,7 +12,7 @@ pub async fn startup_calendar_sync(service: Arc<CalendarService>) {
             Ok(fetched) => {
                 if let Some(detail) = fetched.degraded_detail {
                     tracing::warn!(%start, %end, count = fetched.events.len(), %detail,
-                        "startup calendar refresh degraded; weekly fallback may not cover history");
+                        "startup calendar refresh used a fallback; verify historical coverage");
                 } else {
                     tracing::info!(%start, %end, count = fetched.events.len(),
                         "startup calendar data and translations synchronized");

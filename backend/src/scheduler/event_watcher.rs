@@ -1,9 +1,10 @@
-use std::{collections::HashSet, time::Duration as StdDuration};
+use std::time::Duration as StdDuration;
 
 use chrono::{Duration, Utc};
 
 use crate::{
     AppState,
+    calendar::parse::occurrence_key,
     config::{CalendarConfig, SchedulerConfig},
     model::{AppEvent, EconomicEvent, EventStatus},
 };
@@ -78,14 +79,18 @@ async fn watch_once(
     let start = active.iter().map(|event| event.event_time).min().unwrap() - Duration::hours(12);
     let end = active.iter().map(|event| event.event_time).max().unwrap() + Duration::hours(12);
     let remote = state.calendar_service.lookup(start, end).await?.events;
-    let watched_ids: HashSet<&str> = active
-        .iter()
-        .map(|event| event.provider_id.as_str())
-        .collect();
-    let relevant: Vec<EconomicEvent> = remote
-        .into_iter()
-        .filter(|event| watched_ids.contains(event.provider_id.as_str()))
-        .collect();
+    let relevant: Vec<EconomicEvent> = active.iter().filter_map(|watched| {
+        let exact = remote.iter().find(|event|
+            event.provider == watched.provider && event.provider_id == watched.provider_id);
+        exact.or_else(|| {
+            if active.iter().filter(|event| same_occurrence(event, watched)).count() != 1 {
+                return None;
+            }
+            let mut matching = remote.iter().filter(|event| same_occurrence(event, watched));
+            let first = matching.next()?;
+            matching.next().is_none().then_some(first)
+        }).cloned()
+    }).collect();
     state
         .events
         .save_events_without_observations(&relevant)
@@ -94,7 +99,8 @@ async fn watch_once(
     for watched in active {
         if let Some(updated) = relevant
             .iter()
-            .find(|event| event.provider_id == watched.provider_id)
+            .find(|event| (event.provider == watched.provider && event.provider_id == watched.provider_id)
+                || same_occurrence(event, &watched))
             && updated.has_release()
         {
             let released = state.events.get(watched.id).await?;
@@ -103,6 +109,12 @@ async fn watch_once(
         }
     }
     Ok(())
+}
+
+fn same_occurrence(left: &EconomicEvent, right: &EconomicEvent) -> bool {
+    left.time_exact && right.time_exact
+        && occurrence_key(&left.country, left.event_time, &left.event)
+            == occurrence_key(&right.country, right.event_time, &right.event)
 }
 
 async fn release(state: &AppState, event: &EconomicEvent) -> Result<(), crate::error::AppError> {

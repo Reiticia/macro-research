@@ -27,7 +27,9 @@ proxied = ["tradingview", "forexfactory", "cnbc", "yahoo", "telegram", "typesafe
 request_timeout_seconds = 20
 
 [calendar]
-primary_url = "https://economic-calendar.tradingview.com/events"
+# 优先级：BiQuote → TradingView → Forex Factory。本地旧 primary_url 仍作为 TradingView 地址读取。
+biquote_url = "https://biquote.io/api/calendar"
+tradingview_url = "https://economic-calendar.tradingview.com/events"
 fallback_url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 base_url = "https://tradingeconomics.com/calendar"
 sync_days = 7

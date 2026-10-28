@@ -18,7 +18,8 @@ use market_event_analyzer::{
     auth::{AuthState, TokenStore},
     backfill::{BackfillRange, BackfillService, repository::BackfillRepository},
     calendar::{
-        CalendarService, ForexFactoryProvider, TradingEconomicsApiProvider, TradingViewProvider,
+        BiquoteCalendarProvider, CalendarService, ForexFactoryProvider, TradingEconomicsApiProvider,
+        TradingViewProvider,
     },
     config::{self, AppConfig},
     fcm::FcmNotifier,
@@ -304,9 +305,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut calendar_service = CalendarService::new(
-        Arc::new(TradingViewProvider::new(
-            client_for("tradingview"),
-            &config.calendar.primary_url,
+        Arc::new(BiquoteCalendarProvider::new(
+            client_for("biquote"),
+            &config.calendar.biquote_url,
         )),
         Arc::new(ForexFactoryProvider::new(
             client_for("forexfactory"),
@@ -314,6 +315,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )),
         events.clone(),
     )
+    .with_secondary(Arc::new(TradingViewProvider::new(
+        client_for("tradingview"),
+        &config.calendar.tradingview_url,
+    )))
     .with_health(health.clone());
     if let Some(translation) = &translation_service {
         calendar_service = calendar_service.with_translation(translation.clone());

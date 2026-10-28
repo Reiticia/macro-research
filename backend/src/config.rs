@@ -84,9 +84,12 @@ pub struct DatabaseConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CalendarConfig {
-    /// TradingView's keyless economic calendar endpoint (primary source).
-    #[serde(default = "default_tradingview_url")]
-    pub primary_url: String,
+    /// BiQuote is the primary keyless calendar source.
+    #[serde(default = "default_biquote_calendar_url")]
+    pub biquote_url: String,
+    /// TradingView is the first fallback. Accept the old config key on upgrade.
+    #[serde(default = "default_tradingview_url", alias = "primary_url")]
+    pub tradingview_url: String,
     /// Forex Factory weekly JSON, used when the primary source cannot answer.
     #[serde(default = "default_forex_factory_url")]
     pub fallback_url: String,
@@ -95,6 +98,10 @@ pub struct CalendarConfig {
     pub base_url: String,
     pub sync_days: i64,
     pub minimum_importance: u8,
+}
+
+fn default_biquote_calendar_url() -> String {
+    "https://biquote.io/api/calendar".into()
 }
 
 fn default_tradingview_url() -> String {
@@ -694,6 +701,16 @@ market_collect_after_minutes = 60
         let config = TranslationConfig::default();
         let error = config.api_key().unwrap_err().to_string();
         assert!(error.contains("translation.api_key"), "{error}");
+    }
+
+    #[test]
+    fn calendar_defaults_to_biquote_and_accepts_legacy_tradingview_url() {
+        let config: CalendarConfig = toml::from_str(
+            "sync_days = 7\nminimum_importance = 3\nprimary_url = 'https://old.example/events'",
+        )
+        .unwrap();
+        assert_eq!(config.biquote_url, "https://biquote.io/api/calendar");
+        assert_eq!(config.tradingview_url, "https://old.example/events");
     }
 
     #[test]

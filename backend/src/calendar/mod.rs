@@ -1,3 +1,4 @@
+mod biquote;
 mod forex_factory;
 pub mod parse;
 mod provider;
@@ -5,6 +6,7 @@ pub mod trading_economics;
 pub mod trading_economics_api;
 mod tradingview;
 
+pub use biquote::BiquoteCalendarProvider;
 pub use forex_factory::ForexFactoryProvider;
 pub use provider::CalendarProvider;
 pub use trading_economics::TradingEconomicsProvider;
@@ -25,21 +27,22 @@ use crate::{
 
 pub const PRIMARY_KEY: &str = "calendar.primary";
 pub const FALLBACK_KEY: &str = "calendar.fallback";
+pub const SECONDARY_KEY: &str = "calendar.tradingview";
 
 /// Result of one calendar refresh, including which provider actually answered.
 pub struct CalendarFetch {
     pub events: Vec<EconomicEvent>,
-    /// Set when the primary source failed and the weekly fallback had to cover the range.
+    /// Set when a lower-priority source had to cover the range.
     pub degraded_detail: Option<String>,
 }
 
 /// Aggregates the keyless calendar feeds and keeps them honest.
 ///
-/// The primary source is TradingView; the weekly Forex Factory feed covers a primary outage
-/// but never replaces primary observations, and published values are copied onto matching
-/// weekly rows so those rows do not stay permanently empty.
+/// Production order: BiQuote → TradingView → weekly Forex Factory. Lower-priority
+/// schedules never replace primary observations; cached values hydrate matching weekly rows.
 pub struct CalendarService {
     primary: Arc<dyn CalendarProvider>,
+    secondary: Option<Arc<dyn CalendarProvider>>,
     fallback: Arc<dyn CalendarProvider>,
     events: EventRepository,
     translation: Option<Arc<TranslationService>>,
@@ -54,11 +57,17 @@ impl CalendarService {
     ) -> Self {
         Self {
             primary,
+            secondary: None,
             fallback,
             events,
             translation: None,
             health: None,
         }
+    }
+
+    pub fn with_secondary(mut self, secondary: Arc<dyn CalendarProvider>) -> Self {
+        self.secondary = Some(secondary);
+        self
     }
 
     pub fn with_translation(mut self, translation: Arc<TranslationService>) -> Self {
@@ -94,7 +103,7 @@ impl CalendarService {
         })
     }
 
-    /// Reads both feeds without writing anything.
+    /// Reads feeds in priority order without writing anything.
     ///
     /// The event watcher only needs the current provider values; persisting there would add an
     /// observation row on every 15-second scan and bloat the history table.
@@ -124,6 +133,35 @@ impl CalendarService {
                 degraded_detail = Some(error.to_string());
                 if let Some(health) = &self.health {
                     health.record_failure(PRIMARY_KEY, error.to_string()).await;
+                }
+            }
+        }
+
+        if primary_events.is_empty()
+            && let Some(secondary) = &self.secondary
+        {
+            match secondary.fetch_events(start, end).await {
+                Ok(events) if !events.is_empty() => {
+                    if let Some(health) = &self.health {
+                        health.record_success(SECONDARY_KEY).await;
+                    }
+                    return Ok(CalendarFetch {
+                        events,
+                        degraded_detail,
+                    });
+                }
+                result => {
+                    let detail = match result {
+                        Ok(_) => "TradingView returned no events".to_owned(),
+                        Err(error) => error.to_string(),
+                    };
+                    if let Some(health) = &self.health {
+                        health.record_failure(SECONDARY_KEY, &detail).await;
+                    }
+                    degraded_detail = Some(format!(
+                        "{}; TradingView: {detail}",
+                        degraded_detail.as_deref().unwrap_or("primary unavailable")
+                    ));
                 }
             }
         }
@@ -165,7 +203,7 @@ impl CalendarService {
             sources.extend(
                 cached
                     .into_iter()
-                    .filter(|event| event.provider == "trading_view"),
+                    .filter(|event| matches!(event.provider.as_str(), "biquote" | "trading_view")),
             );
             fill_missing_values(&mut fallback, &sources);
             return Ok(CalendarFetch {
@@ -200,7 +238,9 @@ pub fn fill_missing_values(fallback: &mut [EconomicEvent], sources: &[EconomicEv
     let mut by_occurrence: HashMap<(String, DateTime<Utc>, String), Vec<&EconomicEvent>> =
         HashMap::new();
     for event in sources {
-        if event.provider != "trading_view" || event.actual.is_none() {
+        if !matches!(event.provider.as_str(), "biquote" | "trading_view")
+            || event.actual.is_none() || !event.time_exact
+        {
             continue;
         }
         by_occurrence
@@ -213,16 +253,20 @@ pub fn fill_missing_values(fallback: &mut [EconomicEvent], sources: &[EconomicEv
             .push(event);
     }
     for target in fallback.iter_mut() {
-        if target.provider != "forex_factory" || target.actual.is_some() {
+        if target.provider != "forex_factory" || target.actual.is_some() || !target.time_exact {
             continue;
         }
         let key = parse::occurrence_key(&target.country, target.event_time, &target.event);
         // Ambiguity leaves the row untouched: a wrong alias would attach another
         // indicator's value to it.
-        let Some(matcher) = by_occurrence.get(&key).filter(|rows| rows.len() == 1) else {
+        let Some(matcher) = by_occurrence.get(&key) else { continue };
+        let best = matcher.iter().map(|e| parse::provider_priority(&e.provider)).max();
+        let mut candidates = matcher.iter()
+            .filter(|e| Some(parse::provider_priority(&e.provider)) == best);
+        let Some(source) = candidates.next() else { continue };
+        if candidates.next().is_some() {
             continue;
-        };
-        let source = matcher[0];
+        }
         target.actual = source.actual;
         target.previous = source.previous;
         target.consensus = source.consensus;
@@ -315,6 +359,17 @@ mod tests {
         let mut other = vec![event("forex_factory", "Japan", "Core CPI m/m", None)];
         fill_missing_values(&mut other, &sources);
         assert!(other[0].actual.is_none());
+    }
+
+    #[test]
+    fn biquote_values_take_precedence_when_both_public_sources_are_cached() {
+        let mut rows = vec![event("forex_factory", "United States", "CPI m/m", None)];
+        let sources = vec![
+            event("trading_view", "United States", "Inflation Rate MoM", Some(3)),
+            event("biquote", "United States", "CPI m/m", Some(4)),
+        ];
+        fill_missing_values(&mut rows, &sources);
+        assert_eq!(rows[0].actual, Some(Decimal::from(4)));
     }
 
     #[test]

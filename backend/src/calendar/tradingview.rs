@@ -10,8 +10,7 @@ use crate::{
 };
 
 /// Keyless TradingView economic calendar. Covers arbitrary date ranges and publishes
-/// actual / previous / forecast, so it replaces the paid Trading Economics scrape as the
-/// primary source.
+/// actual / previous / forecast. Used when BiQuote cannot cover the requested range.
 pub struct TradingViewProvider {
     client: reqwest::Client,
     url: String,
@@ -193,7 +192,7 @@ fn scalar_decimal(value: &Value) -> Option<Decimal> {
     }
 }
 
-fn trading_view_country(code: &str) -> Option<&'static str> {
+pub(super) fn trading_view_country(code: &str) -> Option<&'static str> {
     Some(match code {
         "US" => "United States",
         "EU" => "Euro Area",
@@ -254,6 +253,12 @@ fn trading_view_country(code: &str) -> Option<&'static str> {
         "EG" => "Egypt",
         "NG" => "Nigeria",
         "UA" => "Ukraine",
+        "AE" => "United Arab Emirates",
+        "BG" => "Bulgaria",
+        "GE" => "Georgia",
+        "HR" => "Croatia",
+        "KZ" => "Kazakhstan",
+        "WW" => "World",
         _ => return None,
     })
 }

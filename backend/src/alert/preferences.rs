@@ -79,6 +79,7 @@ mod tests {
         );
         for key in [
             "calendar.primary",
+            "calendar.tradingview",
             "calendar.fallback",
             "calendar.all_sources",
             "market.yahoo",
