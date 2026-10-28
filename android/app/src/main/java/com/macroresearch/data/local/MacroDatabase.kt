@@ -7,7 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [CachedEventEntity::class, FollowedEventEntity::class, AiAnalysisEntity::class, AiConversationEntity::class, AiAutoRefreshEntity::class],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class MacroDatabase : RoomDatabase() {
@@ -15,6 +15,12 @@ abstract class MacroDatabase : RoomDatabase() {
     abstract fun analysisDao(): AnalysisDao
 
     companion object {
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cached_event ADD COLUMN timeExact INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         val MIGRATION_1_2 = object : Migration(1, 2) {            override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE cached_event ADD COLUMN eventZhCn TEXT")
                 db.execSQL("ALTER TABLE cached_event ADD COLUMN eventZhTw TEXT")

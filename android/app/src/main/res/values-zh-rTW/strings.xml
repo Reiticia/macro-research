@@ -124,7 +124,7 @@
     <string name="data_proxy_invalid">請填寫主機:連接埠，不要包含帳號密碼或路徑。</string>
     <string name="data_proxy_saved">已儲存，日曆與行情請求將使用該代理。</string>
     <string name="data_proxy_clear">使用系統網路</string>
-    <string name="calendar_warning_primary">主日曆資料來源無法使用，已改用備用週曆資料，公布值可能缺失。請檢查網路或在設定中設定日曆代理後重新整理。</string>
+    <string name="calendar_warning_primary">BiQuote 主日曆來源無法使用，已切換備用來源，部分事件或公布值可能缺失。請檢查網路或日曆代理後重新整理。</string>
     <string name="calendar_warning_offline">日曆資料來源暫時無法使用，正在顯示快取資料。請檢查網路或在設定中設定日曆代理後重新整理。</string>
     <string name="calendar_warning_backend">後端無法連線或拒絕了本裝置，正在顯示快取資料。請檢查設定中的後端位址與存取權杖。</string>
     <string name="data_source">資料來源</string>

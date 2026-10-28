@@ -125,7 +125,7 @@
     <string name="data_proxy_invalid">Enter host:port without credentials or a path.</string>
     <string name="data_proxy_saved">Saved. Calendar and market requests will use it.</string>
     <string name="data_proxy_clear">Use system network</string>
-    <string name="calendar_warning_primary">Primary calendar source unavailable; using the weekly fallback. Published values may be missing. Check your network or calendar proxy in Settings, then refresh.</string>
+    <string name="calendar_warning_primary">BiQuote calendar unavailable; using a backup source. Some events or published values may be missing. Check your network or calendar proxy, then refresh.</string>
     <string name="calendar_warning_offline">Calendar sources unavailable; showing cached data. Check your network or calendar proxy in Settings, then refresh.</string>
     <string name="calendar_warning_backend">Backend unreachable or rejected this device; showing cached data. Check the backend address and token in Settings.</string>
     <string name="data_source">Data source</string>

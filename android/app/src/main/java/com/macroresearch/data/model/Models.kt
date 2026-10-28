@@ -19,6 +19,7 @@ data class EconomicEvent(
     val forecast: String?,
     val unit: String?,
     val status: String,
+    val timeExact: Boolean = true,
 )
 
 data class EventObservation(

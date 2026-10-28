@@ -4,7 +4,7 @@
 
 | | 直连（默认） | 后端 |
 |---|---|---|
-| 数据来源 | 设备直接请求 TradingView / CNBC / Yahoo / BiQuote / Binance | 只请求自建后端（见 [后端说明](backend.md)） |
+| 数据来源 | 设备直接请求 BiQuote（日历与行情）/ TradingView / CNBC / Yahoo / Binance | 只请求自建后端（见 [后端说明](backend.md)） |
 | AI 分析 | 填了个人 Key：设备直连模型，数据不经服务端；未填 Key 但有后端地址：按 provider 身份请求服务端惰性分析（有访问令牌时可反馈） | 首次请求时只生成所请求的语言与方法并缓存；管理员经 Telegram 批准后才重新生成 |
 | 事件名翻译 | 用户自己的 Key，在设备端翻译 + 校对后写 Room | 服务端统一翻译，随事件返回 |
 | 译名勘正 | 本机直接改写 | 提交后端 → Telegram 管理员审核 → 采纳/拒绝/屏蔽 |
@@ -51,13 +51,15 @@ MacroRepository            ── 缓存、翻译补全、模式切换
 
 ## 日历
 
-客户端按日期区间请求 TradingView 经济日历 JSON 接口（`economic-calendar.tradingview.com/events`，无需 API Key，请求带 `Origin` 头），并解析事件标题、国家（ISO 代码映射为全名）、分类（indicator）、发布时间、重要度（-1/0/1 映射为 1/2/3）和 Actual / Previous / Forecast。该接口只提供一个市场预期值（`forecast`），客户端会同时写入 `consensus` 与 `forecast`，否则规则引擎失去对比基准，会把所有事件判为中性信号。
+客户端默认请求 **BiQuote → TradingView → Forex Factory**，优先使用首个非空且解析成功的数据源。BiQuote 主源接入细节、覆盖边界与配置见 [BiQuote 日历接入](biquote-calendar.md)。Room v9 增加 `timeExact`，保留旧缓存与关注，不把日期占位时间当作精确公布时间触发前台轮询。
 
-TradingView 接口失败或返回空、且请求范围与当前周重叠时，回退请求 Forex Factory 公开周度 JSON（`nfs.faireconomy.media/ff_calendar_thisweek.json`，同样无需 Key），按 impact Low / Medium / High / Holiday 映射重要度，并将带单位字符串（如 `0.2%`、`768B`）归一化为数值与单位，同样把单一预期值写入 `consensus` 与 `forecast`。两个来源都不单独提供第二套共识值，属于已知数据边界。
+TradingView 回退源按日期区间请求经济日历 JSON 接口（`economic-calendar.tradingview.com/events`，无需 API Key，请求带 `Origin` 头），并解析事件标题、国家（ISO 代码映射为全名）、分类（indicator）、发布时间、重要度（-1/0/1 映射为 1/2/3）和 Actual / Previous / Forecast。该接口只提供一个市场预期值（`forecast`），客户端会同时写入 `consensus` 与 `forecast`，否则规则引擎失去对比基准，会把所有事件判为中性信号。
+
+TradingView 接口失败或返回空、且请求范围与当前周重叠时，回退请求 Forex Factory 公开周度 JSON（`nfs.faireconomy.media/ff_calendar_thisweek.json`，同样无需 Key），按 impact Low / Medium / High / Holiday 映射重要度，并将带单位字符串（如 `0.2%`、`768B`）归一化为数值与单位，同样把单一预期值写入 `consensus` 与 `forecast`。三个来源都不单独提供第二套共识值，属于已知数据边界。
 
 数值显示不按事件名称推断来源倍率。Forex Factory 的 K/M/B/T 后缀仅表示倍率，数值展开一次后使用 `number` 单位；只有原文带货币符号才记录对应单位（`$`/EUR/GBP），其中 `$` 不自行解释成美元而保留原符号。TradingView 的 `actual/previous/forecast` 是展示尺度数值，独立 `scale` 字段为 K/M/B/T，`*Raw` 为绝对数值（公开响应样例见 `android/app/src/test/resources/calendar-units/README.md`）。解析保留展示数值，将 `scale` 与 `unit` 组合写入现有 unit 字段（如 `K`、`M`、`B $`），不同时使用 Raw 再乘倍率。来源明确的倍率直接显示；已匹配的就业/库存指标补物理维度而不猜倍率。三条核实过的美国扩散指数 ticker 在缺少 scale/unit 时使用指数点，不扩展为通用事件名规则。数值旁不展示“单位未确认／倍率未确认”提示：缺少单位时只显示数值；来源明确提供的货币符号仍保留，缺少 scale 时不猜倍率。旧缓存的 `currency` 标签不能证明美元维度，只按已展开数值显示，不添加美元符号（已识别的 FF 人数/原油库存可使用对应物理维度）。这仅改变显示，缺失元数据仍保持缺失，影响计算的单位校验不放宽。刷新后新解析结果沿现有 Room 合并流程更新，无需数据库迁移。旧历史缓存缺少单位/倍率时，详情页提供“刷新数值与单位”，只在用户点击时重新查询该事件日期，不清库、不调用 AI；后端模式通过已有事件刷新接口触发服务端同步，因此需同时更新后端。并非更新 APK 就自动补齐所有旧历史日期。
 
-事件 ID 初始由 provider ID 的 SHA-256 摘要生成。主源恢复后，按国家、精确发布时间和明确的标题别名匹配已有周历事件（例如 Core PPI m/m / Core PPI MoM），仅在匹配唯一时原位补齐数值，保留旧 ID、关注和译文；不模糊匹配、不删除未匹配记录。后续按 provider / providerId 查找保留的 ID。主源已有实际值不会被回退周历覆盖；AI 翻译仅更新译名列，不再回写启动翻译时的整条旧事件快照。应用更新后首次刷新仍会清理旧 `trading_economics` 数据源的缓存行。
+事件 ID 初始由 provider ID 的 SHA-256 摘要生成。主源恢复后，按国家、精确发布时间和明确的标题别名匹配已有 TradingView / 周历事件（例如 Core PPI m/m / Core PPI MoM），仅在匹配唯一时原位补齐数值，保留旧 ID、关注和译文；不模糊匹配、不删除未匹配记录。后续按 provider / providerId 查找保留的 ID。按 BiQuote > TradingView > Forex Factory 保持来源优先级；较低优先级源只可补缺失的公布值，不可覆盖已有公布值或降低来源优先级；AI 翻译仅更新译名列，不再回写启动翻译时的整条旧事件快照。应用更新后首次刷新仍会清理旧 `trading_economics` 数据源的缓存行。
 
 回退周历与主源对同一指标使用不同标题，是历史记录长期缺失公布值的主因。因此维护一份**封闭且逐条核对过的同义表**（如 Core CPI m/m ↔ Core Inflation Rate MoM、CPI m/m ↔ Inflation Rate MoM、Crude Oil Inventories ↔ EIA Crude Oil Stocks Change、Natural Gas Storage ↔ EIA Natural Gas Stocks Change、Final Wholesale Inventories m/m ↔ Wholesale Inventories MoM、Prelim UoM Consumer Sentiment ↔ Michigan Consumer Sentiment Prel），每次合并（日历 / 历史 / 首页 / 手动重试）都把同一次发生（国家 + 精确时刻 + 规范化标题）的主源数值补写进回退行：按 id 去重后必须**恰好一条**带值的主源行，否则不改；名称、ID、译名与已有数值均保留。不得凭猜测添加同义条目——错误别名会把其他指标的数值挂到该行上。主源与回退源都不提供实际值的指标（例如 S&P Global PMI 终值）保持为空，重试时如实提示。
 
@@ -65,9 +67,9 @@ TradingView 接口失败或返回空、且请求范围与当前周重叠时，�
 
 已到时间但尚无 Actual 的事件，详情页提供「重新获取公布值」按钮：绕过历史同步间隔，仅按该事件所在日期重新请求，保留原 ID、关注与译名，并提示已取得、仍未返回或失败原因（含数据源告警）。
 
-设置页的「数据源网络」支持可选 HTTP CONNECT 代理（`host:port`）。日历请求与**被墙/限流的行情源（Yahoo、CNBC）**都走它，BiQuote / Binance 仍直连，留空则全部沿用系统网络，不修改全机代理、不代理 AI 密钥，HTTPS 证书验证保持开启。代理必须由用户提供，APK 不内置代理地址。连接电脑的安卓调试环境可用 `adb reverse tcp:17890 tcp:7890` 转发电脑已有代理，然后设置 `127.0.0.1:17890`；该配置依赖电脑代理和 ADB 连接，重连/重启后可能需要重建转发。恢复直连可点「使用系统网络」。
+设置页的「数据源网络」支持可选 HTTP CONNECT 代理（`host:port`）。日历请求与**被墙/限流的行情源（Yahoo、CNBC）**都走它，BiQuote **行情** / Binance 仍直连（BiQuote 日历与其他日历请求一样使用所配置的代理），留空则全部沿用系统网络，不修改全机代理、不代理 AI 密钥，HTTPS 证书验证保持开启。代理必须由用户提供，APK 不内置代理地址。连接电脑的安卓调试环境可用 `adb reverse tcp:17890 tcp:7890` 转发电脑已有代理，然后设置 `127.0.0.1:17890`；该配置依赖电脑代理和 ADB 连接，重连/重启后可能需要重建转发。恢复直连可点「使用系统网络」。
 
-日历按单日区间请求，日界与展示均采用**设备系统时区**：请求前把本地日转换为对应的 UTC 瞬时区间（例如东八区的 9 月 11 日 → `2026-09-10T16:00:00Z` ~ `2026-09-11T15:59:59Z`），终点用闭合边界，避免混入次日零点事件。首页“今日”、历史同步的 30 天窗口与 120 天清理阀值同样按系统时区。切换日期时会取消上一个请求、清空旧列表并显示加载提示，因此慢响应不会用其他日期的数据覆盖当前选择。
+日历按单日区间请求，日界与展示均采用**设备系统时区**：请求前把本地日转换为对应的 UTC 瞬时区间（例如东八区的 9 月 11 日 → `2026-09-10T16:00:00Z` ~ `2026-09-11T15:59:59Z`），TradingView 使用当日最后一秒作为终点；BiQuote 请求至下一日零点，解析后按半开区间过滤并去重，避免混入次日事件。首页“今日”、历史同步的 30 天窗口与 120 天清理阀值同样按系统时区。切换日期时会取消上一个请求、清空旧列表并显示加载提示，因此慢响应不会用其他日期的数据覆盖当前选择。
 
 唯一例外是 Material3 日期选择器的毫秒值：`CalendarDatePickerState.selectedDateMillis` 按 API 约定用 UTC 编码“日期”而非“瞬时”，改成系统时区会让高亮日期偏移一天；它输出的 `LocalDate` 再按系统时区分桶。
 

@@ -1,5 +1,7 @@
 # Calendar unit regression samples
 
+`biquote.json` combines field projections of the 2026-10-28 public `/api/calendar` response (AU CPI and FR Jobseekers) with synthetic zero/revision, monetary and tentative-time edge cases. Reference: https://biquote.io/docs/#calendar and https://biquote.io/guides/economic-calendar-api.html (checked 2026-10-28). The documented `multiplier` is a display scale: both implementations retain the numeric value unchanged and encode `thousands/millions/billions/trillions` as K/M/B/T in `unit`. `currency` is only used as a dimension when the explicit unit says `currency`. `id` is the occurrence key, not the recurring `eventId`. The API returns a bare array with a 500-row cap and no offset; transport tests exercise splitting and half-open boundaries.
+
 `forex-factory.json` contains synthetic formatted-number cases, not an API contract.
 
 `tradingview.json` is a field projection of the public JSON response fetched on 2026-10-09 from:

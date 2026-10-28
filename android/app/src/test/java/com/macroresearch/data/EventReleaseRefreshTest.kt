@@ -63,6 +63,7 @@ class EventReleaseRefreshTest {
         val dao = FakeEventDao().apply { rows[1] = cachedRow() }
         server { primary ->
             primary.enqueue(MockResponse().setResponseCode(503))
+            primary.enqueue(MockResponse().setResponseCode(503))
             primary.enqueue(MockResponse().setBody(weeklyBody))
         }.use { (_, client) ->
             val result = EventReleaseRefresher(client, dao, ZoneOffset.UTC).refresh(1)
@@ -82,6 +83,7 @@ class EventReleaseRefreshTest {
         server { primary ->
             primary.enqueue(MockResponse().setResponseCode(503))
             primary.enqueue(MockResponse().setResponseCode(503))
+            primary.enqueue(MockResponse().setResponseCode(503))
         }.use { (_, client) ->
             val failure = runCatching { EventReleaseRefresher(client, dao, ZoneOffset.UTC).refresh(1) }
             assertTrue(failure.isFailure)
@@ -96,6 +98,7 @@ class EventReleaseRefreshTest {
             OkHttpClient(),
             ZoneOffset.UTC,
             primaryUrl = server.url("/primary").toString(),
+            tradingViewUrl = server.url("/tradingview").toString(),
             fallbackUrl = server.url("/fallback").toString(),
         )
         return server to client
@@ -110,7 +113,7 @@ class EventReleaseRefreshTest {
         }
 
     private fun primaryBody(actual: String, title: String = "Core PPI MoM") =
-        """{"status":"ok","result":[{"id":"398283","title":"$title","country":"US","date":"$eventTime","actual":$actual,"forecast":0.3,"unit":"%"}]}"""
+        """[{"id":"mql5:398283","name":"$title","countryCode":"US","time":"$eventTime","timeMode":"exact","actual":$actual,"forecast":0.3,"unit":"percent"}]"""
 
     private val weeklyBody =
         """[{"title":"Core PPI m/m","country":"USD","date":"2026-09-10T08:30:00-04:00","forecast":"0.3%","previous":"0.2%"}]"""

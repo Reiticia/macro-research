@@ -13,7 +13,7 @@ data class CalendarWarning(
     val retryAfterSeconds: Long? = null,
 ) {
     enum class Reason {
-        /** The primary provider failed or returned nothing; rows come from the weekly fallback. */
+        /** The primary provider failed or returned nothing; rows come from a lower-priority source. */
         PRIMARY_UNAVAILABLE,
 
         /** The fallback provider is rate-limiting this device, so retrying right now cannot help. */

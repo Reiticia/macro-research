@@ -22,7 +22,7 @@
 ## 功能
 
 - 五个一级导航：首页、日历、市场、历史、设置。
-- 客户端直接获取 TradingView 财经日历 JSON 接口并写入 Room；直连时优先 IPv4，对持续网络失败使用持久化熔断，失败时对本周范围回退 Forex Factory，并遵守其 `Retry-After` 限流窗口。
+- 财经日历优先获取 BiQuote，失败或无数据时依次回退 TradingView、Forex Factory 并写入 Room。BiQuote 按日请求并拆分达到 500 条上限的窗口，避免截断；直连时优先 IPv4，持续网络失败使用持久化熔断，各源遵守独立的 `Retry-After` 限流窗口。
 - 客户端直接从 Yahoo Finance、Binance、BiQuote、CNBC 获取实时行情和可用的分钟 K 线。
 - 在设备端计算 Actual / Consensus 预期差、规则信号、理论影响和实际行情窗口。
 - 事件公布后可用自有 AI 接口生成市场分析：传导链路（数据意外 → 利率/美元/风险资产）、数据解读与走势判断，结果存入 Room，可随时重新生成。个人 AI 分析可选从用户配置的 HTTPS RSS/Atom 源获取相关新闻元数据；默认源为 MarketWatch、BBC Business、DW，后端共享 AI 不使用此功能。

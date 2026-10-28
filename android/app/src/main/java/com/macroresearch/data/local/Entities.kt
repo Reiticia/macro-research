@@ -1,5 +1,6 @@
 package com.macroresearch.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.macroresearch.data.model.EconomicEvent
@@ -25,6 +26,7 @@ data class CachedEventEntity(
     val forecast: String?,
     val unit: String?,
     val status: String,
+    @ColumnInfo(defaultValue = "1") val timeExact: Boolean = true,
 )
 
 @Entity(tableName = "followed_event")
@@ -74,10 +76,10 @@ data class AiAutoRefreshEntity(
 
 fun EconomicEvent.asEntity() = CachedEventEntity(
     id, provider, providerId, releaseGroupId, country, currency, category, event, eventZhCn, eventZhTw,
-    eventTime, importance, actual, previous, consensus, forecast, unit, status,
+    eventTime, importance, actual, previous, consensus, forecast, unit, status, timeExact,
 )
 
 fun CachedEventEntity.asExternalModel() = EconomicEvent(
     id, provider, providerId, releaseGroupId, country, currency, category, event, eventZhCn, eventZhTw,
-    eventTime, importance, actual, previous, consensus, forecast, unit, status,
+    eventTime, importance, actual, previous, consensus, forecast, unit, status, timeExact,
 ).let { it.copy(status = it.currentStatus()) }

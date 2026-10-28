@@ -158,7 +158,7 @@ class CalendarRecoveryTest {
 
     @Test fun configuredProxyIsUsedWithoutChangingTheSharedClient() = runBlocking {
         MockWebServer().use { proxy ->
-            proxy.enqueue(MockResponse().setBody("""{"status":"ok","result":[{"id":"398283","title":"Core PPI MoM","country":"US","date":"2026-09-10T12:30:00Z","actual":0.2}]}"""))
+            proxy.enqueue(MockResponse().setBody("""[{"id":"mql5:398283","name":"Core PPI MoM","countryCode":"US","time":"2026-09-10T12:30:00Z","timeMode":"exact","actual":0.2}]"""))
             proxy.start()
             val shared = OkHttpClient()
             val calendar = EconomicCalendarClient(shared, ZoneOffset.UTC,
@@ -174,11 +174,13 @@ class CalendarRecoveryTest {
     @Test fun scheduleFallbackReportsDegradationAndRetryGetsActuals() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(503))
+            server.enqueue(MockResponse().setResponseCode(503))
             server.enqueue(MockResponse().setBody("""[{"title":"Core PPI m/m","country":"USD","date":"2026-09-10T08:30:00-04:00","forecast":"0.3%","previous":"0.2%"}]"""))
-            server.enqueue(MockResponse().setBody("""{"status":"ok","result":[{"id":"398283","title":"Core PPI MoM","country":"US","date":"2026-09-10T12:30:00Z","actual":0.2,"forecast":0.3,"unit":"%"}]}"""))
+            server.enqueue(MockResponse().setBody("""[{"id":"mql5:398283","name":"Core PPI MoM","countryCode":"US","time":"2026-09-10T12:30:00Z","timeMode":"exact","actual":0.2,"forecast":0.3,"unit":"percent"}]"""))
             server.start()
             val client = EconomicCalendarClient(OkHttpClient(), ZoneOffset.UTC,
-                primaryUrl = server.url("/primary").toString(), fallbackUrl = server.url("/fallback").toString())
+                primaryUrl = server.url("/primary").toString(),
+                tradingViewUrl = server.url("/tradingview").toString(), fallbackUrl = server.url("/fallback").toString())
             val day = LocalDate.of(2026, 9, 10)
             val degraded = client.fetch(day, day)
             assertEquals(1, degraded.events.size)
@@ -188,6 +190,7 @@ class CalendarRecoveryTest {
             assertNull(recovered.warning)
             assertEquals("0.2", recovered.events.single().actual)
             assertEquals("no-cache", server.takeRequest().getHeader("Cache-Control"))
+            assertTrue(server.takeRequest().path!!.startsWith("/tradingview"))
             assertEquals("/fallback", server.takeRequest().path)
             assertTrue(server.takeRequest().path!!.startsWith("/primary"))
         }
@@ -204,6 +207,8 @@ class CalendarRecoveryTest {
                         MockResponse().setResponseCode(503)
                     }
 
+                    request.path.orEmpty().startsWith("/tradingview") -> MockResponse().setResponseCode(503)
+
                     else -> {
                         fallbackHits++
                         MockResponse().setResponseCode(429).setHeader("Retry-After", "300")
@@ -215,6 +220,7 @@ class CalendarRecoveryTest {
                 OkHttpClient(),
                 ZoneOffset.UTC,
                 primaryUrl = server.url("/primary").toString(),
+                tradingViewUrl = server.url("/tradingview").toString(),
                 fallbackUrl = server.url("/fallback").toString(),
             )
             val day = LocalDate.of(2026, 9, 10)
@@ -241,12 +247,14 @@ class CalendarRecoveryTest {
     @Test fun exhaustedSourcesKeepTheFallbackReasonInsteadOfThePrimaryTimeout() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(503))
+            server.enqueue(MockResponse().setResponseCode(503))
             server.enqueue(MockResponse().setResponseCode(500))
             server.start()
             val client = EconomicCalendarClient(
                 OkHttpClient(),
                 ZoneOffset.UTC,
                 primaryUrl = server.url("/primary").toString(),
+                tradingViewUrl = server.url("/tradingview").toString(),
                 fallbackUrl = server.url("/fallback").toString(),
             )
 
@@ -273,6 +281,8 @@ class CalendarRecoveryTest {
                         MockResponse().setResponseCode(503)
                     }
 
+                    request.path.orEmpty().startsWith("/tradingview") -> MockResponse().setResponseCode(503)
+
                     else -> {
                         fallbackHits++
                         MockResponse().setBody(
@@ -288,6 +298,7 @@ class CalendarRecoveryTest {
                 OkHttpClient(),
                 ZoneOffset.UTC,
                 primaryUrl = server.url("/primary").toString(),
+                tradingViewUrl = server.url("/tradingview").toString(),
                 fallbackUrl = server.url("/fallback").toString(),
                 backoff = backoff,
             )
@@ -307,6 +318,8 @@ class CalendarRecoveryTest {
                 override fun dispatch(request: RecordedRequest): MockResponse = when {
                     request.path.orEmpty().startsWith("/primary") -> MockResponse().setResponseCode(503)
 
+                    request.path.orEmpty().startsWith("/tradingview") -> MockResponse().setResponseCode(503)
+
                     else -> {
                         fallbackHits++
                         MockResponse().setBody("[]")
@@ -322,6 +335,7 @@ class CalendarRecoveryTest {
                 OkHttpClient(),
                 ZoneOffset.UTC,
                 primaryUrl = server.url("/primary").toString(),
+                tradingViewUrl = server.url("/tradingview").toString(),
                 fallbackUrl = server.url("/fallback").toString(),
                 backoff = backoff,
             )

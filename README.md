@@ -24,7 +24,7 @@ macro-research/
 
 ## 数据流（直连模式）
 
-- 财经日历：TradingView 经济日历 JSON 接口，失败时回退 Forex Factory 公开 JSON
+- 财经日历：BiQuote（`biquote.io/api/calendar`）为主源，失败或无数据时依次回退 TradingView、Forex Factory；两种模式均无需日历 API Key
 - 美债收益率：CNBC 报价与 1 分钟 K 线，失败时回退 Yahoo Finance
 - 股票指数、外汇与贵金属：BiQuote，失败时回退 Yahoo Finance
 - 加密资产：Binance

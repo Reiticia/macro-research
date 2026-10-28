@@ -124,7 +124,7 @@
     <string name="data_proxy_invalid">请填写主机:端口，不要包含账号密码或路径。</string>
     <string name="data_proxy_saved">已保存，日历与行情请求将使用该代理。</string>
     <string name="data_proxy_clear">使用系统网络</string>
-    <string name="calendar_warning_primary">主日历数据源不可用，已改用备用周历数据，公布值可能缺失。请检查网络或在设置中配置日历代理后刷新。</string>
+    <string name="calendar_warning_primary">BiQuote 主日历源不可用，已切换备用源，部分事件或公布值可能缺失。请检查网络或日历代理后刷新。</string>
     <string name="calendar_warning_offline">日历数据源暂不可用，正在显示缓存数据。请检查网络或在设置中配置日历代理后刷新。</string>
     <string name="calendar_warning_backend">后端不可达或拒绝了本设备，正在显示缓存数据。请检查设置中的后端地址与访问令牌。</string>
     <string name="data_source">数据来源</string>
