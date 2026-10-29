@@ -31,15 +31,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/events/{id}/refresh", post(event::refresh))
         .route("/api/v1/events/{id}/analysis", get(event::analysis))
         .route("/api/v1/events/{id}/market", get(market::market))
-        .route("/api/v1/events/{id}/ai-analysis", get(event::ai_analysis))
-        .route(
-            "/api/v1/ai-analysis/by-provider",
-            get(event::ai_analysis_by_provider),
-        )
-        .route(
-            "/api/v1/events/{id}/analysis-feedback",
-            post(event::analysis_feedback),
-        )
         .route("/api/v1/market/quotes", get(market::quotes))
         .route("/api/v1/ws", get(websocket::websocket))
         .route_layer(middleware::from_fn_with_state(
@@ -67,7 +58,7 @@ async fn health() -> &'static str {
 
 /// Capability handshake. Public so a client can validate the address, the TLS chain and the
 /// protocol version before the user commits a token.
-async fn meta(State(state): State<AppState>) -> impl IntoResponse {
+async fn meta() -> impl IntoResponse {
     (
         [(header::CACHE_CONTROL, "no-store")],
         Json(json!({
@@ -78,13 +69,12 @@ async fn meta(State(state): State<AppState>) -> impl IntoResponse {
                 "calendar",
                 "market",
                 "analysis",
-                "aiAnalysis",
                 "translation",
                 "translationCorrection",
                 "ws",
                 "deviceBoundApiKeys",
             ],
-            "aiEnabled": state.ai_analysis_service.is_some(),
+            "aiEnabled": false, // Compatibility for older clients; shared AI has been retired.
             "serverTime": chrono::Utc::now().to_rfc3339(),
         })),
     )

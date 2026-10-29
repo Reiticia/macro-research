@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// Keyless TradingView economic calendar. Covers arbitrary date ranges and publishes
-/// actual / previous / forecast. Used when BiQuote cannot cover the requested range.
+/// actual / previous / forecast. Used as the primary calendar source.
 pub struct TradingViewProvider {
     client: reqwest::Client,
     url: String,

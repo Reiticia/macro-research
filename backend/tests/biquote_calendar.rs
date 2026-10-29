@@ -183,12 +183,12 @@ fn event(provider: &str, id: &str) -> EconomicEvent {
 }
 
 #[tokio::test]
-async fn production_priority_is_biquote_then_tradingview_then_weekly() {
+async fn production_priority_is_tradingview_then_biquote_then_weekly() {
     for (primary, secondary, expected) in [
-        (2, 2, vec!["biquote"]),
-        (0, 2, vec!["biquote", "trading_view"]),
-        (1, 2, vec!["biquote", "trading_view"]),
-        (0, 0, vec!["biquote", "trading_view", "forex_factory"]),
+        (2, 2, vec!["trading_view"]),
+        (0, 2, vec!["trading_view", "biquote"]),
+        (1, 2, vec!["trading_view", "biquote"]),
+        (0, 0, vec!["trading_view", "biquote", "forex_factory"]),
     ] {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let feed = |name, result| {
@@ -199,11 +199,11 @@ async fn production_priority_is_biquote_then_tradingview_then_weekly() {
             })
         };
         let service = CalendarService::new(
-            feed("biquote", primary),
+            feed("trading_view", primary),
             feed("forex_factory", 2),
             repository().await,
         )
-        .with_secondary(feed("trading_view", secondary));
+        .with_secondary(feed("biquote", secondary));
         let result = service
             .lookup(start(), start() + Duration::days(1))
             .await
@@ -217,13 +217,13 @@ async fn production_priority_is_biquote_then_tradingview_then_weekly() {
 #[tokio::test]
 async fn promotion_preserves_ids_observations_and_primary_values() {
     let repository = repository().await;
-    let old = event("trading_view", "old");
+    let old = event("biquote", "old");
     let id = repository.save_events(&[old.clone()]).await.unwrap()[0];
     repository
         .set_status(id, EventStatus::Watching)
         .await
         .unwrap();
-    let mut new = event("biquote", "mql5:occurrence");
+    let mut new = event("trading_view", "tv:occurrence");
     new.event = "Core Inflation Rate MoM".into();
     new.actual = Some(Decimal::new(3, 1));
     new.event_zh_cn = None;
@@ -231,7 +231,7 @@ async fn promotion_preserves_ids_observations_and_primary_values() {
         repository.save_events(&[new.clone()]).await.unwrap(),
         vec![id]
     );
-    assert_eq!(repository.get(id).await.unwrap().provider, "biquote");
+    assert_eq!(repository.get(id).await.unwrap().provider, "trading_view");
     assert_eq!(
         repository.get(id).await.unwrap().event_zh_cn.as_deref(),
         Some("核心CPI月率")
@@ -257,14 +257,14 @@ async fn promotion_preserves_ids_observations_and_primary_values() {
 async fn fallback_can_fill_a_missing_primary_without_demoting_it() {
     let repository = repository().await;
     let id = repository
-        .save_events(&[event("biquote", "new")])
+        .save_events(&[event("trading_view", "new")])
         .await
         .unwrap()[0];
-    let mut fallback = event("trading_view", "old");
+    let mut fallback = event("biquote", "old");
     fallback.actual = Some(Decimal::ZERO);
     assert_eq!(repository.save_events(&[fallback]).await.unwrap(), vec![id]);
     let stored = repository.get(id).await.unwrap();
-    assert_eq!(stored.provider, "biquote");
+    assert_eq!(stored.provider, "trading_view");
     assert_eq!(stored.actual, Some(Decimal::ZERO));
 }
 
@@ -272,15 +272,15 @@ async fn fallback_can_fill_a_missing_primary_without_demoting_it() {
 async fn ambiguous_or_inexact_occurrences_are_not_promoted() {
     let repository = repository().await;
     repository
-        .save_events(&[event("trading_view", "old1"), event("trading_view", "old2")])
+        .save_events(&[event("biquote", "old1"), event("biquote", "old2")])
         .await
         .unwrap();
     let ids = repository
-        .save_events(&[event("biquote", "new")])
+        .save_events(&[event("trading_view", "new")])
         .await
         .unwrap();
     assert_eq!(ids, vec![3]);
-    let mut inexact = event("biquote", "tentative");
+    let mut inexact = event("trading_view", "tentative");
     inexact.time_exact = false;
     assert_ne!(repository.save_events(&[inexact]).await.unwrap(), ids);
 }

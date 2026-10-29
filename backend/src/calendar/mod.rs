@@ -27,7 +27,7 @@ use crate::{
 
 pub const PRIMARY_KEY: &str = "calendar.primary";
 pub const FALLBACK_KEY: &str = "calendar.fallback";
-pub const SECONDARY_KEY: &str = "calendar.tradingview";
+pub const SECONDARY_KEY: &str = "calendar.biquote";
 
 /// Result of one calendar refresh, including which provider actually answered.
 pub struct CalendarFetch {
@@ -38,7 +38,7 @@ pub struct CalendarFetch {
 
 /// Aggregates the keyless calendar feeds and keeps them honest.
 ///
-/// Production order: BiQuote → TradingView → weekly Forex Factory. Lower-priority
+/// Production order: TradingView → BiQuote → weekly Forex Factory. Lower-priority
 /// schedules never replace primary observations; cached values hydrate matching weekly rows.
 pub struct CalendarService {
     primary: Arc<dyn CalendarProvider>,
@@ -152,14 +152,14 @@ impl CalendarService {
                 }
                 result => {
                     let detail = match result {
-                        Ok(_) => "TradingView returned no events".to_owned(),
+                        Ok(_) => "BiQuote returned no events".to_owned(),
                         Err(error) => error.to_string(),
                     };
                     if let Some(health) = &self.health {
                         health.record_failure(SECONDARY_KEY, &detail).await;
                     }
                     degraded_detail = Some(format!(
-                        "{}; TradingView: {detail}",
+                        "{}; BiQuote: {detail}",
                         degraded_detail.as_deref().unwrap_or("primary unavailable")
                     ));
                 }
@@ -239,7 +239,8 @@ pub fn fill_missing_values(fallback: &mut [EconomicEvent], sources: &[EconomicEv
         HashMap::new();
     for event in sources {
         if !matches!(event.provider.as_str(), "biquote" | "trading_view")
-            || event.actual.is_none() || !event.time_exact
+            || event.actual.is_none()
+            || !event.time_exact
         {
             continue;
         }
@@ -259,11 +260,19 @@ pub fn fill_missing_values(fallback: &mut [EconomicEvent], sources: &[EconomicEv
         let key = parse::occurrence_key(&target.country, target.event_time, &target.event);
         // Ambiguity leaves the row untouched: a wrong alias would attach another
         // indicator's value to it.
-        let Some(matcher) = by_occurrence.get(&key) else { continue };
-        let best = matcher.iter().map(|e| parse::provider_priority(&e.provider)).max();
-        let mut candidates = matcher.iter()
+        let Some(matcher) = by_occurrence.get(&key) else {
+            continue;
+        };
+        let best = matcher
+            .iter()
+            .map(|e| parse::provider_priority(&e.provider))
+            .max();
+        let mut candidates = matcher
+            .iter()
             .filter(|e| Some(parse::provider_priority(&e.provider)) == best);
-        let Some(source) = candidates.next() else { continue };
+        let Some(source) = candidates.next() else {
+            continue;
+        };
         if candidates.next().is_some() {
             continue;
         }
@@ -362,14 +371,19 @@ mod tests {
     }
 
     #[test]
-    fn biquote_values_take_precedence_when_both_public_sources_are_cached() {
+    fn tradingview_values_take_precedence_when_both_public_sources_are_cached() {
         let mut rows = vec![event("forex_factory", "United States", "CPI m/m", None)];
         let sources = vec![
-            event("trading_view", "United States", "Inflation Rate MoM", Some(3)),
+            event(
+                "trading_view",
+                "United States",
+                "Inflation Rate MoM",
+                Some(3),
+            ),
             event("biquote", "United States", "CPI m/m", Some(4)),
         ];
         fill_missing_values(&mut rows, &sources);
-        assert_eq!(rows[0].actual, Some(Decimal::from(4)));
+        assert_eq!(rows[0].actual, Some(Decimal::from(3)));
     }
 
     #[test]

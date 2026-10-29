@@ -10,8 +10,6 @@ use crate::error::AppError;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmScope {
-    /// The post-release AI market briefing.
-    AiAnalysis,
     /// Event-name translation batches.
     Translation,
     /// Jev market-symbol selection for a scheduled event.
@@ -21,7 +19,6 @@ pub enum LlmScope {
 impl LlmScope {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::AiAnalysis => "ai_analysis",
             Self::Translation => "translation",
             Self::MarketSelection => "market_selection",
         }
@@ -32,12 +29,6 @@ impl LlmScope {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LlmKind {
-    /// Analysis pass one: numbers and rules only, no market moves.
-    ExAnte,
-    /// Analysis pass two: validates the ex-ante chain against the observed moves.
-    Comparison,
-    /// Analysis in a single pass with numbers, rules and moves together.
-    SinglePass,
     /// One translation batch.
     Translation,
     /// One Jev market-symbol selection request.
@@ -47,9 +38,6 @@ pub enum LlmKind {
 impl LlmKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::ExAnte => "ex_ante",
-            Self::Comparison => "comparison",
-            Self::SinglePass => "single_pass",
             Self::Translation => "translation",
             Self::MarketSelection => "market_selection",
         }

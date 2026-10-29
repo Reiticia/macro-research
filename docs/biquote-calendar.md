@@ -1,6 +1,6 @@
-# BiQuote 财经日历主源
+# BiQuote 财经日历备用源
 
-Android 直连和 Rust 后端均按 **BiQuote → TradingView → Forex Factory** 请求。
+Android 直连和 Rust 后端均按 **TradingView → BiQuote → Forex Factory** 请求。
 前一源失败、数据格式无效或返回空时才尝试下一源；非空主源成功时不混入备用源。
 失败不清空已有缓存，回退结果会携带降级提示。现有股票/外汇 BiQuote 行情接入不变。
 
@@ -15,7 +15,7 @@ Android 直连和 Rust 后端均按 **BiQuote → TradingView → Forex Factory*
 返回裸 JSON 数组，按时间升序；默认仅 200 条，最大 500 条，无 offset 分页。
 
 两端按不超过 24 小时的窗口分段；达到 500 条就二分该时间窗口重新请求。解析后按半开区间过滤，
-用 occurrence ID 去重；仍无法排除截断时整次主源请求失败并回退，不把部分结果标记为成功。
+用 occurrence ID 去重；仍无法排除截断时整次 BiQuote 请求失败并回退至 Forex Factory，不把部分结果标记为成功。
 一次获取最多 512 个请求，防止错误响应造成无界重试。Android 使用设备时区的日界，
 后端使用传入的 UTC 区间。取消 Android 请求会传播，不会继续请求备用源。
 
@@ -47,21 +47,21 @@ tradingview_url = "https://economic-calendar.tradingview.com/events"
 fallback_url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 ```
 
-缺少新字段时自动启用 BiQuote 默认地址。旧 `primary_url` 作为 `tradingview_url` 的兼容别名，
+缺少新字段时自动使用 BiQuote 默认备用地址；TradingView 仍为主源。旧 `primary_url` 作为 `tradingview_url` 的兼容别名，
 **不能同时填写这两个名字**。无需改动现有密钥配置。后端代理名单中加入 `biquote` 可代理
-BiQuote 日历和行情；默认直连。Telegram `/test_calendar_api` 新增 BiQuote 主源检测按钮。
-健康键为 `calendar.primary`、`calendar.tradingview`、`calendar.fallback`。
+BiQuote 日历和行情；默认直连。Telegram `/test_calendar_api` 新增 BiQuote 备用源检测按钮。
+健康键为 `calendar.primary`（TradingView）、`calendar.biquote`、`calendar.fallback`。
 
 Android 日历使用设置中的日历代理，各源独立记录熔断和 Retry-After；升级后旧 TradingView
 熔断时间不会误用于 BiQuote。Room v8 → v9 只新增时间精度列，不清空事件、关注或 AI 缓存。
 
 切源时，仅在国家、精确时间和规范化标题都匹配且唯一时原位升级来源，保留旧事件 ID、
-关注、译文和关联数据；歧义不合并。优先级低的备用源不能覆盖已存在的公布值，但可以填补
+关注、译文和关联数据；歧义不合并。来源优先级为 TradingView > BiQuote > Forex Factory；优先级低的备用源不能覆盖已存在的公布值，但可以填补
 缺失值。认证 Trading Economics 历史导入不参与公共源身份迁移。
 
 ## 数据边界
 
-- 官方说明为约前后 90 天的滚动窗口，不是全历史档案；空结果会尝试 TradingView，
+- 官方说明 BiQuote 为约前后 90 天的滚动窗口，不是全历史档案；TradingView 失败或为空才尝试 BiQuote，
   Forex Factory 仅覆盖本周。部分边界日缺数仍取决于上游覆盖，不能据此宣称历史完整。
 - 非精确时刻、无公布值的讲话和假期仍保留为日历事件，不伪造数值。
 - 仅新增一条有依据的跨源别名 `ISM Non-Manufacturing PMI` ↔ `ISM Services PMI`（ISM 报告改名，影响规则表早已把两者视为同一指标）；其余未被核对过的标题差异不合并，未匹配旧事件保留，需要在核对名称后单独处理。

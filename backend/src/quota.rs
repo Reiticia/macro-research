@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
 use chrono::{Duration, Utc};
 use sqlx::SqlitePool;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::{config::LimitConfig, error::AppError};
 
@@ -13,28 +10,14 @@ pub enum QuotaOutcome {
     Exhausted { retry_after_seconds: i64 },
 }
 
-/// Per-token daily counters plus a process-wide concurrency gate for model calls.
-///
-/// The server owns the model key, so an unthrottled caller could spend real money; every
-/// expensive scope counts against the requesting token's daily budget.
+/// Historical per-token usage counters retained for status compatibility.
 pub struct QuotaService {
     pool: SqlitePool,
-    limits: LimitConfig,
-    ai_slots: Arc<Semaphore>,
 }
 
 impl QuotaService {
-    pub fn new(pool: SqlitePool, limits: LimitConfig) -> Self {
-        let slots = Arc::new(Semaphore::new(limits.ai_concurrency.max(1)));
-        Self {
-            pool,
-            limits,
-            ai_slots: slots,
-        }
-    }
-
-    pub fn ai_analysis_limit(&self) -> u32 {
-        self.limits.ai_analysis_per_token_per_day
+    pub fn new(pool: SqlitePool, _limits: LimitConfig) -> Self {
+        Self { pool }
     }
 
     /// Counts one use of `scope` for today and fails once the daily budget is exhausted.
@@ -51,8 +34,7 @@ impl QuotaService {
 
     /// Non-failing form of [`Self::consume`].
     ///
-    /// The AI endpoint prefers serving the previous analysis over an error, so it needs to learn
-    /// that the budget is spent without turning that into an exception.
+    /// Reports exhaustion without turning it into an exception.
     pub async fn try_consume(
         &self,
         token_id: &str,
@@ -81,15 +63,6 @@ impl QuotaService {
             });
         }
         Ok(QuotaOutcome::Allowed)
-    }
-
-    /// Blocks until a model slot is free, bounding concurrent upstream calls.
-    pub async fn acquire_ai_slot(&self) -> Result<OwnedSemaphorePermit, AppError> {
-        self.ai_slots
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| AppError::Internal("AI concurrency gate is closed".into()))
     }
 
     /// Today's usage for the status endpoint.
@@ -123,27 +96,19 @@ mod tests {
     async fn service() -> QuotaService {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         sqlx::migrate!("./migrations").run(&pool).await.unwrap();
-        QuotaService::new(
-            pool,
-            LimitConfig {
-                ai_analysis_per_token_per_day: 2,
-                ai_regenerate_cooldown_seconds: 0,
-                ai_concurrency: 1,
-                llm_usage_retention_days: 180,
-            },
-        )
+        QuotaService::new(pool, LimitConfig::default())
     }
 
     #[tokio::test]
     async fn daily_budget_is_enforced_per_token() {
         let quota = service().await;
-        assert!(quota.consume("alice", "ai_analysis", 2).await.is_ok());
-        assert!(quota.consume("alice", "ai_analysis", 2).await.is_ok());
-        let error = quota.consume("alice", "ai_analysis", 2).await.unwrap_err();
+        assert!(quota.consume("alice", "test_scope", 2).await.is_ok());
+        assert!(quota.consume("alice", "test_scope", 2).await.is_ok());
+        let error = quota.consume("alice", "test_scope", 2).await.unwrap_err();
         assert!(matches!(error, AppError::QuotaExceeded { .. }));
         // Another token keeps its own budget.
-        assert!(quota.consume("bob", "ai_analysis", 2).await.is_ok());
+        assert!(quota.consume("bob", "test_scope", 2).await.is_ok());
         let usage = quota.usage_today("alice").await.unwrap();
-        assert_eq!(usage, vec![("ai_analysis".to_owned(), 2)]);
+        assert_eq!(usage, vec![("test_scope".to_owned(), 2)]);
     }
 }

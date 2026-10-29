@@ -8,7 +8,7 @@
 #   sudo ./deploy.sh deploy --binary ./market-event-analyzer   # 使用预编译二进制
 #   sudo ./deploy.sh status              # 查看服务状态、健康检查与配置概览
 #   sudo ./deploy.sh logs                # 跟踪服务日志
-#   sudo ./deploy.sh check-ai            # 中转站/模型连通性自检
+#   sudo ./deploy.sh check-ai            # 翻译中转站连通性自检
 #   sudo ./deploy.sh backfill            # 补采最近三个月 (需 [backfill] te_api_key)
 #   sudo ./deploy.sh backfill 2026-06-08 2026-09-07
 #   sudo ./deploy.sh uninstall --purge   # 卸载服务并删除数据
@@ -38,7 +38,6 @@ RUST_LOG="${RUST_LOG:-market_event_analyzer=info,tower_http=info}"
 
 DO_BACKUP=1
 ENABLE_TRANSLATION="auto"   # auto | on | off
-ENABLE_AI="auto"            # auto | on | off
 OUTBOUND_PROXY=""           # http://127.0.0.1:7890 或 socks5://...
 BINARY_SRC=""
 CONFIG_SRC=""   # 安装时使用的配置来源，由 require_source_tree 决定
@@ -70,7 +69,6 @@ usage() {
   --skip-tests          不运行 cargo test
   --test                部署前运行 cargo test
   --translation <MODE>  auto | on | off (默认 auto: 保留配置文件里已有的 enabled)
-  --ai <MODE>           auto | on | off (默认 auto: 保留配置文件里已有的 enabled)
   --proxy <URL>         出网代理 (如 http://127.0.0.1:7890)，写入 [network].proxy_url
   --tls-cert <PATH>     证书链 PEM；与 --tls-key 同时提供即由后端直出 HTTPS（无需反向代理）
   --tls-key <PATH>      私钥 PEM
@@ -81,7 +79,6 @@ usage() {
 配置（模型/Bot 凭据写在 config.toml，权限 0640；客户端 API Key 不写入配置）:
   [auth] enabled              默认启用；客户端 API Key 通过 Telegram Bot 申请
   [translation] api_key        事件名翻译
-  [ai] api_key                 AI 市场简报（可与翻译用不同中转站/不同 Key）
   [telegram] bot_token         Telegram 机器人令牌
   [telegram] admin_chat_ids    管理员 chat id，逗号分隔
   [backfill] te_api_key        历史补采 --backfill
@@ -115,7 +112,6 @@ parse_global() {
             --user)          APP_USER="${2:?--user 需要参数}"; shift 2 ;;
             --binary)        BINARY_SRC="${2:?--binary 需要参数}"; shift 2 ;;
             --translation)   ENABLE_TRANSLATION="${2:?--translation 需要参数}"; shift 2 ;;
-            --ai)            ENABLE_AI="${2:?--ai 需要参数}"; shift 2 ;;
             --proxy)         OUTBOUND_PROXY="${2:?--proxy 需要参数}"; shift 2 ;;
             --keep)          BACKUP_KEEP="${2:?--keep 需要参数}"; shift 2 ;;
             --test)          RUN_TESTS=1; shift ;;
@@ -146,11 +142,6 @@ esac
 case "$ENABLE_TRANSLATION" in
     auto|on|off) ;;
     *) die "--translation 只能是 auto / on / off" ;;
-esac
-
-case "$ENABLE_AI" in
-    auto|on|off) ;;
-    *) die "--ai 只能是 auto / on / off" ;;
 esac
 
 if [[ -n "${TLS_CERT}" || -n "${TLS_KEY}" ]]; then
@@ -406,15 +397,13 @@ cmd_deploy() {
 
     # 既有配置里已经写好的密钥与开关先读出来（install 会用仓库版覆盖该文件）。
     local prev_config="${APP_DIR}/config.toml"
-    local prev_translation_key prev_ai_key prev_bot_token prev_chat_ids prev_te_key
-    local prev_enabled_translation prev_enabled_ai prev_enabled_telegram
+    local prev_translation_key prev_bot_token prev_chat_ids prev_te_key
+    local prev_enabled_translation prev_enabled_telegram
     prev_translation_key="$(toml_get "${prev_config}" translation api_key)"
-    prev_ai_key="$(toml_get "${prev_config}" ai api_key)"
     prev_bot_token="$(toml_get "${prev_config}" telegram bot_token)"
     prev_chat_ids="$(toml_get "${prev_config}" telegram admin_chat_ids)"
     prev_te_key="$(toml_get "${prev_config}" backfill te_api_key)"
     prev_enabled_translation="$(toml_get "${prev_config}" translation enabled)"
-    prev_enabled_ai="$(toml_get "${prev_config}" ai enabled)"
     prev_enabled_telegram="$(toml_get "${prev_config}" telegram enabled)"
 
     # 停服 -> 备份
@@ -441,15 +430,13 @@ cmd_deploy() {
     # 配置文件是唯一事实来源：升级时把已配置的密钥与开关原样写回新文件（仓库版是空值）。
     # 首次部署后直接编辑 ${APP_DIR}/config.toml 填密钥并重启即可，无需重跑部署。
     set_toml_secret "${APP_DIR}/config.toml" translation api_key "${prev_translation_key}" ""
-    set_toml_secret "${APP_DIR}/config.toml" ai api_key "${prev_ai_key}" ""
     set_toml_secret "${APP_DIR}/config.toml" telegram bot_token "${prev_bot_token}" ""
     set_toml_secret "${APP_DIR}/config.toml" telegram admin_chat_ids "${prev_chat_ids}" ""
     set_toml_secret "${APP_DIR}/config.toml" backfill te_api_key "${prev_te_key}" ""
 
-    # enabled 开关：只有显式传 --translation/--ai 才改写；否则保留文件里已有的值。
+    # enabled 开关：只有显式传 --translation 才改写；否则保留文件里已有的值。
     # 首次部署（既无密钥也无开关记录）时把没有凭据的子系统写成 false，避免服务干跑。
     apply_enabled translation "${ENABLE_TRANSLATION}" "${prev_enabled_translation}" "${prev_translation_key}"
-    apply_enabled ai "${ENABLE_AI}" "${prev_enabled_ai}" "${prev_ai_key}"
     if [[ -n "${prev_bot_token}" && -n "${prev_chat_ids}" ]]; then
         set_toml_value "${APP_DIR}/config.toml" telegram enabled "${prev_enabled_telegram:-true}"
     else
@@ -542,7 +529,7 @@ cmd_status() {
         info "配置文件: ${APP_DIR}/config.toml（值不回显）"
         local section name key
         info "  [auth] API Key 由 Telegram Bot 管理，不存入配置文件"
-        for key in "translation:api_key" "ai:api_key" \
+        for key in "translation:api_key" \
                    "telegram:bot_token" "telegram:admin_chat_ids" "backfill:te_api_key"; do
             section="${key%%:*}"
             name="${key##*:}"

@@ -23,11 +23,11 @@ url = "sqlite://data/market.db"
 [network]
 proxy_url = ""
 proxied = ["tradingview", "forexfactory", "cnbc", "yahoo", "telegram", "typesafe"]
-# TypeSafe/Jev 或模型中转站需要代理时，可加入 "typesafe" / "translation" / "ai"。
+# TypeSafe/Jev 或模型中转站需要代理时，可加入 "typesafe" / "translation"。
 request_timeout_seconds = 20
 
 [calendar]
-# 优先级：BiQuote → TradingView → Forex Factory。本地旧 primary_url 仍作为 TradingView 地址读取。
+# 优先级：TradingView → BiQuote → Forex Factory。本地旧 primary_url 仍作为 TradingView 地址读取。
 biquote_url = "https://biquote.io/api/calendar"
 tradingview_url = "https://economic-calendar.tradingview.com/events"
 fallback_url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
@@ -62,13 +62,8 @@ symbols = ["nasdaq100", "sp500", "gold", "silver", "dxy", "eur_usd", "us2y", "us
 [auth]
 enabled = true
 
-# 首次请求共享分析时按令牌计费；缓存命中不消耗配额。翻译在同步循环内部运行，
-# 不在此暴露。
+# 模型调用审计（翻译与 Jev 市场选择）。
 [limits]
-ai_analysis_per_token_per_day = 60
-# 同一 (事件, 方法) 两次生成之间的最小间隔；窗口内的重试直接返回上一次结果。
-ai_regenerate_cooldown_seconds = 600
-ai_concurrency = 2
 # 模型调用审计记录保留天数（0 = 关闭审计）。
 llm_usage_retention_days = 180
 
@@ -114,23 +109,6 @@ fallback_to_all_on_jev_error = true
 enabled = false
 service_account_file = ""
 send_timeout_seconds = 10
-
-# 服务端 AI 市场简报。可以与翻译用不同的中转站、模型与密钥。
-[ai]
-enabled = false
-base_url = "https://relay.example.com/v1"
-model = "deepseek-flash"
-api_key = ""
-default_method = 2
-max_tokens = 4096
-# 推理模型的输出 token 参数名：gpt-5 / o 系列要写 max_completion_tokens。
-# 留空用默认 max_tokens；中转站报错时服务端也会自动换名重试一次。
-# max_tokens_param = "max_completion_tokens"
-# 思考等级等厂商专属参数，原样并入请求体（messages 受保护，不可覆盖）。
-# extra_body = { reasoning_effort = "low" }
-# extra_body = { enable_thinking = false }
-# extra_body = { thinking = { type = "enabled", budget_tokens = 2048 } }
-# extra_headers = { "api-key" = "azure-style-key" }
 
 # 管理员告警与译名勘正审核控制台。缺凭据时服务照常运行，告警只写日志。
 [telegram]

@@ -79,7 +79,7 @@ mod tests {
         );
         for key in [
             "calendar.primary",
-            "calendar.tradingview",
+            "calendar.biquote",
             "calendar.fallback",
             "calendar.all_sources",
             "market.yahoo",
@@ -92,13 +92,7 @@ mod tests {
                 Some(NotificationKind::DataSources)
             );
         }
-        for key in [
-            "service.startup",
-            "analysis.ai",
-            "translation.relay",
-            "typesafe",
-            "fcm",
-        ] {
+        for key in ["service.startup", "translation.relay", "typesafe", "fcm"] {
             assert_eq!(NotificationKind::for_alert(key), None);
         }
     }

@@ -8,7 +8,6 @@ use axum::{
 use chrono::{Duration, Utc};
 use market_event_analyzer::{
     AppState,
-    ai_analysis::AiAnalysisService,
     alert::{AlertService, HealthRegistry},
     analysis::{AnalysisService, RuleEngine},
     api,
@@ -115,7 +114,6 @@ async fn app() -> TestApp {
     let mut config =
         AppConfig::from_path("config.example.toml").expect("config.example.toml is present");
     config.auth.enabled = true;
-    config.ai.enabled = false;
     config.translation.enabled = false;
     config.telegram.enabled = false;
 
@@ -189,7 +187,6 @@ async fn app() -> TestApp {
         calendar_service,
         market_service,
         analysis_service,
-        ai_analysis_service: None::<Arc<AiAnalysisService>>,
         health,
         telegram: None,
         llm_usage: None,
@@ -209,16 +206,6 @@ fn request(method: &str, uri: &str, token: Option<&str>) -> Request<Body> {
         builder = builder.header("authorization", format!("Bearer {token}"));
     }
     builder.body(Body::empty()).unwrap()
-}
-
-fn json_request(uri: &str, token: &str, body: serde_json::Value) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri(uri)
-        .header("authorization", format!("Bearer {token}"))
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap()
 }
 
 #[tokio::test]
@@ -565,91 +552,61 @@ async fn source_failures_escalate_only_after_the_threshold() {
 }
 
 #[tokio::test]
-async fn missing_shared_ai_returns_not_found_even_without_a_model_key() {
+async fn retired_ai_routes_are_unavailable_and_existing_data_is_preserved() {
     let app = app().await;
-    let response = api::router(app.state.clone())
-        .oneshot(request(
-            "GET",
-            "/api/v1/events/1/ai-analysis?language=zh-CN",
-            Some("secret-token"),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn shared_ai_is_readable_and_feedback_is_recorded_once_per_revision() {
-    let app = app().await;
-    sqlx::query(
-        "INSERT INTO ai_analysis (event_id, language, method, timezone, revision, chain_json, data_analysis, market_outlook, model, generated_at) \
-         VALUES (1, 'en', 2, 'UTC', 1, '[]', 'data', 'outlook', 'test-model', '2026-09-19T00:00:00+00:00')",
-    )
-    .execute(app.state.events.pool())
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO ai_analysis (event_id, language, method, timezone, revision, chain_json, data_analysis, market_outlook, model, generated_at) VALUES (1, 'en', 2, 'UTC', 1, '[]', 'data', 'outlook', 'test-model', '2026-09-19T00:00:00Z')")
+        .execute(app.state.events.pool()).await.unwrap();
+    sqlx::query("INSERT INTO shared_ai_job(event_id, method, language, target_revision) VALUES(1, 2, 'en', 2)")
+        .execute(app.state.events.pool()).await.unwrap();
     let router = api::router(app.state.clone());
-
-    let cached = router
-        .clone()
-        .oneshot(request(
+    for (method, path) in [
+        ("GET", "/api/v1/events/1/ai-analysis?language=en&method=2"),
+        (
             "GET",
-            "/api/v1/events/1/ai-analysis?language=en&method=2",
-            Some("secret-token"),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(cached.status(), StatusCode::OK);
-
-    // Direct-mode clients have a device-local id, so they read the same cached row by provider
-    // identity. The lookup is authenticated because a cache miss can now trigger model work.
-    let public_cached = router
-        .clone()
-        .oneshot(request(
+            "/api/v1/events/1/ai-analysis?language=en&method=2&refresh=true",
+        ),
+        (
             "GET",
-            "/api/v1/ai-analysis/by-provider?provider=trading_view&provider_id=fixture-2&language=en&method=2",
-            Some("secret-token"),
-        ))
+            "/api/v1/ai-analysis/by-provider?provider=trading_view&provider_id=fixture-2",
+        ),
+        ("POST", "/api/v1/events/1/analysis-feedback"),
+    ] {
+        let response = router
+            .clone()
+            .oneshot(request(method, path, Some("secret-token")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+    let response = router
+        .oneshot(request("GET", "/api/v1/meta", None))
         .await
         .unwrap();
-    assert_eq!(public_cached.status(), StatusCode::OK);
-
-    let body = serde_json::json!({"language":"en","method":2,"revision":1,"message":"outlook ignores the dollar move"});
-    let first = router
-        .clone()
-        .oneshot(json_request(
-            "/api/v1/events/1/analysis-feedback",
-            "secret-token",
-            body.clone(),
-        ))
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["aiEnabled"], false);
+    assert!(
+        !body["capabilities"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("aiAnalysis"))
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM ai_analysis")
+            .fetch_one(app.state.events.pool())
+            .await
+            .unwrap(),
+        1
+    );
+    let status: String = sqlx::query_scalar("SELECT status FROM shared_ai_job")
+        .fetch_one(app.state.events.pool())
         .await
         .unwrap();
-    assert_eq!(first.status(), StatusCode::OK);
-    let second = router
-        .oneshot(json_request(
-            "/api/v1/events/1/analysis-feedback",
-            "secret-token",
-            body,
-        ))
-        .await
-        .unwrap();
-    assert_eq!(second.status(), StatusCode::OK);
-    let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM analysis_feedback")
-        .fetch_all(app.state.events.pool())
-        .await
-        .unwrap();
-    assert_eq!(ids.len(), 1);
-
-    // The same revision against an unknown analysis is rejected.
-    let missing = api::router(app.state.clone())
-        .oneshot(json_request(
-            "/api/v1/events/1/analysis-feedback",
-            "secret-token",
-            serde_json::json!({"language":"en","method":1,"revision":9,"message":"x"}),
-        ))
-        .await
-        .unwrap();
-    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(status, "pending"); // No worker is started; old jobs stay inert.
 }
 
 #[tokio::test]

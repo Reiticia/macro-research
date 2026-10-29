@@ -8,7 +8,6 @@ use std::{
 
 use market_event_analyzer::{
     AppState,
-    ai_analysis::{self, AiAnalysisService},
     alert::{
         AlertService, HealthRegistry, Severity, TelegramClient,
         bot::{BotState, bot_loop},
@@ -18,8 +17,8 @@ use market_event_analyzer::{
     auth::{AuthState, TokenStore},
     backfill::{BackfillRange, BackfillService, repository::BackfillRepository},
     calendar::{
-        BiquoteCalendarProvider, CalendarService, ForexFactoryProvider, TradingEconomicsApiProvider,
-        TradingViewProvider,
+        BiquoteCalendarProvider, CalendarService, ForexFactoryProvider,
+        TradingEconomicsApiProvider, TradingViewProvider,
     },
     config::{self, AppConfig},
     fcm::FcmNotifier,
@@ -135,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if check_ai {
-        check_ai_relays(&config, &client_for, &translation_http).await?;
+        check_ai_relays(&config, &translation_http).await?;
         return Ok(());
     }
 
@@ -305,9 +304,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut calendar_service = CalendarService::new(
-        Arc::new(BiquoteCalendarProvider::new(
-            client_for("biquote"),
-            &config.calendar.biquote_url,
+        Arc::new(TradingViewProvider::new(
+            client_for("tradingview"),
+            &config.calendar.tradingview_url,
         )),
         Arc::new(ForexFactoryProvider::new(
             client_for("forexfactory"),
@@ -315,9 +314,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )),
         events.clone(),
     )
-    .with_secondary(Arc::new(TradingViewProvider::new(
-        client_for("tradingview"),
-        &config.calendar.tradingview_url,
+    .with_secondary(Arc::new(BiquoteCalendarProvider::new(
+        client_for("biquote"),
+        &config.calendar.biquote_url,
     )))
     .with_health(health.clone());
     if let Some(translation) = &translation_service {
@@ -411,30 +410,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let ai_analysis_service = if config.ai.enabled {
-        match AiAnalysisService::new(
-            client_for("ai"),
-            config.ai.clone(),
-            pool.clone(),
-            events.clone(),
-            analyses.clone(),
-            market.clone(),
-        ) {
-            Ok(service) => Some(Arc::new(
-                service
-                    .with_health(health.clone())
-                    .with_regenerate_cooldown(config.limits.ai_regenerate_cooldown_seconds)
-                    .with_audit_opt(llm_usage.clone()),
-            )),
-            Err(error) => {
-                tracing::warn!(%error, "AI analysis disabled");
-                None
-            }
-        }
-    } else {
-        None
-    };
-
     let quota = Arc::new(QuotaService::new(pool.clone(), config.limits.clone()));
     if config.auth.has_legacy_tokens() {
         tracing::warn!(
@@ -502,7 +477,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         calendar_service: calendar_service.clone(),
         market_service: market_service.clone(),
         analysis_service,
-        ai_analysis_service,
         health: health.clone(),
         telegram: telegram.clone(),
         llm_usage: llm_usage.clone(),
@@ -547,10 +521,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Populate and maintain the in-process price/change cache independently of HTTP traffic.
     // Per-symbol loops are staggered by MarketService to avoid synchronized upstream bursts.
     market_service.clone().start_live_quote_refresh();
-    tokio::spawn(market_event_analyzer::shared_ai::run(
-        state.clone(),
-        alerts.clone(),
-    ));
     tokio::spawn(scheduler::startup_calendar_sync(calendar_service.clone()));
     tokio::spawn(scheduler::calendar_sync_loop(
         calendar_service,
@@ -651,7 +621,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// relay itself says.
 async fn check_ai_relays(
     config: &AppConfig,
-    client_for: &impl Fn(&str) -> reqwest::Client,
     translation_http: &reqwest::Client,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("== 中转站自检 ==");
@@ -701,21 +670,8 @@ async fn check_ai_relays(
         println!("\n[翻译] 未启用 (translation.enabled = false)");
     }
 
-    if config.ai.enabled {
-        println!(
-            "\n[AI 分析] base_url={} model={}",
-            config.ai.base_url, config.ai.model
-        );
-        match ai_analysis::probe(&client_for("ai"), &config.ai).await {
-            Ok(content) => println!("  ✅ 回复: {content}"),
-            Err(error) => println!("  ❌ {error}"),
-        }
-    } else {
-        println!("\n[AI 分析] 未启用 (ai.enabled = false)");
-    }
-
     println!("\nbase_url 可填 https://relay/v1 或完整的 .../v1/chat/completions");
-    println!("两个模块可以用不同的中转站与不同的 Key（都写在配置文件的 api_key 里）。");
+    println!("仅检查翻译模块；后端 AI 市场分析已移除。");
     Ok(())
 }
 
@@ -734,7 +690,7 @@ async fn startup_notice(config: &AppConfig, llm_usage: Option<&Arc<LlmUsageRepos
         format!("数据库 {}", config.database.url),
     ];
     lines.push(format!(
-        "鉴权：{} · 翻译：{} · AI 分析：{}",
+        "鉴权：{} · 翻译：{}",
         if config.auth.enabled {
             "已启用"
         } else {
@@ -742,11 +698,6 @@ async fn startup_notice(config: &AppConfig, llm_usage: Option<&Arc<LlmUsageRepos
         },
         if config.translation.enabled {
             format!("已启用（{}）", config.translation.model)
-        } else {
-            "已关闭".to_owned()
-        },
-        if config.ai.enabled {
-            format!("已启用（{}）", config.ai.model)
         } else {
             "已关闭".to_owned()
         },

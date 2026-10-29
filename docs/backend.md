@@ -1,6 +1,6 @@
 # Macro Research 后端
 
-自建的统一数据服务：上游抓取、缓存、规则与 AI 分析、事件名翻译、FCM/兼容 WebSocket 推送，
+自建的统一数据服务：上游抓取、缓存、规则分析、事件名翻译、FCM/兼容 WebSocket 推送，
 以及数据源异常时的 Telegram 管理员告警。Android 客户端可以**直连公开数据源**，也可以
 **切到后端模式**只依赖这一个域名。
 
@@ -9,10 +9,9 @@ Android (direct | backend)
         │  HTTPS + Bearer
 ┌───────┴─────────────────────────────────────────────────────────────┐
 │ Axum REST + WS          auth / quota / meta / status                │
-│ CalendarService         BiQuote → TradingView → Forex Factory       │
+│ CalendarService         TradingView → BiQuote → Forex Factory       │
 │ MarketService           CNBC(美债) → Yahoo / BiQuote / Binance      │
 │ AnalysisService         规则引擎 (rules.toml)                        │
-│ AiAnalysisService       服务端生成并缓存 AI 简报（3 种方法）         │
 │ TranslationService      事件名翻译 + 勘正审核                        │
 │ FcmNotifier             关注事件的后台推送                           │
 │ AlertService → Telegram 数据源告警 + 勘正按钮 + /status              │
@@ -58,9 +57,6 @@ enabled = true
 [translation]
 api_key = "sk-relay-…"               # 中转站密钥直接写在这里
 
-[ai]
-api_key = "sk-relay-…"
-
 [telegram]
 bot_token = "123456:ABC…"
 admin_chat_ids = "123456789"
@@ -91,12 +87,12 @@ te_api_key = ""                      # 仅 --backfill 需要
 - **模型/Bot 凭据只从配置文件读**（客户端 API Key 除外），不再有 `API_TOKENS` / `OPENAI_API_KEY` 这类环境变量；只剩
   `APP_CONFIG`（路径）与 `RUST_LOG`（日志）两个普通变量，都不是凭据；
 - 缺某个密钥只关闭对应的子系统并打印缺哪个键，服务本身照常启动：
-  内部日历、行情、历史采集仍可用，只是没有相应翻译/AI/告警；客户端访问仍受鉴权保护；
+  内部日历、行情、历史采集仍可用，只是没有相应翻译/校对/告警；客户端访问仍受鉴权保护；
 - 文件里是明文密钥：仓库只放模板，`config.toml` 被忽略；服务器上部署脚本会把它设为
   `0640 root:market`。
 
 缺少凭据时的行为：`[auth] enabled=true` 即使密钥库为空也保持鉴权，绝不自动开放接口；Telegram 未配置时告警
-只写日志；翻译与 AI 未配置密钥则拒绝启动该子系统（服务本身仍能起来）。市场选择依赖 `[typesafe]`；配置不完整时记录警告并按类别或全标的兜底。
+只写日志；翻译未配置密钥则拒绝启动该子系统（服务本身仍能起来）。市场选择依赖 `[typesafe]`；配置不完整时记录警告并按类别或全标的兜底。
 
 ## 出网代理
 
@@ -120,7 +116,7 @@ request_timeout_seconds = 20
 - 保护路由使用 `Authorization: Bearer <api_key>`。`/health`、`/api/v1/meta`、`/api/v1/access-key-bot` 和只读 `/api/v1/translations/names` 仍公开；公开读取不能触发模型或绑定设备。
 - **通用密钥（general）**无需设备标识，可在多个设备使用；**设备密钥（device）**必须携带两个头：`X-Installation-Id`（安装 UUID）和 `X-Android-Id-Hash`（客户端对 ANDROID_ID 做应用域分隔 SHA-256）。首次成功鉴权以原子条件更新绑定这对标识，后续任意一个不同/缺失均返回 401，不自动重新绑定。REST 与 WebSocket 握手使用同一校验。
 - 服务端只保存两者组合摘要，不保存原始 ANDROID_ID。标识可由定制客户端伪造，**不是硬件证明或设备私钥签名**；不能承诺抵抗主动克隆。密钥不得泄露，公网使用 HTTPS。
-- 配额/审计身份为稳定的 `api_key:<数据库编号>`，共享 AI 缓存命中仍不消耗生成配额，个人模型 Key 不经过后端。
+- 配额/审计身份为稳定的 `api_key:<数据库编号>`，个人模型 Key 不经过后端，服务端不生成 AI 市场分析。
 - 错误统一为 `{"error":{"code","message"}}`；数据库故障拒绝鉴权，不退回公开接口。只有明确设置 `auth.enabled=false` 才禁用校验，仅限本机调试。公开 meta 与所有受保护路由响应带 `Cache-Control: no-store`，避免旧 HTTP 响应掩盖协议/鉴权变化。
 
 ### Telegram 机器人公开入口
@@ -151,7 +147,7 @@ request_timeout_seconds = 20
 ### 从 auth.tokens 升级
 
 - SQLx 迁移 `021_api_keys.sql` 在启动时创建密钥/申请表，保留现有事件和模型分析。
-- 旧 `auth.tokens` 字段兼容读入但直接丢弃，旧令牌**不再有效，不自动导入**；只废弃客户端访问令牌，`translation.api_key`、`ai.api_key` 等上游模型凭据不变。
+- 旧 `auth.tokens` 字段兼容读入但直接丢弃，旧令牌**不再有效，不自动导入**；只废弃客户端访问令牌，`translation.api_key` 等上游模型凭据不变。
 - 升级前确保 Bot 凭据和管理员私聊 ID 可用；升级后保持 `auth.enabled=true`，通过 Bot 发放新密钥并更新客户端。历史上因缺少 tokens 被部署脚本写成 false 的配置需要重新启用鉴权；新版手动部署脚本始终写 true，不携带旧自动关闭状态。
 - 此次配置模板改变，现有自动部署的模板校验可能要求人工更新部署基线；不要为了绕过校验删除数据库或关掉鉴权。旧二进制回滚还需与迁移前的数据库备份配套。
 
@@ -178,11 +174,8 @@ request_timeout_seconds = 20
 | POST | `/api/v1/events/{id}/refresh` | 绕过同步间隔按事件当日重取公布值 |
 | GET | `/api/v1/events/{id}/analysis` | 规则报告 |
 | GET | `/api/v1/events/{id}/market` | `{snapshots, reactions}` |
-| GET | `/api/v1/events/by-provider?provider&provider_id` | 按上游身份查事件（直连客户端映射共享结果用） |
+| GET | `/api/v1/events/by-provider?provider&provider_id` | 按上游身份查事件（按源定位日历记录） |
 | GET | `/api/v1/market/quotes?symbols=` | 批量当前行情与不可用列表 |
-| GET | `/api/v1/events/{id}/ai-analysis?language&method` | 共享分析，缓存未命中时惰性生成当前语言和方法 |
-| GET | `/api/v1/ai-analysis/by-provider?provider&provider_id&language&method` | 按上游身份读取或惰性生成共享分析 |
-| POST | `/api/v1/events/{id}/analysis-feedback` | `{language, method, revision, message}`；同一结果只记一条 |
 | GET | `/api/v1/usage?days=7&recent=20` | 模型调用审计：按类别汇总的 token 消耗与最近记录 |
 | POST | `/api/v1/translations/corrections` | 提交译名勘正（进入管理员审核） |
 | GET | `/api/v1/translations/corrections?eventName=` | 最近一条勘正状态 |
@@ -275,18 +268,18 @@ fallback_to_all_on_jev_error = true
 
 每个候选标的对应一个 Noul 问题；例如 `dxy`、`us2y`、`gold` 会作为 `questions` 的 key，概率不低于阈值的标的进入候选采集清单。就业、通胀、GDP、利率等类别会并入保守的宏观标的；能源/原油类并入 WTI/Brent。无法识别类别时回退到所有 `[market].symbols`。Jev 错误时默认全标的兜底，可将 `fallback_to_all_on_jev_error=false` 改为类别兜底优先。持久化失败时本轮临时采集所有配置标的。
 
-选择器读取事件名称、国家、货币、类别、重要性、前值和预期值；不依赖尚未公布的 Actual。不会改变客户端每 5 秒实时行情刷新、事件行情每 15 秒采样、分钟 OHLC 聚合或 AI 报告接口。模型请求按 `market_selection` 类别记录到 `/api/v1/usage`，健康键为 `market_selection.typesafe`。需要代理 TypeSafe 时在 `[network].proxied` 加上 `typesafe`。
+选择器读取事件名称、国家、货币、类别、重要性、前值和预期值；不依赖尚未公布的 Actual。不会改变客户端每 5 秒实时行情刷新、事件行情每 15 秒采样、分钟 OHLC 聚合或规则报告接口。模型请求按 `market_selection` 类别记录到 `/api/v1/usage`，健康键为 `market_selection.typesafe`。需要代理 TypeSafe 时在 `[network].proxied` 加上 `typesafe`。
 
 ## 数据源与降级
 
 | 子系统 | 主源 | 回退 |
 |---|---|---|
-| 财经日历 | BiQuote `biquote.io/api/calendar`（免 Key） | TradingView → Forex Factory 本周 JSON |
+| 财经日历 | TradingView（免 Key） | BiQuote `biquote.io/api/calendar` → Forex Factory 本周 JSON |
 | 美债收益率 | CNBC 报价 + 1 分钟 K 线 | Yahoo `^UST2YR` / `^TNX` |
 | 指数 / 贵金属 / 美元 | BiQuote | Yahoo |
 | 加密 | Binance (`data-api.binance.vision`) | — |
 
-- BiQuote 使用 `[calendar].biquote_url`；TradingView 使用 `tradingview_url`（兼容旧配置名 `primary_url`），Forex Factory 仍使用 `fallback_url`。旧配置无需修改即可启用 BiQuote 主源。详细字段和边界见 [BiQuote 日历接入](biquote-calendar.md)。
+- BiQuote 使用 `[calendar].biquote_url`；TradingView 使用 `tradingview_url`（兼容旧配置名 `primary_url`），Forex Factory 仍使用 `fallback_url`。旧配置无需修改即可保留 TradingView 主源并启用 BiQuote 备用源。详细字段和边界见 [BiQuote 日历接入](biquote-calendar.md)。
 - 回退周历与主源对同一指标使用不同标题，因此维护一份**封闭且逐条核对过的同义表**；
   合并时把主源的公布值补写到**恰好唯一匹配**（国家 + 精确时刻 + 规范化标题）的回退行上，
   有歧义就不写。唯一匹配的公共源事件原位升级，保留 ID、观察流水和关联数据；低优先级源只可填补缺失值，不能覆盖已有主源值，也不删除未匹配行。认证历史导入不参与跨源合并。
@@ -298,178 +291,31 @@ fallback_to_all_on_jev_error = true
   `live_quote_stale_seconds` 秒并标记 `stale`。
 - 已到公布时间但所有源都没有 Actual 的事件标记为 `data_unavailable`，**不使用当前价格伪造**。
 
-## 用中转站（OpenAI 兼容）
+## 翻译模型与审计
 
-后端从不绑定某一家模型厂商：只要对方提供 `POST {base_url}/chat/completions`，就能当上游。
-翻译与 AI 简报是**两套独立配置**：可以不同中转站、不同模型、不同 Key。
+后端仅为事件名翻译／校对与可选 Jev 市场选择调用模型，不生成 AI 市场简报。翻译使用 OpenAI 兼容接口：
 
 ```toml
 [translation]
-base_url = "https://relay-a.example.com/v1"
+base_url = "https://relay.example.com/v1"
 model = "deepseek-flash"
-api_key = "sk-relay-a-..."          # 中转站密钥就写在配置文件里
-
-[ai]
-base_url = "https://api.openai.com/v1"
-model = "gpt-5-mini"
-api_key = "sk-openai-..."           # 分析用另一个厂商/模型
+api_key = ""  # 填入本地配置，不提交
+# extra_headers = { "X-Title" = "macro-research" }
+# extra_body = { temperature = 0.2 }
 ```
 
-凭据只从配置文件读（已没有 `OPENAI_API_KEY` 之类的环境变量）。缺哪个键，启动日志会直接指出，
-并且只关闭对应的子系统，不影响其余功能。
+base_url 可填 API 根地址或完整的 /chat/completions 地址。显式在 [network].proxied 加入 translation 才走代理。
+`cargo run -- --check-ai`（或部署脚本 check-ai）现在仅检查翻译，会访问外部翻译模型；不再检查已移除的 AI 分析。
+模型用量写入 llm_usage，可通过受保护的 GET /api/v1/usage 或 Telegram /usage 查看。保留天数由 [limits].llm_usage_retention_days 控制。
 
-### base_url 怎么写
+## 后端 AI 市场分析已移除
 
-三种写法都行，不必手改代码：
-
-| 你手上的地址 | 实际请求 |
-|---|---|
-| `https://relay.example.com/v1` | `https://relay.example.com/v1/chat/completions` |
-| `https://relay.example.com/v1/chat/completions` | 原样使用 |
-| `https://relay.example.com` | `https://relay.example.com/chat/completions` |
-
-必须以 `http://` 或 `https://` 开头；非 https 仅适合局域网自建网关。
-
-### 中转站的额外要求
-
-`extra_headers` 覆盖需要额外头或非 Bearer 鉴权的网关：
-
-```toml
-[ai]
-# OpenRouter 类
-# extra_headers = { "HTTP-Referer" = "https://github.com/you/macro-research", "X-Title" = "macro-research" }
-
-[translation]
-# Azure 类：用 api-key 而不是 Bearer。若写 Authorization，它会直接替掉默认的 Bearer 头。
-# extra_headers = { "api-key" = "azure-key" }
-```
-
-### 中转站自身被墙
-
-把 `translation` / `ai` 加进出网代理名单即可（默认直连）：
-
-```toml
-[network]
-proxy_url = "http://127.0.0.1:7890"
-proxied = ["tradingview", "cnbc", "yahoo", "telegram", "translation", "ai"]
-```
-
-### 配完先自检
-
-```bash
-sudo ./deploy.sh check-ai          # 已部署的服务器上
-cargo run -- --check-ai            # 开发机上，读当前目录 config.toml
-```
-
-它不碰数据库、不写任何分析结果，只发一次最小请求并打印**中转站自己的回复或错误**：
-
-```text
-== 中转站自检 ==
-出网代理: http://127.0.0.1:7890
-
-[翻译] base_url=https://relay-a.example.com/v1 model=deepseek-v4-flash
-  ✅ Nonfarm Payrolls → 非农就业 / 非農就業
-
-[AI 分析] base_url=https://relay-a.example.com/v1 model=deepseek-v4-flash
-  ✅ 回复: ok
-```
-
-### 常见报错对照
-
-| 现象 | 原因 / 处理 |
-|---|---|
-| `HTTP 401: invalid api key` | Key 与 base_url 不匹配（常见：拿 A 站的 key 填了 B 站地址），或 `[translation]/[ai] api_key` 忘了填 |
-| `HTTP 404: model not found` | 模型名要写中转站的写法（常带日期后缀或厂商前缀） |
-| `HTTP 400 ... response_format` | 已自动降级：第一次被拒后后续批次不再发送 `response_format` |
-| `HTTP 429` | 中转站限流；事件名翻译会自动重试，AI 简报会返回错误并让客户端稍后再点 |
-| `relay returned a non chat-completions body` | 地址指向了网页而不是 API（缺 `/v1`，或该站不兼容 OpenAI 协议） |
-| 一直停在英文事件名 | 看 `/status` 里的 `translation.relay` 与 `analysis.ai` 状态，它们会像数据源一样告警到 Telegram |
-
-客户端直连模式也支持中转站：设置页填 endpoint、Key 与模型即可，模型名可从 `/models` 拉取（拉不到就手填）。
-
-## 共享 AI 分析：服务端生成，结果冻结
-
-服务端采用惰性生成：用户首次请求某个已公布事件的某个语言和方法时，才调用 `[ai]` 配置的
-OpenAI 兼容接口，并且只生成当前请求的这一条。缓存键是
-`(event_id, language, method, timezone)`，语言固定 en / zh-CN / zh-TW；之后相同请求直接读取
-数据库，不再调用模型。不存在规则分析报告时，首次请求会先生成确定性的规则报告；未公布的事件
-不会触发 AI 调用。事件时间到达后，即使 Actual 缺失也可生成事件背景/行情分析；模型必须标明缺失值与未观测行情，不得伪造惊喜或确定因果。新增可选 `refresh=true` 查询参数仅对已存在的精确缓存键执行一次受限更新，仍走配额、冷却、并发控制、审计与 revision 递增；不允许该参数创建缓存未命中的新组合。普通读取仍返回冻结缓存。并发请求同一个缓存键时，服务端只保留一次模型调用。
-
-- 后端模式使用 `GET /api/v1/events/{id}/ai-analysis`；按 provider 查询使用
-  `GET /api/v1/ai-analysis/by-provider`，两者都需要 Bearer token。普通请求缓存命中直接返回，缓存未命中才同步生成当前语言/方法；`refresh=true` 仅允许更新已有的精确缓存键；
-- 读者对结果有异议时 `POST /api/v1/events/{id}/analysis-feedback` 提交反馈，同一结果
-  （同一 revision）只记一条；
-- 反馈通过 Telegram 推送给管理员，消息带「重新分析 / 忽略」按钮；只有管理员点击
-  「重新分析」才会把 `target_revision + 1` 的任务入队并递增该行的 `revision`，
-  忽略则标记后不再提醒；
-- 任务逐条重试并记录失败原因；某条失败不影响其他事件与其他方法。
-
-响应体（`AiAnalysis` 字段之上附加）：
-
-| 字段 | 含义 |
-|---|---|
-| `fromCache` | 首次生成返回 `false`，之后命中数据库返回 `true` |
-| `rateLimited` | 普通首次请求为 `false`（保留字段，兼容客户端解析） |
-| `usage` | 生成时的模型消耗（中转站未上报时缺省） |
-
-客户端自带 Key 时走另一条路：设备直接请求用户配置的模型接口，payload 与结果都不经过
-服务端，本地 Room 缓存按 `(event, method)` 分键（迁移 v5），切方法立即可见各自的结果。
-
-## 管理员才能重新生成
-
-首次生成按 Bearer token 计入 `[limits] ai_analysis_per_token_per_day`，缓存命中不消耗配额。
-`ai_concurrency` 限制同时打给模型的任务数。用户反馈后仍由管理员决定是否重新生成，
-`ai_regenerate_cooldown_seconds`（默认 600 秒）约束管理员批准后的重生成频率。
-
-## 模型调用审计（按类别分类）
-
-每次模型调用都写入 `llm_usage` 审计表，记录：**类别**（`scope` = `ai_analysis` / `translation`
-；分析内部再分 `kind` = `ex_ante` / `comparison` / `single_pass`）、调用方令牌、事件、语言与
-方法、模型名、中转站主机、四项 token 计数（含 `reasoning_tokens` 与 `cached_tokens`）、
-耗时、重试次数与成败原因。
-
-查看：
-
-```bash
-curl -H "Authorization: Bearer $TOKEN" \
-     "https://relay.example.com/api/v1/usage?days=7&recent=20"
-```
-
-或直接在 Telegram 里发 `/usage`（近 24 小时按类别汇总 + 最近 3 条）。
-
-记录保留 `[limits] llm_usage_retention_days` 天（默认 180，设 0 关闭审计），
-在提供汇总前自动清理，无需额外定时任务。
-
-方法与客户端一致：
-
-1. `method=1` 只用公布值与规则信号，行情永不进入 payload；
-2. `method=2`（默认）两段式：先产出事前链条与展望，再把该事前结果与真实行情一起发回，
-   要求逐条标注 `confirmed` / `contradicted` / `unobserved`；
-3. `method=3` 一次给出全部内容。
-
-### 思考等级与厂商专属参数
-
-推理模型（gpt-5 / o 系列、DeepSeek reasoner、Qwen thinking 等）需要两样东西，都已在配置里：
-
-```toml
-[ai]
-max_tokens = 8192                    # 思考 token 也计入输出预算，需调大
-# 推理模型普遍不认 max_tokens：中转站报错时服务端会自动换 max_completion_tokens 重试一次，
-# 也可以直接写死：
-# max_tokens_param = "max_completion_tokens"
-
-# 思考等级 / 思考预算等厂商专属参数，原样并入请求体（messages 受保护，不可覆盖）：
-extra_body = { reasoning_effort = "low" }                                  # OpenAI
-# extra_body = { enable_thinking = false }                                 # Qwen
-# extra_body = { thinking = { type = "enabled", budget_tokens = 2048 } }    # Anthropic 风格
-```
-
-同一字段写在 `[translation]` 下即可控制翻译批次的思考与采样行为（翻译通常不需要）。
-
-没有可用分钟行情时三种方法都退化为“只给数字与规则”。模型回包解析（markdown 围栏、
-reasoning 混排、schema 回显、截断、`snake_case`、`verdict` 归一化）与设备端共用同一份语料：
-`android/app/src/test/resources/ai-analysis/`，由 Kotlin 与 Rust 两侧测试共同校验，避免两套
-实现漂移。
+- 不再提供事件 AI 分析、按 provider 读取 AI、反馈与重新生成接口；旧 URL 返回 404。
+- 不再初始化模型客户端或启动 shared_ai_job 后台任务，旧 Telegram 重新分析按钮不会调用模型。
+- /api/v1/meta 不再声明 aiAnalysis 能力；为旧客户端兼容保留 aiEnabled=false。
+- 新模板移除 [ai] 和 AI 分析限额／并发／冷却参数。旧配置中的 [ai] 和三项 AI 限额只被丢弃，不保存密钥、不启用能力，也不会使升级启动失败；可自行从部署配置删除。
+- 保留既有 SQLx 迁移与 ai_analysis、analysis_feedback、shared_ai_job 等历史表和数据，不修改迁移校验和、不删表；旧任务不再消费。
+- 翻译、校对、Jev 市场选择、规则分析、行情和通知仍保留。AI 简报与追问只在 Android 使用用户自己的 Key，后端模式同样如此。
 
 ## 翻译与勘正审核
 
@@ -510,9 +356,9 @@ quiet_hours = ""                 # 例 "23:00-07:00"，默认关闭
 quiet_hours_timezone = "Asia/Shanghai"
 ```
 
-告警键：`service.startup`、`calendar.primary`（BiQuote）、`calendar.tradingview`、`calendar.fallback`（Forex Factory）、`calendar.all_sources`、
+告警键：`service.startup`、`calendar.primary`（TradingView）、`calendar.biquote`、`calendar.fallback`（Forex Factory）、`calendar.all_sources`、
 `calendar.data_missing`、`market.cnbc`、`market.yahoo`、`market.biquote`、`market.binance`、
-`analysis.ai`、`translation.relay`。
+`translation.relay`。
 
 触发规则：
 
@@ -530,7 +376,7 @@ quiet_hours_timezone = "Asia/Shanghai"
 
 点击后弹出操作确认，**只编辑原消息**显示两类通知的当前状态，并移除全部按钮，不发送新消息；再次修改请重新发送 `/notifications`。
 两个开关默认开启、互不影响，对所有管理员生效，保存到 SQLite `notification_settings` 表，重启后保留。仅白名单管理员可操作。
-关闭通知不会停止数据采集或健康记录，`/status` 仍能查看状态；AI 调用失败、启动通知和反馈按钮不受影响。
+关闭通知不会停止数据采集或健康记录，`/status` 仍能查看状态；翻译／校对调用失败、启动通知和译名审核按钮不受影响。
 显式关闭数据源通知也会抑制该类别的 critical 通知（与静默时段规则不同）；被抑制的发送尝试仍写入审计表。
 关闭缺失摘要时不更新事件通知冷却记录；重新开启后按原定检查周期和冷却规则通知，不立即重放历史告警。
 
@@ -538,7 +384,7 @@ quiet_hours_timezone = "Asia/Shanghai"
 与“数据源真的没问题”可以区分。Telegram 用 long polling（`offset` 落库），无需公网回调。
 
 **启动通知**：服务每次启动都会给管理员发一条，包含监听地址与协议（http/https）、构建时的完整 Git 提交 hash、数据库路径、
-鉴权/翻译/AI 的启用状态与所用模型、出网代理，以及最近一次模型调用时间。它**不受静默时段
+鉴权/翻译的启用状态与所用翻译模型、出网代理，以及最近一次模型调用时间。它**不受静默时段
 抑制**（夜间重启也值得关注，且第一次启动必须证明 bot 配置可用）；崩溃循环（systemd 自动拉起）
 时会每个重启各发一条，这也是预期行为——那是真出了问题。
 
@@ -706,5 +552,5 @@ cargo test
 覆盖：BiQuote 日历 / TradingView / Forex Factory / CNBC / Yahoo / BiQuote 行情 / Binance 解析与降级、
 同义表合并（含歧义不写、主源不被覆盖）、鉴权 401/200、每日配额 429、
 告警状态机（阈值 / 冷却 / 恢复）、翻译勘正（去重、屏蔽、采纳回写）、
-共享语料的 AI 回包解析，以及既有的仓库、历史分页、状态机与补采测试。
+AI 退役接口与历史数据保留，以及既有的仓库、历史分页、状态机与补采测试。
 所有合成数据只写内存数据库，不混入真实数据。

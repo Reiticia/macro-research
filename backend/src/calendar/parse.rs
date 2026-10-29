@@ -76,8 +76,8 @@ pub fn release_status(
 /// Public calendar precedence; authenticated historical imports are kept separate.
 pub fn provider_priority(provider: &str) -> u8 {
     match provider {
-        "biquote" => 3,
-        "trading_view" => 2,
+        "biquote" => 2,
+        "trading_view" => 3,
         "forex_factory" => 1,
         _ => 0,
     }

@@ -10,8 +10,8 @@ use crate::{
         telegram::{InlineButton, TelegramClient},
     },
     calendar::{
-        BiquoteCalendarProvider, CalendarProvider, ForexFactoryProvider, TradingEconomicsApiProvider,
-        TradingEconomicsProvider, TradingViewProvider,
+        BiquoteCalendarProvider, CalendarProvider, ForexFactoryProvider,
+        TradingEconomicsApiProvider, TradingEconomicsProvider, TradingViewProvider,
     },
     config::AppConfig,
     fcm::FcmNotifier,
@@ -23,7 +23,7 @@ use crate::{
 /// Telegram long-polling loop: the admin console for the server.
 ///
 /// It answers `/status`, `/usage`, `/notifications` and `/help`, and resolves buttons attached to
-/// shared-analysis feedback. Admin operations require whitelisted chats; private key applications
+/// translation review. Admin operations require whitelisted chats; private key applications
 /// and own-key records are also available to ordinary users.
 pub struct BotState {
     pub telegram: Arc<TelegramClient>,
@@ -118,7 +118,7 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
         .get("message")
         .and_then(|message| message.get("message_id"))
         .and_then(Value::as_i64);
-    let Some((action, raw_id)) = data.split_once(':') else {
+    let Some((action, _raw_id)) = data.split_once(':') else {
         return Ok(());
     };
     if let Some((action, module)) = data.split_once(':') {
@@ -161,7 +161,11 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
                 if buttons.is_empty() {
                     if !matches!(
                         module,
-                        "biquote_calendar" | "tradingview" | "forexfactory" | "tradingeconomics" | "te_api"
+                        "biquote_calendar"
+                            | "tradingview"
+                            | "forexfactory"
+                            | "tradingeconomics"
+                            | "te_api"
                     ) {
                         state
                             .telegram
@@ -275,33 +279,11 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
             _ => {}
         }
     }
-    let Ok(id) = raw_id.parse::<i64>() else {
-        return Ok(());
-    };
-    let (outcome, confirmation) = match action {
-        "ag" => (
-            crate::shared_ai::decide(&state.pool, id, true).await,
-            "已处理：有效反馈已加入重新分析队列",
-        ),
-        "ai" => (
-            crate::shared_ai::decide(&state.pool, id, false).await,
-            "已忽略反馈",
-        ),
-        _ => return Ok(()),
-    };
-    let text = match outcome {
-        Ok(()) => confirmation.to_owned(),
-        Err(error) => format!("操作失败：{error}"),
-    };
-    state.telegram.answer_callback(callback_id, &text).await?;
-    if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
+    // Stale shared-AI approval buttons can no longer enqueue model work.
+    if matches!(action, "ag" | "ai") {
         state
             .telegram
-            .close_keyboard(chat_id, message_id, &text)
-            .await?;
-        state
-            .telegram
-            .send_message(chat_id, &format!("✅ {text}"), None)
+            .answer_callback(callback_id, "后端 AI 分析已移除，请在客户端配置个人 AI。")
             .await?;
     }
     Ok(())
@@ -348,15 +330,15 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
         }
         "/test_calendar_api" => {
             state.telegram.send_message(chat_id, "请选择要测试的日历源：", Some(vec![
-                vec![InlineButton { text: "BiQuote（主源）".into(), callback_data: "apitest:biquote_calendar".into() }],
-                vec![InlineButton { text: "TradingView".into(), callback_data: "apitest:tradingview".into() }, InlineButton { text: "Forex Factory".into(), callback_data: "apitest:forexfactory".into() }],
+                vec![InlineButton { text: "BiQuote（备用源）".into(), callback_data: "apitest:biquote_calendar".into() }],
+                vec![InlineButton { text: "TradingView（主源）".into(), callback_data: "apitest:tradingview".into() }, InlineButton { text: "Forex Factory".into(), callback_data: "apitest:forexfactory".into() }],
                 vec![InlineButton { text: "Trading Economics 页面".into(), callback_data: "apitest:tradingeconomics".into() }, InlineButton { text: "Trading Economics API".into(), callback_data: "apitest:te_api".into() }],
             ])).await?;
             return Ok(());
         }
         "/test_ai" => {
             state.telegram.send_message(chat_id, "请选择要测试的 AI 模块：", Some(vec![
-                vec![InlineButton { text: "事件名翻译".into(), callback_data: "aitest:translation".into() }, InlineButton { text: "AI 分析".into(), callback_data: "aitest:analysis".into() }],
+                vec![InlineButton { text: "事件名翻译".into(), callback_data: "aitest:translation".into() }],
                 vec![InlineButton { text: "市场选择".into(), callback_data: "aitest:market_selection".into() }, InlineButton { text: "翻译校对".into(), callback_data: "aitest:typesafe".into() }],
             ])).await?;
             return Ok(());
@@ -554,10 +536,12 @@ async fn test_calendar_api(state: &BotState, provider: &str) -> Result<(), Strin
     let end = Utc::now();
     let start = end - Duration::days(1);
     let result = match provider {
-        "biquote_calendar" => BiquoteCalendarProvider::new(client, &state.config.calendar.biquote_url)
-            .fetch_events(start, end)
-            .await
-            .map(|_| ()),
+        "biquote_calendar" => {
+            BiquoteCalendarProvider::new(client, &state.config.calendar.biquote_url)
+                .fetch_events(start, end)
+                .await
+                .map(|_| ())
+        }
         "tradingview" => TradingViewProvider::new(client, &state.config.calendar.tradingview_url)
             .fetch_events(start, end)
             .await
@@ -608,24 +592,6 @@ async fn test_ai_module(state: &BotState, module: &str) -> Result<(), String> {
                 }),
             )
         }
-        "analysis" => {
-            let config = &state.config.ai;
-            if !config.enabled {
-                return Err("AI 分析未启用".into());
-            }
-            let key = config.api_key().map_err(|error| error.to_string())?;
-            let url = crate::openai_compat::chat_endpoint(&config.base_url)
-                .map_err(|error| error.to_string())?;
-            (
-                url,
-                config.model.clone(),
-                key,
-                config.extra_headers.clone(),
-                serde_json::json!({
-                    "model": config.model, "messages": [{"role":"user","content":"Reply with OK."}], "max_tokens": 8
-                }),
-            )
-        }
         "market_selection" | "typesafe" => {
             if module == "market_selection" && !state.config.market_selection.enabled {
                 return Err("市场选择 AI 未启用".into());
@@ -660,14 +626,10 @@ async fn test_ai_module(state: &BotState, module: &str) -> Result<(), String> {
             &mut payload,
             &state.config.translation.extra_body,
         ),
-        "analysis" => {
-            crate::openai_compat::merge_extra_body(&mut payload, &state.config.ai.extra_body)
-        }
         _ => {}
     }
     let route = match module {
         "translation" => "translation",
-        "analysis" => "ai",
         _ => "typesafe",
     };
     let client = if state.config.network.proxies(route) {
