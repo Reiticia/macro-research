@@ -453,4 +453,12 @@
     <string name="ai_page_too_large">页面超过预览大小限制，未读取正文。</string>
     <string name="ai_page_no_text">页面没有可读取的静态文章文本。</string>
     <string name="ai_google_resolve_failed">Google News 原文链接解析失败，未读取媒体正文。</string>
+    <string name="ai_related_news">相关新闻 · 人工查阅</string>
+    <string name="ai_manual_news_note">使用系统默认浏览器阅读，返回后将摘录补充给 AI。打开页面不会自动把正文发给 AI。</string>
+    <string name="ai_news_read">阅读原文</string>
+    <string name="ai_news_supply">补充给 AI</string>
+    <string name="ai_news_open_failed">无法打开浏览器，可选中并复制链接手动访问。</string>
+    <string name="ai_manual_news_privacy">确认发送后，标题、媒体、发布时间、链接、你的摘录和问题会作为追问发送给个人 AI 接口，并保存在本机对话与请求记录中。应用未独立核实你提供的内容。</string>
+    <string name="ai_news_excerpt">文章摘录或你的说明（最多 6000 字符）</string>
+    <string name="ai_news_question">希望 AI 回答的问题（选填，最多 1000 字符）</string>
 </resources>

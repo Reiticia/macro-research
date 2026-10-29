@@ -284,6 +284,7 @@ data class AiAnalysisState(
     val loading: Boolean = false,
     val error: String? = null,
     val steps: List<AiExecutionStep> = emptyList(),
+    val articles: List<com.macroresearch.data.remote.NewsArticle> = emptyList(),
     val requests: List<AiRequestRecord> = emptyList(),
 )
 
@@ -367,9 +368,9 @@ class AnalysisViewModel(
             val oldRevision = _ai.value.analysis?.revision
             repository.recordAutoRefreshAttempt(id, refreshMethod, refreshLanguage)
             refreshedRevision = oldRevision
-            _ai.value = _ai.value.copy(loading = true, error = null, steps = emptyList(), requests = emptyList())
+            _ai.value = _ai.value.copy(loading = true, error = null, steps = emptyList(), requests = emptyList(), articles = emptyList())
             try {
-                val updated = repository.generateAiAnalysis(id, language, regenerate = true, onProgress = ::recordProgress, onRequests = ::recordRequests)
+                val updated = repository.generateAiAnalysis(id, language, regenerate = true, onProgress = ::recordProgress, onRequests = ::recordRequests, onArticles = ::recordArticles)
                 _ai.update { it.copy(analysis = updated, loading = false) }
                 refreshedRevision = oldRevision
             } catch (cancelled: CancellationException) {
@@ -392,7 +393,7 @@ class AnalysisViewModel(
         try {
             val result = repository.aiAnalysis(id)
             val history = repository.aiHistory(id)
-            _ai.value = AiAnalysisState(analysis = result, steps = history.steps, requests = history.requests)
+            _ai.value = AiAnalysisState(analysis = result, steps = history.steps, requests = history.requests, articles = history.articles.orEmpty())
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -404,9 +405,9 @@ class AnalysisViewModel(
     fun generateAiAnalysis(languageTag: String) {
         if (_ai.value.loading || generationJob?.isActive == true) return
         generationJob = viewModelScope.launch {
-            _ai.value = _ai.value.copy(loading = true, error = null, steps = emptyList(), requests = emptyList())
+            _ai.value = _ai.value.copy(loading = true, error = null, steps = emptyList(), requests = emptyList(), articles = emptyList())
             try {
-                val result = repository.generateAiAnalysis(id, languageTag, regenerate = true, onProgress = ::recordProgress, onRequests = ::recordRequests)
+                val result = repository.generateAiAnalysis(id, languageTag, regenerate = true, onProgress = ::recordProgress, onRequests = ::recordRequests, onArticles = ::recordArticles)
                 _ai.update { it.copy(analysis = result, loading = false) }
             } catch (cancelled: CancellationException) {
                 finishProgress(AiStepStatus.CANCELLED)
@@ -416,6 +417,10 @@ class AnalysisViewModel(
                 _ai.update { it.copy(loading = false, error = error.message) }
             }
         }
+    }
+
+    private fun recordArticles(articles: List<com.macroresearch.data.remote.NewsArticle>) {
+        _ai.update { it.copy(articles = articles) }
     }
 
     private fun recordRequests(records: List<AiRequestRecord>) {

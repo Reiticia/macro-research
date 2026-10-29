@@ -609,8 +609,9 @@ class MacroRepository(
         regenerate: Boolean = false,
         onProgress: (List<AiExecutionStep>) -> Unit = {},
         onRequests: (List<AiRequestRecord>) -> Unit = {},
+        onArticles: (List<com.macroresearch.data.remote.NewsArticle>) -> Unit = {},
     ): AiAnalysis = aiRunGate.run(analysisHistoryKey(eventId, analysisPreferences.method.value.wireValue)) {
-        generateAiAnalysisInternal(eventId, languageTag, regenerate, onProgress, onRequests)
+        generateAiAnalysisInternal(eventId, languageTag, regenerate, onProgress, onRequests, onArticles)
     }
 
     private suspend fun generateAiAnalysisInternal(
@@ -619,6 +620,7 @@ class MacroRepository(
         regenerate: Boolean,
         onProgress: (List<AiExecutionStep>) -> Unit,
         onRequests: (List<AiRequestRecord>) -> Unit,
+        onArticles: (List<com.macroresearch.data.remote.NewsArticle>) -> Unit,
     ): AiAnalysis = withContext(Dispatchers.IO) {
         check(translationSettings.value.configured) { "A personal AI key is required to generate analysis" }
         val method = analysisPreferences.method.value
@@ -657,6 +659,10 @@ class MacroRepository(
                 dataSourceSettings.value.baseUrl.isNotBlank() -> AiStepDetail.INTERFACE_UNAVAILABLE
                 else -> AiStepDetail.DIRECT_DATA
             }, count = newsResult?.articles?.size)
+            val articles = newsResult?.articles.orEmpty()
+            checkpoint = checkpoint.copy(articles = articles)
+            aiHistoryStore.save(historyKey, checkpoint)
+            onArticles(articles)
             val nextRevision = (cached?.revision ?: 0) + 1
             val analysis = directSource.aiAnalysis(
                 AiAnalysisRequest(

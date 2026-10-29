@@ -266,6 +266,13 @@ private fun AiAnalysisCard(
                     }
                 }
             }
+            NewsReview(ai.articles, canAsk = configured && eventTimeReached && !conversation.loading && !ai.loading, onAsk = onAsk)
+            if (ai.analysis == null && (conversation.messages.isNotEmpty() || conversation.error != null || conversation.loading)) {
+                Text(stringResource(R.string.ai_conversation), fontWeight = FontWeight.SemiBold)
+                conversation.messages.forEach { message -> Text(if (message.role == "user") stringResource(R.string.ai_you, message.content) else stringResource(R.string.ai_assistant, message.content)) }
+                conversation.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                AiRequestViewer(conversation.requests, followUp = true)
+            }
             AiRequestViewer(ai.requests)
             AiExecutionTimeline(ai.steps)
             ai.error?.let {

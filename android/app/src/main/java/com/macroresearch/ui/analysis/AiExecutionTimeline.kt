@@ -55,7 +55,10 @@ internal fun AiExecutionTimeline(steps: List<AiExecutionStep>) {
                         else -> null
                     }
                     function?.let { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall) }
-                    step.url?.let { url -> SelectionContainer { Text(url, style = MaterialTheme.typography.bodySmall) } }
+                    step.url?.let { url ->
+                        SelectionContainer { Text(url, style = MaterialTheme.typography.bodySmall) }
+                        if (step.operation == AiOperation.OPEN_ARTICLE) NewsLinkButton(url)
+                    }
                     step.httpStatus?.let { Text("HTTP $it", style = MaterialTheme.typography.labelSmall) }
                     detailLabel(step.detail)?.let { Text(stringResource(it), style = MaterialTheme.typography.bodySmall, color = color) }
                     step.count?.let { Text(stringResource(R.string.ai_execution_count, it), style = MaterialTheme.typography.labelSmall) }

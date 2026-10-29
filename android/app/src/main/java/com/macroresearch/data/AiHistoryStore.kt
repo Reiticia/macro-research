@@ -1,6 +1,7 @@
 package com.macroresearch.data
 
 import com.google.gson.Gson
+import com.macroresearch.data.remote.NewsArticle
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
@@ -13,6 +14,7 @@ data class AiHistory(
     val session: String = "",
     val steps: List<AiExecutionStep> = emptyList(),
     val requests: List<AiRequestRecord> = emptyList(),
+    val articles: List<NewsArticle>? = emptyList(),
 )
 
 class AiHistoryStore(private val directory: File) {

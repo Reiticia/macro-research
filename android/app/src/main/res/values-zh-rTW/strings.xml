@@ -453,4 +453,12 @@
     <string name="ai_page_too_large">頁面超過預覽大小限制，未讀取內文。</string>
     <string name="ai_page_no_text">頁面沒有可讀取的靜態文章文字。</string>
     <string name="ai_google_resolve_failed">Google News 原文連結解析失敗，未讀取媒體內文。</string>
+    <string name="ai_related_news">相關新聞 · 人工查閱</string>
+    <string name="ai_manual_news_note">使用系統預設瀏覽器閱讀，返回後將摘錄補充給 AI。開啟頁面不會自動將內文傳送給 AI。</string>
+    <string name="ai_news_read">閱讀原文</string>
+    <string name="ai_news_supply">補充給 AI</string>
+    <string name="ai_news_open_failed">無法開啟瀏覽器，可選取並複製連結手動造訪。</string>
+    <string name="ai_manual_news_privacy">確認傳送後，標題、媒體、發布時間、連結、你的摘錄與問題將作為追問傳送至個人 AI 介面，並儲存在本機對話與請求記錄中。應用程式未獨立查證你提供的內容。</string>
+    <string name="ai_news_excerpt">文章摘錄或你的說明（最多 6000 字元）</string>
+    <string name="ai_news_question">希望 AI 回答的問題（選填，最多 1000 字元）</string>
 </resources>

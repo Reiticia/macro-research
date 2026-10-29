@@ -454,4 +454,12 @@
     <string name="ai_page_too_large">Page exceeds the bounded preview size limit.</string>
     <string name="ai_page_no_text">No readable static article text was found.</string>
     <string name="ai_google_resolve_failed">Google News original-link resolution failed; no publisher content was read.</string>
+    <string name="ai_related_news">Related news · manual review</string>
+    <string name="ai_manual_news_note">Open an article in your default browser, then return to supply excerpts to AI. Opening a page does not send its content to AI.</string>
+    <string name="ai_news_read">Read article</string>
+    <string name="ai_news_supply">Supply to AI</string>
+    <string name="ai_news_open_failed">Could not open a browser. You can select and copy the link instead.</string>
+    <string name="ai_manual_news_privacy">The title, publisher, publication time, URL, your excerpts and question will be sent to your personal AI endpoint as a follow-up, saved in the local conversation and request history. The app has not independently verified your notes.</string>
+    <string name="ai_news_excerpt">Excerpt or your notes (up to 6,000 characters)</string>
+    <string name="ai_news_question">Question for AI (optional, up to 1,000 characters)</string>
 </resources>
