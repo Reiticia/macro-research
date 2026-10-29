@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit
 /**
  * Economic calendar aggregated on-device from keyless JSON sources.
  *
- * BiQuote is primary, TradingView is the date-range fallback, and Forex Factory is
+ * TradingView is primary, BiQuote is the date-range fallback, and Forex Factory is
  * the last-resort weekly schedule. All three sources are keyless.
  */
 data class CalendarFetchResult(val events: List<EconomicEvent>, val warning: CalendarWarning? = null)
@@ -52,13 +52,13 @@ class EconomicCalendarClient(
     private val client: OkHttpClient,
     private val zone: ZoneId = ZoneId.systemDefault(),
     private val proxy: () -> Proxy? = { null },
-    private val primaryUrl: String = BIQUOTE_URL,
+    private val primaryUrl: String = TRADING_VIEW_URL,
     private val fallbackUrl: String = FOREX_FACTORY_URL,
     private val primaryConnectTimeout: Duration = PRIMARY_CONNECT_TIMEOUT,
     private val primaryCallTimeout: Duration = PRIMARY_CALL_TIMEOUT,
     /** Survives process restarts so a cold start does not repeat known failures or rate limits. */
     private val backoff: CalendarBackoffStore = CalendarBackoffStore.inMemory(),
-    private val tradingViewUrl: String = TRADING_VIEW_URL,
+    private val biquoteUrl: String = BIQUOTE_URL,
 ) {
     /** Serializes calendar traffic so Home and History cannot race calendar providers. */
     private val fetchMutex = Mutex()
@@ -100,7 +100,7 @@ class EconomicCalendarClient(
                 emptyList()
             } else {
                 try {
-                    fetchBiquote(primaryHttp, start, end, countryCodes, now).also {
+                    fetchTradingView(primaryHttp, start, end, countryCodes, now).also {
                         backoff.clear(CalendarSource.PRIMARY)
                     }
                 } catch (cancelled: CancellationException) {
@@ -120,23 +120,23 @@ class EconomicCalendarClient(
             }
             if (primaryEvents.isNotEmpty()) return@withContext CalendarFetchResult(primaryEvents)
 
-            var primaryDetail = primaryError?.describe() ?: "BiQuote returned no events"
-            val secondaryEvents = if (remainingBlock(CalendarSource.TRADING_VIEW, now) != null) {
-                primaryDetail += "; TradingView cooling down"
+            var primaryDetail = primaryError?.describe() ?: "TradingView returned no events"
+            val secondaryEvents = if (remainingBlock(CalendarSource.BIQUOTE, now) != null) {
+                primaryDetail += "; BiQuote cooling down"
                 emptyList()
             } else {
                 try {
-                    fetchTradingView(primaryHttp, start, end, countryCodes, now).also {
-                        backoff.clear(CalendarSource.TRADING_VIEW)
-                        if (it.isEmpty()) primaryDetail += "; TradingView returned no events"
+                    fetchBiquote(primaryHttp, start, end, countryCodes, now).also {
+                        backoff.clear(CalendarSource.BIQUOTE)
+                        if (it.isEmpty()) primaryDetail += "; BiQuote returned no events"
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
                     if (activeProxy == null && error is IOException) {
-                        backoff.block(CalendarSource.TRADING_VIEW, now.plusSeconds(PRIMARY_FAILURE_BACKOFF.seconds))
+                        backoff.block(CalendarSource.BIQUOTE, now.plusSeconds(PRIMARY_FAILURE_BACKOFF.seconds))
                     }
-                    primaryDetail += "; TradingView: ${error.describe()}"
+                    primaryDetail += "; BiQuote: ${error.describe()}"
                     emptyList()
                 }
             }
@@ -195,7 +195,7 @@ class EconomicCalendarClient(
             while (windows.isNotEmpty()) {
                 check(++requests <= 512) { "BiQuote calendar request budget exceeded" }
                 val (from, to) = windows.removeFirst()
-                val url = primaryUrl.toHttpUrl().newBuilder()
+                val url = biquoteUrl.toHttpUrl().newBuilder()
                     .addQueryParameter("from", from.toString())
                     .addQueryParameter("to", to.toString())
                     .addQueryParameter("limit", "500")
@@ -207,7 +207,7 @@ class EconomicCalendarClient(
                 val request = Request.Builder().url(url).header("Accept", "application/json")
                     .cacheControl(CacheControl.FORCE_NETWORK).build()
                 val rows = http.newCall(request).awaitResponse { response ->
-                    checkRateLimit(response, CalendarSource.PRIMARY, now)
+                    checkRateLimit(response, CalendarSource.BIQUOTE, now)
                     check(response.isSuccessful) { "BiQuote calendar returned HTTP ${response.code}" }
                     biquoteRows(response.body?.string().orEmpty())
                 }
@@ -248,7 +248,7 @@ class EconomicCalendarClient(
         // `to` is an inclusive instant: the last second of the local day, so the window covers
         // exactly the requested local days instead of pulling in the next day's all-day rows.
         val to = end.plusDays(1).atStartOfDay(zone).toInstant().minusSeconds(1)
-        val builder = tradingViewUrl.toHttpUrl().newBuilder()
+        val builder = primaryUrl.toHttpUrl().newBuilder()
             .addQueryParameter("from", DateTimeFormatter.ISO_INSTANT.format(from))
             .addQueryParameter("to", DateTimeFormatter.ISO_INSTANT.format(to))
         countryCodes?.takeIf { it.isNotEmpty() }
@@ -260,7 +260,7 @@ class EconomicCalendarClient(
             .cacheControl(CacheControl.FORCE_NETWORK)
             .build()
         return http.newCall(request).awaitResponse { response ->
-            checkRateLimit(response, CalendarSource.TRADING_VIEW, now)
+            checkRateLimit(response, CalendarSource.PRIMARY, now)
             check(response.isSuccessful) { "TradingView calendar returned HTTP ${response.code}" }
             parseTradingView(response.body?.string().orEmpty(), now)
         }

@@ -135,6 +135,7 @@ class MacroApplication : Application() {
             analysisPreferences = analysisPreferences,
             newsPreferences = NewsPreferences(this),
             newsRssClient = NewsRssClient(http),
+            aiHistoryStore = com.macroresearch.data.AiHistoryStore(noBackupFilesDir.resolve("ai-history")),
             backendPreferences = backendPreferences,
             translationClient = TranslationClient(translationHttp, gson),
             aiAnalysisClient = aiAnalysisClient,

@@ -98,7 +98,7 @@ class EventReleaseRefreshTest {
             OkHttpClient(),
             ZoneOffset.UTC,
             primaryUrl = server.url("/primary").toString(),
-            tradingViewUrl = server.url("/tradingview").toString(),
+            biquoteUrl = server.url("/biquote").toString(),
             fallbackUrl = server.url("/fallback").toString(),
         )
         return server to client
@@ -113,7 +113,7 @@ class EventReleaseRefreshTest {
         }
 
     private fun primaryBody(actual: String, title: String = "Core PPI MoM") =
-        """[{"id":"mql5:398283","name":"$title","countryCode":"US","time":"$eventTime","timeMode":"exact","actual":$actual,"forecast":0.3,"unit":"percent"}]"""
+        """{"status":"ok","result":[{"id":"398283","title":"$title","country":"US","date":"$eventTime","actual":$actual,"forecast":0.3,"unit":"%"}]}"""
 
     private val weeklyBody =
         """[{"title":"Core PPI m/m","country":"USD","date":"2026-09-10T08:30:00-04:00","forecast":"0.3%","previous":"0.2%"}]"""

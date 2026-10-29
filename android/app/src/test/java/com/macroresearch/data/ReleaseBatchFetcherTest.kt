@@ -56,9 +56,9 @@ class ReleaseBatchFetcherTest {
         val server = MockWebServer()
         server.start()
         try {
-            server.enqueue(MockResponse().setBody("""[
-                {"id":"1","name":"Core CPI MoM","countryCode":"US","time":"2026-09-10T12:30:00Z","timeMode":"exact","actual":0.4,"forecast":0.3,"unit":"percent"},
-                {"id":"2","name":"CPI MoM","countryCode":"US","time":"2026-09-10T12:30:00Z","timeMode":"exact","actual":0.31,"forecast":0.3,"unit":"percent"}]"""))
+            server.enqueue(MockResponse().setBody("""{"status":"ok","result":[
+                {"id":"1","title":"Core CPI MoM","country":"US","date":"2026-09-10T12:30:00Z","actual":0.4,"forecast":0.3,"unit":"%"},
+                {"id":"2","title":"CPI MoM","country":"US","date":"2026-09-10T12:30:00Z","actual":0.31,"forecast":0.3,"unit":"%"}]}"""))
             val client = EconomicCalendarClient(OkHttpClient(), ZoneOffset.UTC,
                 primaryUrl = server.url("/primary").toString(), fallbackUrl = server.url("/fallback").toString())
             val source = object : DataSource by backend(server) {

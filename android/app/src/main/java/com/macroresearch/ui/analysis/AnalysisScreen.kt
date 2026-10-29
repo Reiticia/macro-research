@@ -91,19 +91,10 @@ fun AnalysisScreen(id: Long, repository: MacroRepository, onBack: () -> Unit) {
     val settings by repository.translationSettings.collectAsStateWithLifecycle()
     val languageTag = LocalConfiguration.current.locales[0].toLanguageTag()
     val method by repository.analysisMethod.collectAsStateWithLifecycle()
-    val dataSource by repository.dataSourceSettings.collectAsStateWithLifecycle()
     val conversation by vm.conversation.collectAsStateWithLifecycle()
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
-    LaunchedEffect(id, languageTag, method, settings.configured, dataSource) {
-        if (settings.configured) {
-            vm.loadAi(languageTag)
-        } else if (dataSource.baseUrl.isNotBlank()) {
-            // The backend generates only this language/method on the first request, then serves
-            // the persisted row on subsequent requests.
-            vm.loadAi(languageTag)
-        }
-    }
+    LaunchedEffect(id, languageTag, method, settings.configured) { vm.loadAi(languageTag) }
     LaunchedEffect(settings.configured, method) { vm.loadConversation() }
     LaunchedEffect(id, languageTag, lifecycleState, state.event, ai.analysis?.revision) {
         vm.scheduleWindowEndRefresh(languageTag, lifecycleState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
@@ -121,10 +112,7 @@ fun AnalysisScreen(id: Long, repository: MacroRepository, onBack: () -> Unit) {
                 market = state.market,
                 ai = ai,
                 aiConfigured = settings.configured,
-                sharedFeedbackEnabled = dataSource.configured,
                 onGenerateAi = { vm.generateAiAnalysis(languageTag) },
-                onFeedback = { vm.feedback(languageTag, it) },
-                onRefreshShared = { vm.refreshSharedAi(languageTag) },
                 conversation = conversation,
                 onAsk = { vm.askFollowUp(languageTag, it) },
                 onResetConversation = vm::resetConversation,
@@ -154,10 +142,7 @@ private fun AnalysisContent(
     market: MarketResponse?,
     ai: AiAnalysisState,
     aiConfigured: Boolean,
-    sharedFeedbackEnabled: Boolean,
     onGenerateAi: () -> Unit,
-    onFeedback: (String) -> Unit,
-    onRefreshShared: () -> Unit,
     conversation: com.macroresearch.ui.AiConversationState,
     onAsk: (String) -> Unit,
     onResetConversation: () -> Unit,
@@ -178,10 +163,7 @@ private fun AnalysisContent(
                 event,
                 ai,
                 aiConfigured,
-                sharedFeedbackEnabled,
                 onGenerateAi,
-                onFeedback,
-                onRefreshShared,
                 conversation,
                 onAsk,
                 onResetConversation,
@@ -198,16 +180,12 @@ private fun AiAnalysisCard(
     event: EconomicEvent,
     ai: AiAnalysisState,
     configured: Boolean,
-    sharedFeedbackEnabled: Boolean,
     onGenerate: () -> Unit,
-    onFeedback: (String) -> Unit,
-    onRefreshShared: () -> Unit,
     conversation: com.macroresearch.ui.AiConversationState,
     onAsk: (String) -> Unit,
     onResetConversation: () -> Unit,
 ) {
     var question by remember(event.id) { mutableStateOf("") }
-    var feedbackText by remember(ai.analysis?.revision, ai.analysis?.method) { mutableStateOf("") }
     var now by remember(event.id) { mutableStateOf(Instant.now()) }
     LaunchedEffect(event.id) { while (true) { now = Instant.now(); delay(1_000) } }
     val eventTimeReached = hasEventTimeArrived(event.eventTime, now)
@@ -218,9 +196,6 @@ private fun AiAnalysisCard(
                 if (configured && ai.analysis != null && !ai.loading) {
                     TextButton(onClick = onGenerate) { Text(stringResource(R.string.ai_reanalyze)) }
                 }
-                if (!configured && ai.analysis != null && !ai.loading) {
-                    TextButton(onClick = onRefreshShared) { Text(stringResource(R.string.retry)) }
-                }
             }
             if (eventTimeReached && event.actual == null) {
                 AiHint(stringResource(R.string.ai_missing_release_data))
@@ -228,7 +203,7 @@ private fun AiAnalysisCard(
             when {
                 !eventTimeReached -> AiHint(stringResource(R.string.ai_waiting_for_event))
                 ai.loading -> LoadingHint()
-                ai.analysis == null && !configured -> AiHint(stringResource(R.string.ai_shared_pending))
+                ai.analysis == null && !configured -> AiHint(stringResource(R.string.ai_requires_key))
                 ai.analysis == null -> {
                     AiHint(stringResource(R.string.ai_analysis_hint))
                     Button(onClick = onGenerate, modifier = Modifier.fillMaxWidth()) {
@@ -266,6 +241,7 @@ private fun AiAnalysisCard(
                             Text(if (message.role == "user") stringResource(R.string.ai_you, message.content) else stringResource(R.string.ai_assistant, message.content))
                         }
                         conversation.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        AiRequestViewer(conversation.requests, followUp = true)
                         OutlinedTextField(
                             value = question,
                             onValueChange = { if (it.length <= 2000) question = it },
@@ -290,30 +266,14 @@ private fun AiAnalysisCard(
                     }
                 }
             }
+            AiRequestViewer(ai.requests)
+            AiExecutionTimeline(ai.steps)
             ai.error?.let {
                 Text(
                     stringResource(R.string.ai_analysis_failed, it),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                 )
-            }
-            if (!configured && ai.analysis != null && !ai.loading) {
-                AiHint(stringResource(R.string.ai_shared_note))
-                if (sharedFeedbackEnabled) {
-                    if (ai.feedbackSent) {
-                        AiHint(stringResource(R.string.ai_feedback_sent))
-                    } else {
-                        OutlinedTextField(
-                            value = feedbackText,
-                            onValueChange = { if (it.length <= 2000) feedbackText = it },
-                            label = { Text(stringResource(R.string.ai_feedback)) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        TextButton(onClick = { onFeedback(feedbackText) }, enabled = feedbackText.isNotBlank()) {
-                            Text(stringResource(R.string.ai_feedback))
-                        }
-                    }
-                }
             }
             if (configured && ai.error != null && ai.analysis != null) {
                 TextButton(onClick = onGenerate) { Text(stringResource(R.string.retry)) }

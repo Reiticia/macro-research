@@ -1,6 +1,10 @@
 package com.macroresearch.data.remote
 
 import com.macroresearch.data.model.EconomicEvent
+import com.macroresearch.data.AiExecutionTrace
+import com.macroresearch.data.AiOperation
+import com.macroresearch.data.AiStepStatus
+import com.macroresearch.data.AiStepDetail
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -16,9 +20,13 @@ import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
 import org.xml.sax.InputSource
 import java.util.Locale
+import java.time.Duration
+import java.time.Instant
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 
-/** Minimal metadata from an RSS/Atom article; article bodies are never fetched. */
+/** Minimal article metadata from RSS/Atom or BiQuote; article bodies are never fetched. */
 data class NewsArticle(
     val title: String,
     val url: String,
@@ -32,51 +40,88 @@ data class NewsFetchResult(
     val status: String,
 )
 
-/** Reads user-selected RSS feeds and returns a small, event-relevant set for a direct AI request. */
-class NewsRssClient(client: OkHttpClient) {
+/** Combines opt-in headline sources for personal AI only; never used by shared backend AI. */
+class NewsRssClient(
+    client: OkHttpClient,
+    private val biquote: BiquoteNewsClient = BiquoteNewsClient(client),
+) {
     private val client = client.newBuilder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(7, TimeUnit.SECONDS)
         .callTimeout(8, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)
         .build()
 
-    suspend fun relevantArticles(event: EconomicEvent, sourceUrls: List<String>): NewsFetchResult =
-        withContext(Dispatchers.IO) {
-            coroutineScope {
-                val urls = sourceUrls.mapNotNull(::validatedFeedUrl).distinct().take(MAX_SOURCES)
-                val results = urls.map { url -> async { fetchFeed(url) } }.awaitAll()
-                val articles = results.flatMap(FeedFetch::articles)
-                    .mapNotNull { article -> relevance(event, article)?.let { it to article } }
-                    .sortedByDescending { it.first }
-                    .map { it.second }
-                    .distinctBy(NewsArticle::url)
-                    .take(MAX_ARTICLES)
-                val failures = results.count { !it.succeeded }
-                val status = when {
-                    urls.isEmpty() || failures == results.size -> "search_unavailable"
-                    failures > 0 -> "partial_results"
-                    articles.isEmpty() -> "no_relevant_articles_found"
-                    else -> "articles_found"
-                }
-                NewsFetchResult(articles, status)
+    suspend fun relevantArticles(
+        event: EconomicEvent,
+        sourceUrls: List<String>,
+        includeBiquote: Boolean = false,
+        now: Instant = Instant.now(),
+        trace: AiExecutionTrace? = null,
+    ): NewsFetchResult = withContext(Dispatchers.IO) {
+        coroutineScope {
+            val urls = sourceUrls.mapNotNull(::validatedFeedUrl).distinct().take(MAX_SOURCES)
+            val tasks = urls.map { url -> async { fetchFeed(url, trace) } }.toMutableList()
+            if (includeBiquote) tasks += async {
+                val result = biquote.marketNews(trace)
+                FeedFetch(result.articles, result.status != "search_unavailable")
             }
+            val results = tasks.awaitAll()
+            val articles = selectArticles(event, results.flatMap(FeedFetch::articles), now)
+            val failures = results.count { !it.succeeded }
+            val status = when {
+                results.isEmpty() || failures == results.size -> "search_unavailable"
+                failures > 0 -> "partial_results"
+                articles.isEmpty() -> "no_relevant_articles_found"
+                else -> "articles_found"
+            }
+            NewsFetchResult(articles, status)
         }
+    }
+
+    internal fun selectArticles(event: EconomicEvent, articles: List<NewsArticle>, now: Instant): List<NewsArticle> {
+        // The endpoint is a latest-news feed, not a historical search. Never attach today's
+        // headlines to an old event, future-dated articles, or unknown publication times.
+        if (!event.timeExact) return emptyList()
+        val time = runCatching { Instant.parse(event.eventTime) }.getOrNull() ?: return emptyList()
+        if (time.isAfter(now)) return emptyList()
+        val start = time.minus(Duration.ofHours(24))
+        val end = minOf(now, time.plus(Duration.ofHours(24)))
+        return articles.mapNotNull { article ->
+            val published = article.publishedAt?.let { date ->
+                runCatching { Instant.parse(date) }.getOrNull()
+                    ?: runCatching { ZonedDateTime.parse(date, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant() }.getOrNull()
+            } ?: return@mapNotNull null
+            if (published < start || published > end) return@mapNotNull null
+            relevance(event, article)?.let { Triple(it, published, article) }
+        }.sortedWith(compareByDescending<Triple<Int, Instant, NewsArticle>> { it.first }.thenByDescending { it.second })
+            .map { it.third }
+            .distinctBy(NewsArticle::url)
+            .take(MAX_ARTICLES)
+    }
 
     private data class FeedFetch(val articles: List<NewsArticle>, val succeeded: Boolean)
 
-    private fun fetchFeed(url: String): FeedFetch {
+    private suspend fun fetchFeed(url: String, trace: AiExecutionTrace?): FeedFetch {
+        val step = trace?.start(AiOperation.FETCH_NEWS, url)
+        var code: Int? = null
         val request = Request.Builder().url(url).header("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml").get().build()
         return try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return FeedFetch(emptyList(), false)
-                val body = response.body ?: return FeedFetch(emptyList(), false)
-                val bytes = body.source().readByteArray(MAX_FEED_BYTES + 1L)
-                if (bytes.size > MAX_FEED_BYTES) return FeedFetch(emptyList(), false)
+            client.newCall(request).awaitResponse { response ->
+                code = response.code
+                if (!response.isSuccessful) return@awaitResponse FeedFetch(emptyList(), false)
+                val body = response.body ?: return@awaitResponse FeedFetch(emptyList(), false)
+                val source = body.source()
+                source.request(MAX_FEED_BYTES + 1L)
+                val bytes = source.buffer.readByteArray()
+                if (bytes.size > MAX_FEED_BYTES) return@awaitResponse FeedFetch(emptyList(), false)
                 FeedFetch(parseFeed(bytes.toString(Charsets.UTF_8), url), true)
-            }
+            }.also { result -> step?.let { trace.finish(it, if (result.succeeded) AiStepStatus.SUCCEEDED else AiStepStatus.FAILED, count = result.articles.size, httpStatus = code) } }
         } catch (cancelled: CancellationException) {
+            step?.let { trace.finish(it, AiStepStatus.CANCELLED, httpStatus = code) }
             throw cancelled
         } catch (_: Exception) {
+            step?.let { trace.finish(it, AiStepStatus.FAILED, AiStepDetail.PAGE_UNAVAILABLE, httpStatus = code) }
             FeedFetch(emptyList(), false)
         }
     }
@@ -148,11 +193,15 @@ class NewsRssClient(client: OkHttpClient) {
             .toMutableSet()
         if ("cpi" in eventName || "consumer price" in eventName) terms += setOf("inflation", "prices")
         if ("ppi" in eventName || "producer price" in eventName) terms += setOf("inflation", "producer")
-        if ("fomc" in eventName || "fed funds" in eventName || "interest rate" in eventName) terms += setOf("federal reserve", "fed", "rates")
+        if ("fomc" in eventName || "fed funds" in eventName ||
+            "interest rate" in eventName && event.country == "United States") terms += setOf("federal reserve", "fed")
+        if ("pce" in eventName || "personal consumption expenditure" in eventName) terms += setOf("pce", "inflation")
         if ("nonfarm" in eventName || "payroll" in eventName || "unemployment" in eventName) terms += setOf("jobs", "employment")
         if ("gdp" in eventName || "gross domestic product" in eventName) terms += setOf("growth", "economy")
-        val text = "${article.title} ${article.summary.orEmpty()}".lowercase(Locale.ROOT)
-        val score = terms.count { text.contains(it) }
+        // Google News descriptions may concatenate other publishers' headlines. Only match
+        // the actual title; a keyword buried in an aggregate description is not evidence.
+        val text = article.title.lowercase(Locale.ROOT)
+        val score = terms.count { term -> Regex("(?<![\\p{L}\\p{N}])${Regex.escape(term)}(?![\\p{L}\\p{N}])").containsMatchIn(text) }
         return score.takeIf { it > 0 }
     }
 

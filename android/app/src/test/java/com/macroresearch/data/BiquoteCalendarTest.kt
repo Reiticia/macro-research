@@ -5,6 +5,7 @@ import com.google.gson.JsonObject
 import com.macroresearch.data.local.asEntity
 import com.macroresearch.data.local.asExternalModel
 import com.macroresearch.data.local.mergeCalendarRows
+import com.macroresearch.data.local.fillMissingValues
 import com.macroresearch.data.remote.EconomicCalendarClient
 import com.macroresearch.data.remote.biquoteRows
 import com.macroresearch.data.remote.parseBiquoteCalendar
@@ -28,15 +29,15 @@ import java.time.ZoneOffset
 class BiquoteCalendarTest {
     private val day = LocalDate.parse("2026-10-28")
     private val now = Instant.parse("2026-10-28T16:00:00Z")
-    private val tv = """{"status":"ok","result":[{"id":"tv","title":"CPI MoM","country":"US","date":"2026-10-28T12:30:00Z","actual":0.2}]}"""
+    private val tv = """{"status":"ok","result":[{"id":"tv","title":"CPI MoM","country":"AU","date":"2026-10-28T12:30:00Z","actual":0.2}]}"""
 
     private fun fixture() = javaClass.getResourceAsStream("/calendar-units/biquote.json")!!
         .bufferedReader().use { it.readText() }
 
     private fun client(server: MockWebServer, zone: ZoneId = ZoneOffset.UTC, backoff: CalendarBackoffStore = CalendarBackoffStore.inMemory()) =
         EconomicCalendarClient(OkHttpClient(), zone,
-            primaryUrl = server.url("/biquote").toString(),
-            tradingViewUrl = server.url("/tradingview").toString(),
+            primaryUrl = server.url("/tradingview").toString(),
+            biquoteUrl = server.url("/biquote").toString(),
             fallbackUrl = server.url("/weekly").toString(), backoff = backoff)
 
     @Test fun sharedFixturePreservesNullZeroRevisionsUnitsAndOccurrenceIds() {
@@ -74,18 +75,17 @@ class BiquoteCalendarTest {
         assertEquals("-4000", ReleaseImpactEvaluator.evaluate(claims).surprise!!.stripTrailingZeros().toPlainString())
     }
 
-    @Test fun productionDefaultCallsBiquoteWithoutAKeyOrFallback() = runBlocking {
+    @Test fun productionDefaultCallsTradingViewWithoutAKeyOrFallback() = runBlocking {
         var calls = 0
         val http = OkHttpClient.Builder().addInterceptor { chain ->
             calls++
             val request = chain.request()
-            assertEquals("biquote.io", request.url.host)
-            assertEquals("/api/calendar", request.url.encodedPath)
-            assertEquals("500", request.url.queryParameter("limit"))
+            assertEquals("economic-calendar.tradingview.com", request.url.host)
+            assertEquals("/events", request.url.encodedPath)
             assertEquals("AU", request.url.queryParameter("countries"))
             assertNull(request.header("Authorization"))
             Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                .body(fixture().toResponseBody()).build()
+                .body(tv.toResponseBody()).build()
         }.build()
         val result = EconomicCalendarClient(http, ZoneOffset.UTC).fetch(day, day, listOf("AU"))
         assertTrue(result.events.isNotEmpty())
@@ -93,17 +93,18 @@ class BiquoteCalendarTest {
         assertEquals(1, calls)
     }
 
-    @Test fun emptyInvalidAndFailedPrimaryResponsesUseTradingViewBeforeWeekly() = runBlocking {
-        for (response in listOf(MockResponse().setBody("[]"), MockResponse().setBody("{}"), MockResponse().setResponseCode(503))) {
+    @Test fun emptyInvalidAndFailedPrimaryResponsesUseBiquoteBeforeWeekly() = runBlocking {
+        for (response in listOf(MockResponse().setBody("""{"status":"no_data"}"""), MockResponse().setBody("[]"), MockResponse().setBody("{}"), MockResponse().setResponseCode(503))) {
             MockWebServer().use { server ->
                 server.enqueue(response)
-                server.enqueue(MockResponse().setBody(tv))
+                server.enqueue(MockResponse().setBody(fixture()))
                 val result = client(server).fetch(day, day)
-                assertEquals("trading_view", result.events.single().provider)
+                assertTrue(result.events.isNotEmpty())
+                assertTrue(result.events.all { it.provider == "biquote" })
                 assertEquals(CalendarWarning.Reason.PRIMARY_UNAVAILABLE, result.warning?.reason)
                 assertEquals(2, server.requestCount)
-                assertEquals("/biquote", server.takeRequest().requestUrl!!.encodedPath)
                 assertEquals("/tradingview", server.takeRequest().requestUrl!!.encodedPath)
+                assertEquals("/biquote", server.takeRequest().requestUrl!!.encodedPath)
             }
         }
     }
@@ -111,18 +112,54 @@ class BiquoteCalendarTest {
     @Test fun primaryRetryAfterIsHonoredWhileTheSecondaryRemainsUsable() = runBlocking {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "300"))
-            server.enqueue(MockResponse().setBody(tv))
+            server.enqueue(MockResponse().setBody(fixture()))
+            server.enqueue(MockResponse().setBody(fixture()))
+            val backoff = CalendarBackoffStore.inMemory()
+            val client = client(server, backoff = backoff)
+            val first = client.fetch(day, day).events
+            assertTrue(first.isNotEmpty())
+            assertTrue(first.all { it.provider == "biquote" })
+            assertNotNull(backoff.blockedUntil(CalendarSource.PRIMARY))
+            assertNull(client.nextRetryAt())
+            val second = client.fetch(day, day).events
+            assertTrue(second.isNotEmpty())
+            assertTrue(second.all { it.provider == "biquote" })
+            assertEquals(3, server.requestCount)
+            server.takeRequest()
+            assertEquals("/biquote", server.takeRequest().requestUrl!!.encodedPath)
+            assertEquals("/biquote", server.takeRequest().requestUrl!!.encodedPath)
+        }
+    }
+
+    @Test fun biquoteRetryAfterDoesNotBlockTradingViewRecovery() = runBlocking {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setResponseCode(503))
+            server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "300"))
+            server.enqueue(MockResponse().setBody("""[{"title":"CPI m/m","country":"USD","date":"2026-10-28T12:30:00Z"}]"""))
             server.enqueue(MockResponse().setBody(tv))
             val backoff = CalendarBackoffStore.inMemory()
             val client = client(server, backoff = backoff)
+            assertEquals("forex_factory", client.fetch(day, day).events.single().provider)
+            assertNotNull(backoff.blockedUntil(CalendarSource.BIQUOTE))
+            assertNull(backoff.blockedUntil(CalendarSource.PRIMARY))
             assertEquals("trading_view", client.fetch(day, day).events.single().provider)
-            assertNotNull(backoff.blockedUntil(CalendarSource.PRIMARY))
-            assertNull(client.nextRetryAt())
-            assertEquals("trading_view", client.fetch(day, day).events.single().provider)
-            assertEquals(3, server.requestCount)
-            server.takeRequest()
+            assertEquals(4, server.requestCount)
             assertEquals("/tradingview", server.takeRequest().requestUrl!!.encodedPath)
+            assertEquals("/biquote", server.takeRequest().requestUrl!!.encodedPath)
+            assertEquals("/weekly", server.takeRequest().requestUrl!!.encodedPath)
             assertEquals("/tradingview", server.takeRequest().requestUrl!!.encodedPath)
+        }
+    }
+
+    @Test fun allBlockedSourcesRetryAtTheEarliestProviderDeadline() {
+        val backoff = CalendarBackoffStore.inMemory()
+        backoff.block(CalendarSource.PRIMARY, now.plusSeconds(300))
+        backoff.block(CalendarSource.BIQUOTE, now.plusSeconds(120))
+        backoff.block(CalendarSource.FALLBACK, now.plusSeconds(600))
+        MockWebServer().use { server ->
+            assertEquals(now.plusSeconds(120), client(server, backoff = backoff).nextRetryAt(now))
+            backoff.clear(CalendarSource.BIQUOTE)
+            assertNull(client(server, backoff = backoff).nextRetryAt(now))
         }
     }
 
@@ -134,6 +171,7 @@ class BiquoteCalendarTest {
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     val url = request.requestUrl!!
+                    if (url.encodedPath == "/tradingview") return MockResponse().setResponseCode(503)
                     assertEquals("/biquote", url.encodedPath)
                     assertEquals("US", url.queryParameter("countries"))
                     assertEquals("500", url.queryParameter("limit"))
@@ -145,44 +183,60 @@ class BiquoteCalendarTest {
                 }
             }
             val result = client(server, zone).fetch(day, day, listOf("US"))
-            assertNull(result.warning)
+            assertEquals(CalendarWarning.Reason.PRIMARY_UNAVAILABLE, result.warning?.reason)
             assertEquals(601, result.events.size)
             assertEquals(601, result.events.map { it.id }.toSet().size)
-            assertEquals(3, server.requestCount)
+            assertEquals(4, server.requestCount)
+            assertEquals("/tradingview", server.takeRequest().requestUrl!!.encodedPath)
             val request = server.takeRequest().requestUrl!!
             assertEquals(start, Instant.parse(request.queryParameter("from")))
             assertEquals(day.plusDays(1).atStartOfDay(zone).toInstant(), Instant.parse(request.queryParameter("to")))
         }
     }
 
-    @Test fun anUnresolvableCapNeverReturnsPartialPrimaryData() = runBlocking {
+    @Test fun anUnresolvableBiquoteCapFallsThroughToWeeklyWithoutPartialData() = runBlocking {
         val capped = JsonArray().apply { repeat(500) { add(row(it, now)) } }.toString()
         MockWebServer().use { server ->
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse =
-                    if (request.requestUrl!!.encodedPath == "/biquote") MockResponse().setBody(capped)
-                    else MockResponse().setBody(tv)
+                    when (request.requestUrl!!.encodedPath) {
+                        "/tradingview" -> MockResponse().setResponseCode(503)
+                        "/biquote" -> MockResponse().setBody(capped)
+                        else -> MockResponse().setBody("""[{"title":"CPI m/m","country":"USD","date":"2026-10-28T12:30:00Z"}]""")
+                    }
             }
             val result = client(server).fetch(day, day)
-            assertEquals("trading_view", result.events.single().provider)
+            assertEquals("forex_factory", result.events.single().provider)
             assertTrue(result.warning!!.detail!!.contains("row cap"))
             assertTrue(server.requestCount < 30)
         }
     }
 
-    @Test fun biquotePromotionKeepsSavedIdentityAndCannotBeDemotedByFallback() {
-        val fresh = parseBiquoteCalendar(biquoteRows(fixture()), now).first { it.providerId == "mql5:302115" }.asEntity()
-        val old = fresh.copy(id = 77, provider = "trading_view", providerId = "tv", eventZhCn = "消费者物价指数")
+    @Test fun tradingViewPromotionKeepsSavedIdentityAndCannotBeDemotedByBiquote() {
+        val biquote = parseBiquoteCalendar(biquoteRows(fixture()), now).first { it.providerId == "mql5:302115" }.asEntity()
+        val fresh = biquote.copy(provider = "trading_view", providerId = "tv")
+        val old = biquote.copy(id = 77, eventZhCn = "消费者物价指数")
         val merged = mergeCalendarRows(listOf(fresh), listOf(old)).single()
         assertEquals(77L, merged.id)
-        assertEquals("biquote", merged.provider)
+        assertEquals("trading_view", merged.provider)
         assertEquals(old.eventZhCn, merged.eventZhCn)
         assertEquals(merged, mergeCalendarRows(listOf(old.copy(actual = null)), listOf(merged)).single())
         val missing = merged.copy(actual = null)
         val filled = mergeCalendarRows(listOf(old.copy(actual = "2")), listOf(missing)).single()
-        assertEquals("biquote", filled.provider)
+        assertEquals("trading_view", filled.provider)
         assertEquals("2", filled.actual)
         assertEquals(77L, filled.id)
+    }
+
+    @Test fun cachedTradingViewValuesTakePrecedenceOverBiquoteForWeeklyHydration() {
+        val base = parseBiquoteCalendar(biquoteRows(fixture()), now)
+            .first { it.providerId == "mql5:302115" }.asEntity()
+        val weekly = base.copy(id = 1, provider = "forex_factory", providerId = "weekly", actual = null)
+        val biquote = base.copy(id = 2, actual = "9")
+        val tradingView = base.copy(id = 3, provider = "trading_view", providerId = "tv", actual = "2")
+        val hydrated = fillMissingValues(listOf(weekly, biquote, tradingView)).single()
+        assertEquals(weekly.id, hydrated.id)
+        assertEquals("2", hydrated.actual)
     }
 
     private fun row(id: Int, time: Instant) = JsonObject().apply {

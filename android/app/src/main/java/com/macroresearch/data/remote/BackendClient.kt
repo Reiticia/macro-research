@@ -4,9 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
-import com.macroresearch.data.AnalysisMethod
 import com.macroresearch.data.BackendDeviceIdentity
-import com.macroresearch.data.model.AiAnalysis
 import com.macroresearch.data.model.AnalysisReport
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.data.model.EventDetailResponse
@@ -22,7 +20,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.time.Instant
-import java.time.ZoneId
 
 /** The backend rejected the address, the protocol version, or the token. */
 class BackendUnauthorizedException(message: String) : IOException(message)
@@ -216,65 +213,6 @@ class BackendClient(
         }.let { gson.fromJson(it, MarketQuotesResponse::class.java) }
     }
 
-    /** Lazy server briefing lookup for a direct-mode event with a device-local id. */
-    suspend fun aiAnalysisByProvider(
-        event: EconomicEvent,
-        languageTag: String,
-        method: AnalysisMethod,
-        timezone: String = ZoneId.systemDefault().id,
-        refresh: Boolean = false,
-    ): AiAnalysis? = withContext(Dispatchers.IO) {
-        val root = try {
-            getJson("/api/v1/ai-analysis/by-provider") { url ->
-                url.addQueryParameter("provider", event.provider)
-                url.addQueryParameter("provider_id", event.providerId)
-                url.addQueryParameter("language", languageTag)
-                url.addQueryParameter("method", method.wireValue.toString())
-                url.addQueryParameter("timezone", timezone)
-                if (refresh) url.addQueryParameter("refresh", "true")
-            }
-        } catch (missing: BackendException) {
-            if (missing.statusCode == 404) return@withContext null
-            throw missing
-        }
-        gson.fromJson(root, AiAnalysis::class.java)
-    }
-
-    /** Cached or lazily generated server-side briefing, or null when it is unavailable. */
-    suspend fun aiAnalysis(
-        id: Long,
-        languageTag: String,
-        method: AnalysisMethod,
-        timezone: String = ZoneId.systemDefault().id,
-        refresh: Boolean = false,
-    ): AiAnalysis? = withContext(Dispatchers.IO) {
-        val root = try {
-            getJson("/api/v1/events/$id/ai-analysis") { url ->
-                url.addQueryParameter("language", languageTag)
-                url.addQueryParameter("method", method.wireValue.toString())
-                url.addQueryParameter("timezone", timezone)
-                if (refresh) url.addQueryParameter("refresh", "true")
-            }
-        } catch (missing: BackendException) {
-            if (missing.statusCode == 404) return@withContext null
-            throw missing
-        }
-        gson.fromJson(root, AiAnalysis::class.java)
-    }
-
-    suspend fun submitAnalysisFeedback(
-        id: Long, languageTag: String, method: Int, revision: Int, message: String,
-    ): Unit = withContext(Dispatchers.IO) {
-        val body = JsonObject().apply {
-            addProperty("language", languageTag)
-            addProperty("method", method)
-            addProperty("revision", revision)
-            addProperty("message", message)
-        }
-        postJson("/api/v1/events/$id/analysis-feedback", body)
-        Unit
-    }
-
     /** `https://host` / `http://host` into the WebSocket scheme of the same endpoint. */
     fun webSocketUrl(): String? {
         val base = baseUrl().trim().trimEnd('/')
@@ -353,7 +291,7 @@ class BackendClient(
                 val message = error?.stringOrNull("message") ?: "Backend returned HTTP ${response.code}"
                 when (response.code) {
                     401, 403 -> throw BackendUnauthorizedException(message)
-                    400, 404, 409, 429 -> throw BackendException(response.code, code, message)
+                    400, 404, 409, 429, 501 -> throw BackendException(response.code, code, message)
                     else -> throw BackendUnavailableException(message)
                 }
             }

@@ -1,7 +1,7 @@
 # Macro Research
 
 宏观财经事件研究工具。Android 客户端默认**直连公开数据源**，也可以切到**自建后端模式**：
-所有数据、事件名翻译与 AI 分析由一台服务器提供，数据源出问题时再用 Telegram 机器人通知管理员。
+日历、行情与事件名翻译由一台服务器提供；AI 分析始终使用客户端个人 Key，数据源出问题时再用 Telegram 机器人通知管理员。
 
 ```text
 macro-research/
@@ -16,7 +16,8 @@ macro-research/
 |---|---|---|
 | 谁去抓数据 | 设备直接请求公开源 | 服务器统一抓取并缓存 |
 | 受限网络 | 设备侧自备 HTTP 代理 | 服务器侧出网代理 |
-| AI 分析与翻译 | 用户自己的 Key | 服务端统一 Key，免填 |
+| AI 分析 | 用户自己的 Key | 用户自己的 Key，设备直连模型 |
+| 事件名翻译 | 用户自己的 Key或后端译名缓存 | 服务端统一翻译 |
 | 译名勘正 | 本机生效 | 提交管理员审核后对所有人生效 |
 | 事件公布提醒 | 无 | WebSocket 本地通知 |
 
@@ -24,7 +25,7 @@ macro-research/
 
 ## 数据流（直连模式）
 
-- 财经日历：BiQuote（`biquote.io/api/calendar`）为主源，失败或无数据时依次回退 TradingView、Forex Factory；两种模式均无需日历 API Key
+- 财经日历：TradingView 为主源，失败或无数据时依次回退 BiQuote（`biquote.io/api/calendar`）、Forex Factory；两种模式均无需日历 API Key
 - 美债收益率：CNBC 报价与 1 分钟 K 线，失败时回退 Yahoo Finance
 - 股票指数、外汇与贵金属：BiQuote，失败时回退 Yahoo Finance
 - 加密资产：Binance
@@ -40,7 +41,7 @@ APK 中不包含私人 API Key 或项目服务器地址。未配置翻译 Key �
 
 ## 后端模式
 
-后端提供统一的 REST + WebSocket 接口、服务端 AI 简报与翻译、访问令牌与每日配额，并在
+后端提供统一的 REST + WebSocket 接口、服务端规则分析与翻译、访问令牌与调用审计，并在
 数据源连续失败、限流或公布值长期缺失时用 Telegram 通知管理员，译名勘正也由管理员在
 Telegram 上点按钮审核。**后端自己就能终结 TLS**（`[server] tls_cert` / `tls_key`），
 不需要反向代理；证书可以用长期有效的 Cloudflare Origin Certificate。

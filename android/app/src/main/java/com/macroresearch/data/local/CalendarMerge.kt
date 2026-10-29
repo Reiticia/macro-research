@@ -85,8 +85,8 @@ internal fun CachedEventEntity.occurrenceKey(): Triple<String, Instant, String>?
 }
 
 private fun providerPriority(provider: String): Int = when (provider) {
-    "biquote" -> 3
-    "trading_view" -> 2
+    "biquote" -> 2
+    "trading_view" -> 3
     "forex_factory" -> 1
     else -> 0
 }

@@ -69,8 +69,6 @@ fun DataSourceSettings(repository: MacroRepository) {
     }
     // Strings must be resolved in composition; the click handler runs in a coroutine.
     val verifiedLabel = stringResource(R.string.backend_verified)
-    val backendAiEnabledLabel = stringResource(R.string.backend_ai_enabled)
-    val backendAiDisabledLabel = stringResource(R.string.backend_ai_disabled)
     val unauthorizedLabel = stringResource(R.string.backend_unauthorized)
     val authenticationDisabledLabel = stringResource(R.string.backend_authentication_disabled)
     val protocolMismatchLabel = stringResource(R.string.backend_protocol_mismatch)
@@ -259,9 +257,8 @@ fun DataSourceSettings(repository: MacroRepository) {
                             scope.launch {
                                 try {
                                     repository.saveBackendSettings(baseUrl, token)
-                                    val result = repository.verifyBackend()
-                                    val aiLabel = if (result.aiEnabled) backendAiEnabledLabel else backendAiDisabledLabel
-                                    status = "$verifiedLabel · $aiLabel"
+                                    repository.verifyBackend()
+                                    status = verifiedLabel
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
                                 } catch (failure: Exception) {

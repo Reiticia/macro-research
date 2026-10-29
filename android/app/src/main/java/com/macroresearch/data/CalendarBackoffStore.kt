@@ -7,7 +7,7 @@ import java.util.concurrent.ConcurrentHashMap
 /** Calendar providers whose retry windows are tracked independently. */
 enum class CalendarSource {
     PRIMARY,
-    TRADING_VIEW,
+    BIQUOTE,
     FALLBACK,
 }
 
@@ -61,9 +61,9 @@ class PreferencesBackoffStore(context: Context) : CalendarBackoffStore {
 
     private val CalendarSource.key: String
         get() = when (this) {
-            CalendarSource.PRIMARY -> "biquote_blocked_until"
-            // The former primary was TradingView; preserve its deadline on upgrade.
-            CalendarSource.TRADING_VIEW -> "primary_blocked_until"
+            // Keep deadlines attached to providers when changing their priority.
+            CalendarSource.PRIMARY -> "primary_blocked_until"
+            CalendarSource.BIQUOTE -> "biquote_blocked_until"
             // Keep the existing key so upgrades preserve an active Retry-After window.
             CalendarSource.FALLBACK -> "fallback_blocked_until"
         }

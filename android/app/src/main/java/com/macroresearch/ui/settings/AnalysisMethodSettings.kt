@@ -12,6 +12,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ import com.macroresearch.data.MacroRepository
 @Composable
 fun AnalysisMethodSettings(repository: MacroRepository) {
     val selected by repository.analysisMethod.collectAsStateWithLifecycle()
+    val toolsEnabled by repository.aiToolsEnabled.collectAsStateWithLifecycle()
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.ai_analysis_method), fontWeight = FontWeight.Bold)
@@ -62,6 +64,11 @@ fun AnalysisMethodSettings(repository: MacroRepository) {
                     }
                 }
             }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.ai_tools_toggle), modifier = Modifier.weight(1f))
+                Switch(checked = toolsEnabled, onCheckedChange = repository::setAiToolsEnabled)
+            }
+            Text(stringResource(R.string.ai_tools_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 stringResource(R.string.ai_analysis_method_note),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
