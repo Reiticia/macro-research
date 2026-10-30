@@ -3,6 +3,7 @@ use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
 
 use crate::{
+    calendar::parse::{occurrence_key, provider_priority},
     error::AppError,
     event_description::EventDescription,
     market_selection::MarketSelection,
@@ -47,7 +48,94 @@ impl EventRepository {
         let mut transaction = self.pool.begin().await?;
         let mut ids = Vec::with_capacity(events.len());
 
+        let mut occurrences = HashMap::new();
         for event in events {
+            *occurrences
+                .entry(occurrence_key(
+                    &event.country,
+                    event.event_time,
+                    &event.event,
+                ))
+                .or_insert(0) += 1;
+        }
+        for incoming in events {
+            let mut event = incoming.clone();
+            // Promote one unambiguous public-calendar occurrence in place, preserving follows,
+            // observations and analysis foreign keys. Never conflate authenticated archives or
+            // two indicators sharing a release time.
+            let key = occurrence_key(&event.country, event.event_time, &event.event);
+            if event.time_exact && provider_priority(&event.provider) > 0 && occurrences[&key] == 1
+            {
+                let same_source: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM economic_event WHERE provider = ? AND provider_id = ?)"
+                )
+                .bind(&event.provider)
+                .bind(&event.provider_id)
+                .fetch_one(&mut *transaction)
+                .await?;
+                if !same_source {
+                    let rows = sqlx::query(
+                        "SELECT * FROM economic_event WHERE country = ? AND event_time = ?",
+                    )
+                    .bind(&event.country)
+                    .bind(event.event_time.to_rfc3339())
+                    .fetch_all(&mut *transaction)
+                    .await?;
+                    let candidates: Vec<_> = rows
+                        .into_iter()
+                        .map(event_from_row)
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter()
+                        .filter(|old| {
+                            old.time_exact
+                                && provider_priority(&old.provider) > 0
+                                && occurrence_key(&old.country, old.event_time, &old.event) == key
+                        })
+                        .collect();
+                    if let [old] = candidates.as_slice() {
+                        if provider_priority(&old.provider) > provider_priority(&event.provider) {
+                            if old.actual.is_some() || event.actual.is_none() {
+                                ids.push(old.id);
+                                continue;
+                            }
+                            // A fallback may fill a missing release, but cannot demote its identity.
+                            event = EconomicEvent {
+                                actual: event.actual,
+                                previous: event.previous,
+                                consensus: event.consensus,
+                                forecast: event.forecast,
+                                unit: event.unit,
+                                ..old.clone()
+                            };
+                        } else if old.provider != event.provider {
+                            if old.status == EventStatus::Historical
+                                && event.status != EventStatus::Historical
+                            {
+                                ids.push(old.id);
+                                continue;
+                            }
+                            sqlx::query(
+                                "UPDATE economic_event SET provider = ?, provider_id = ? WHERE id = ?",
+                            )
+                            .bind(&event.provider)
+                            .bind(&event.provider_id)
+                            .bind(old.id)
+                            .execute(&mut *transaction)
+                            .await?;
+                        }
+                        event.event_zh_cn = old.event_zh_cn.clone().or(event.event_zh_cn);
+                        event.event_zh_tw = old.event_zh_tw.clone().or(event.event_zh_tw);
+                        if event.actual.is_none() && old.actual.is_some() {
+                            event.actual = old.actual;
+                            event.previous = old.previous;
+                            event.consensus = old.consensus;
+                            event.forecast = old.forecast;
+                            event.unit = old.unit.clone();
+                            event.status = old.status;
+                        }
+                    }
+                }
+            }
             let event_query = sqlx::query(
                 r#"INSERT INTO economic_event (
                     provider, provider_id, country, currency, category, event,
@@ -622,7 +710,7 @@ impl EventRepository {
     ) -> Result<Vec<EconomicEvent>, AppError> {
         let rows = sqlx::query(
             r#"SELECT * FROM economic_event
-               WHERE status = 'scheduled' AND importance >= ?
+               WHERE status = 'scheduled' AND time_exact = 1 AND importance >= ?
                  AND event_time >= ? AND event_time <= ?
                ORDER BY event_time ASC"#,
         )

@@ -75,6 +75,7 @@ class MacroRepository(
     private val analysisPreferences: AnalysisPreferences,
     private val newsPreferences: NewsPreferences,
     private val newsRssClient: NewsRssClient,
+    private val aiHistoryStore: AiHistoryStore,
     private val backendPreferences: BackendPreferences,
     private val translationClient: TranslationClient,
     private val aiAnalysisClient: AiAnalysisClient,
@@ -85,6 +86,7 @@ class MacroRepository(
     private val translationPreferences: TranslationPreferences,
     private val pushTopicManager: PushTopicManager,
 ) {
+    private val aiRunGate = AiRunGate()
     val selectedCountries: StateFlow<Set<String>> = countryPreferences.selectedCountries
     val selectedMarkets: StateFlow<List<String>> = marketPreferences.selectedMarkets
     val translationSettings: StateFlow<TranslationSettings> = translationPreferences.settings
@@ -104,8 +106,12 @@ class MacroRepository(
         }
 
     fun setAnalysisMethod(method: AnalysisMethod) = analysisPreferences.setMethod(method)
+    val aiToolsEnabled = analysisPreferences.toolsEnabled
+    fun setAiToolsEnabled(enabled: Boolean) = analysisPreferences.setToolsEnabled(enabled)
     fun setNewsSearchEnabled(enabled: Boolean) = newsPreferences.setEnabled(enabled)
     fun setNewsSources(urls: List<String>) = newsPreferences.setSources(urls)
+    fun setBiquoteNewsEnabled(enabled: Boolean) = newsPreferences.setBiquoteEnabled(enabled)
+    fun setArticlePreviewEnabled(enabled: Boolean) = newsPreferences.setArticlePreviewEnabled(enabled)
 
     private val _calendarWarning = MutableStateFlow<CalendarWarning?>(null)
     val calendarWarning = _calendarWarning.asStateFlow()
@@ -136,6 +142,7 @@ class MacroRepository(
             analysisDao.clearAll()
             analysisDao.clearAllConversations()
             analysisDao.clearAllAutoRefreshAttempts()
+            withContext(Dispatchers.IO) { aiHistoryStore.clearAll() }
             marketCache.clear()
         }
         historySyncedAt = 0L
@@ -145,6 +152,7 @@ class MacroRepository(
 
     fun saveBackendSettings(baseUrl: String, token: String) {
         backendPreferences.save(baseUrl, token)
+        marketCache.clear()
         invalidateReleaseRefresh()
         backendPreferences.clearVerification()
         networkPreferences.clearUpcomingSync()
@@ -166,6 +174,7 @@ class MacroRepository(
                 analysisDao.clearAll()
                 analysisDao.clearAllConversations()
                 analysisDao.clearAllAutoRefreshAttempts()
+                withContext(Dispatchers.IO) { aiHistoryStore.clearAll() }
                 marketCache.clear()
                 historySyncedAt = 0L
                 networkPreferences.clearUpcomingSync()
@@ -489,13 +498,17 @@ class MacroRepository(
         return if (source.mode == DataSourceMode.BACKEND) event(id) else localEvent(id)
     }
 
+    private fun aiEvidenceLoader(trace: AiExecutionTrace? = null): AiEvidenceLoader = AiEvidenceLoader(
+        directSource, backendSource, dataSourceSettings.value.baseUrl,
+        dataSourceSettings.value.mode == DataSourceMode.BACKEND, trace,
+    )
+
     suspend fun analysis(id: Long): AnalysisReport {
-        val event = event(id).event
-        return if (translationSettings.value.configured) {
-            directSource.ruleAnalysis(event) { directSource.eventMarket(event) }
-        } else {
-            source.ruleAnalysis(event) { market(id) }
-        }
+        val local = event(id).event
+        val evidence = aiEvidenceLoader()
+        val authoritative = evidence.event(local)
+        val market = evidence.market(authoritative)
+        return evidence.report(authoritative, market)
     }
 
     /** The cached briefing of the method the user currently has selected. */
@@ -510,22 +523,6 @@ class MacroRepository(
         return analysisDao.analysis(eventId, method.wireValue)?.toModel()
     }
 
-    /**
-     * Builds the AI briefing for a released event and stores it under its own method, so the
-     * three methods never overwrite each other.
-     *
-     * Rate limiting mirrors the server: a regeneration inside the cooldown window does not hit
-     * the network, it returns the stored result marked `rateLimited`, and a backend that is
-     * itself throttled does the same for a device with an empty cache.
-     */
-    suspend fun sharedAiAnalysis(eventId: Long, languageTag: String, refresh: Boolean = false): AiAnalysis? {
-        check(dataSourceSettings.value.baseUrl.isNotBlank()) {
-            "Configure a backend address to read shared analysis"
-        }
-        val event = localEvent(eventId).event
-        return backendSource.cachedAiAnalysis(event, languageTag, analysisMethod.value, refresh = refresh)
-    }
-
     suspend fun aiConversation(eventId: Long): List<AiConversationMessage> {
         val row = analysisDao.conversation(eventId) ?: return emptyList()
         return aiAnalysisClient.decodeConversation(row.messagesJson)
@@ -533,6 +530,7 @@ class MacroRepository(
 
     suspend fun resetAiConversation(eventId: Long) {
         analysisDao.clearConversation(eventId)
+        withContext(Dispatchers.IO) { aiHistoryStore.clear(conversationHistoryKey(eventId)) }
     }
 
     suspend fun autoRefreshAttempted(eventId: Long, method: Int, language: String): Boolean =
@@ -544,89 +542,168 @@ class MacroRepository(
         )
     }
 
-    suspend fun askAiFollowUp(eventId: Long, languageTag: String, question: String): List<AiConversationMessage> {
-        require(translationPreferences.settings.value.configured) { "A personal AI key is required for conversation" }
-        require(question.isNotBlank())
-        val event = dao.event(eventId)?.asExternalModel() ?: error("Event is not available in the local cache")
-        require(hasEventTimeArrived(event.eventTime)) { "The event time has not passed yet" }
-        val report = directSource.ruleAnalysis(event) { directSource.eventMarket(event) }
-        val history = aiConversation(eventId)
-        val settings = translationPreferences.settings.value
-        val key = translationPreferences.apiKey() ?: error("Configure an API key in Settings first")
-        val assistant = aiAnalysisClient.converse(
-            AiAnalysisInput(event, report.macroSignal, report.rawSurprise, report.expectedReactions, report.observedReactions, languageTag),
-            settings, key, history, question.trim(),
-            currentBriefing = analysisDao.analysis(eventId, analysisPreferences.method.value.wireValue)?.let { cached ->
-                "Data: ${cached.dataAnalysis}\nOutlook: ${cached.marketOutlook}\nRisks: ${cached.risks.orEmpty()}"
-            },
-        )
-        val updated = history + AiConversationMessage("user", question.trim()) + assistant
-        analysisDao.upsertConversation(
-            AiConversationEntity(eventId, aiAnalysisClient.encodeConversation(updated), System.currentTimeMillis()),
-        )
-        return updated
+    private fun analysisHistoryKey(eventId: Long, method: Int): String = "analysis|${dataSourceSettings.value.mode}|${dataSourceSettings.value.baseUrl}|$eventId|$method"
+    private fun conversationHistoryKey(eventId: Long): String = "conversation|${dataSourceSettings.value.mode}|${dataSourceSettings.value.baseUrl}|$eventId"
+
+    suspend fun aiHistory(eventId: Long): AiHistory = withContext(Dispatchers.IO) {
+        aiHistoryStore.load(analysisHistoryKey(eventId, analysisPreferences.method.value.wireValue))
     }
 
-    suspend fun submitAnalysisFeedback(language: String, analysis: AiAnalysis, message: String) {
-        check(!translationSettings.value.configured && dataSourceSettings.value.configured) {
-            "Feedback is only available for shared server analysis"
+    suspend fun aiConversationHistory(eventId: Long): AiHistory = withContext(Dispatchers.IO) {
+        aiHistoryStore.load(conversationHistoryKey(eventId))
+    }
+
+    suspend fun askAiFollowUp(eventId: Long, languageTag: String, question: String,
+        onRequests: (List<AiRequestRecord>) -> Unit = {},
+    ): List<AiConversationMessage> = aiRunGate.run(conversationHistoryKey(eventId)) {
+        askAiFollowUpInternal(eventId, languageTag, question, onRequests)
+    }
+
+    private suspend fun askAiFollowUpInternal(eventId: Long, languageTag: String, question: String,
+        onRequests: (List<AiRequestRecord>) -> Unit,
+    ): List<AiConversationMessage> = withContext(Dispatchers.IO) {
+        val historyKey = conversationHistoryKey(eventId)
+        var checkpoint = aiHistoryStore.begin(historyKey, appendRequests = true)
+        val requestLog = AiRequestLog(checkpoint.requests) { records ->
+            checkpoint = checkpoint.copy(requests = records)
+            aiHistoryStore.save(historyKey, checkpoint)
+            onRequests(records)
         }
-        backendSource.feedback(analysis.eventId, language, analysis.method, analysis.revision, message)
+        try {
+            require(translationPreferences.settings.value.configured) { "A personal AI key is required for conversation" }
+            require(question.isNotBlank())
+            val local = dao.event(eventId)?.asExternalModel() ?: error("Event is not available in the local cache")
+            val evidence = aiEvidenceLoader()
+            val event = evidence.event(local)
+            require(hasEventTimeArrived(event.eventTime)) { "The event time has not passed yet" }
+            val market = evidence.market(event)
+            val report = evidence.report(event, market)
+            val history = aiConversation(eventId)
+            val settings = translationPreferences.settings.value
+            val key = translationPreferences.apiKey() ?: error("Configure an API key in Settings first")
+            val assistant = aiAnalysisClient.converse(
+                AiAnalysisInput(event, report.macroSignal, report.rawSurprise, report.expectedReactions, report.observedReactions, languageTag, requestLog = requestLog),
+                settings, key, history, question.trim(),
+                currentBriefing = analysisDao.analysis(eventId, analysisPreferences.method.value.wireValue)?.let { cached ->
+                    "Data: ${cached.dataAnalysis}\nOutlook: ${cached.marketOutlook}\nRisks: ${cached.risks.orEmpty()}"
+                },
+            )
+            val updated = history + AiConversationMessage("user", question.trim()) + assistant
+            analysisDao.upsertConversation(
+                AiConversationEntity(eventId, aiAnalysisClient.encodeConversation(updated), System.currentTimeMillis()),
+            )
+            aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.SUCCEEDED)
+            updated
+        } catch (cancelled: CancellationException) {
+            withContext(kotlinx.coroutines.NonCancellable) { aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.CANCELLED) }
+            throw cancelled
+        } catch (error: Exception) {
+            aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.FAILED)
+            throw error
+        }
     }
 
     suspend fun generateAiAnalysis(
         eventId: Long,
         languageTag: String,
         regenerate: Boolean = false,
-    ): AiAnalysis {
+        onProgress: (List<AiExecutionStep>) -> Unit = {},
+        onRequests: (List<AiRequestRecord>) -> Unit = {},
+        onArticles: (List<com.macroresearch.data.remote.NewsArticle>) -> Unit = {},
+    ): AiAnalysis = aiRunGate.run(analysisHistoryKey(eventId, analysisPreferences.method.value.wireValue)) {
+        generateAiAnalysisInternal(eventId, languageTag, regenerate, onProgress, onRequests, onArticles)
+    }
+
+    private suspend fun generateAiAnalysisInternal(
+        eventId: Long,
+        languageTag: String,
+        regenerate: Boolean,
+        onProgress: (List<AiExecutionStep>) -> Unit,
+        onRequests: (List<AiRequestRecord>) -> Unit,
+        onArticles: (List<com.macroresearch.data.remote.NewsArticle>) -> Unit,
+    ): AiAnalysis = withContext(Dispatchers.IO) {
         check(translationSettings.value.configured) { "A personal AI key is required to generate analysis" }
         val method = analysisPreferences.method.value
         val cached = analysisDao.analysis(eventId, method.wireValue)
-        if (regenerate && cached != null) {
-            val elapsed = System.currentTimeMillis() - cached.generatedAtEpochMs
-            val remaining = AI_REGENERATE_COOLDOWN_MS - elapsed
-            if (remaining > 0) {
-                return cached.toModel().copy(
-                    fromCache = true,
-                    rateLimited = true,
-                    retryAfterSeconds = remaining / 1000,
-                )
-            }
+        val historyKey = analysisHistoryKey(eventId, method.wireValue)
+        var checkpoint = aiHistoryStore.begin(historyKey)
+        val trace = AiExecutionTrace { steps ->
+            checkpoint = checkpoint.copy(steps = steps)
+            aiHistoryStore.save(historyKey, checkpoint)
+            onProgress(steps)
         }
-        val event = dao.event(eventId)?.asExternalModel()
-            ?: error("Event is not available in the local cache")
-        require(hasEventTimeArrived(event.eventTime)) { "The event time has not passed yet" }
-        // Personal model payloads/results never go through the backend, in either data mode.
-        val report = directSource.ruleAnalysis(event) { directSource.eventMarket(event) }
-        val newsSettings = newsPreferences.settings.value
-        val newsResult = if (newsSettings.enabled) {
-            newsRssClient.relevantArticles(event, newsSettings.sourceUrls)
-        } else null
-        val nextRevision = (cached?.revision ?: 0) + 1
-        val analysis = directSource.aiAnalysis(
-            AiAnalysisRequest(
-                event = event,
-                report = report,
-                languageTag = languageTag,
-                method = method,
-                revision = nextRevision,
-                regenerate = regenerate || cached != null,
-                newsSearchRequested = newsSettings.enabled,
-                newsSearchStatus = newsResult?.status,
-                newsArticles = newsResult?.articles.orEmpty(),
-            ),
-        )
-            .let { fetched ->
-                // The generated row must carry the method it was requested with, even when a
-                // relay or server omits the field.
-                fetched.copy(
-                    eventId = event.id,
-                    method = method.wireValue,
-                    revision = if (fetched.revision > 0) fetched.revision else nextRevision,
-                )
-            }
-        analysisDao.upsert(analysis.toEntity())
-        return analysis
+        val requestLog = AiRequestLog { records ->
+            checkpoint = checkpoint.copy(requests = records)
+            aiHistoryStore.save(historyKey, checkpoint)
+            onRequests(records)
+        }
+        try {
+            val local = dao.event(eventId)?.asExternalModel()
+                ?: error("Event is not available in the local cache")
+            val evidence = aiEvidenceLoader(trace)
+            val event = evidence.event(local)
+            require(hasEventTimeArrived(event.eventTime)) { "The event time has not passed yet" }
+            // Evidence follows the configured backend; only the model request stays personal.
+            val market = evidence.market(event)
+            val report = evidence.report(event, market)
+            val newsSettings = newsPreferences.settings.value
+            val newsStep = trace.start(AiOperation.LOAD_NEWS)
+            val newsResult = if (newsSettings.enabled) {
+                newsRssClient.relevantArticles(event, newsSettings.sourceUrls, includeBiquote = newsSettings.biquoteEnabled, trace = trace)
+            } else null
+            trace.finish(newsStep, detail = when {
+                !newsSettings.enabled -> AiStepDetail.NEWS_DISABLED
+                newsResult?.status == "search_unavailable" -> AiStepDetail.MISSING_DATA
+                newsResult?.status == "partial_results" -> AiStepDetail.PARTIAL_NEWS
+                newsResult?.articles.isNullOrEmpty() -> AiStepDetail.NO_NEWS
+                dataSourceSettings.value.baseUrl.isNotBlank() -> AiStepDetail.INTERFACE_UNAVAILABLE
+                else -> AiStepDetail.DIRECT_DATA
+            }, count = newsResult?.articles?.size)
+            val articles = newsResult?.articles.orEmpty()
+            checkpoint = checkpoint.copy(articles = articles)
+            aiHistoryStore.save(historyKey, checkpoint)
+            onArticles(articles)
+            val nextRevision = (cached?.revision ?: 0) + 1
+            val analysis = directSource.aiAnalysis(
+                AiAnalysisRequest(
+                    event = event,
+                    report = report,
+                    languageTag = languageTag,
+                    method = method,
+                    revision = nextRevision,
+                    regenerate = regenerate || cached != null,
+                    newsSearchRequested = newsSettings.enabled,
+                    newsSearchStatus = newsResult?.status,
+                    newsArticles = newsResult?.articles.orEmpty(),
+                    toolsEnabled = analysisPreferences.toolsEnabled.value,
+                    articlePreviewEnabled = newsSettings.enabled && newsSettings.articlePreviewEnabled,
+                    trace = trace,
+                    requestLog = requestLog,
+                ),
+            )
+                .let { fetched ->
+                    // The generated row must carry the method it was requested with, even when a
+                    // relay or server omits the field.
+                    fetched.copy(
+                        eventId = event.id,
+                        method = method.wireValue,
+                        revision = if (fetched.revision > 0) fetched.revision else nextRevision,
+                    )
+                }
+            val saveStep = trace.start(AiOperation.SAVE)
+            analysisDao.upsert(analysis.toEntity())
+            trace.finish(saveStep)
+            aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.SUCCEEDED)
+            analysis
+        } catch (cancelled: CancellationException) {
+            trace.finishRunning(AiStepStatus.CANCELLED)
+            withContext(kotlinx.coroutines.NonCancellable) { aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.CANCELLED) }
+            throw cancelled
+        } catch (error: Exception) {
+            trace.finishRunning(AiStepStatus.FAILED)
+            aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.FAILED)
+            throw error
+        }
     }
 
     private fun AiAnalysisEntity.toModel(): AiAnalysis = AiAnalysis(
@@ -650,8 +727,8 @@ class MacroRepository(
             null
         },
         fromCache = fromCache,
-        rateLimited = rateLimited,
-        retryAfterSeconds = retryAfterSeconds,
+        rateLimited = false,
+        retryAfterSeconds = null,
     )
 
     private fun AiAnalysis.toEntity(): AiAnalysisEntity = AiAnalysisEntity(
@@ -684,7 +761,8 @@ class MacroRepository(
         val event = dao.event(id)?.asExternalModel()
             ?: source.eventDetail(id)?.event
             ?: error("Event is not available in the local cache")
-        val response = source.eventMarket(event)
+        val evidence = aiEvidenceLoader()
+        val response = evidence.market(event)
         marketCache[id] = CachedMarket(System.currentTimeMillis(), response)
         return response
     }
@@ -963,8 +1041,6 @@ class MacroRepository(
         const val HISTORY_PAGE_SIZE = 8
         const val SUPPORTED_API_VERSION = 1
 
-        /** Mirrors the server's per-(event, method) cooldown; see [limits] in the backend config. */
-        internal const val AI_REGENERATE_COOLDOWN_MS = 10 * 60_000L
         private const val HISTORY_RETENTION_DAYS = 730L
         private const val TRANSLATION_BATCH_SIZE = 5
 

@@ -4,6 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.macroresearch.data.MacroRepository
+import com.macroresearch.data.AiExecutionStep
+import com.macroresearch.data.AiRequestRecord
+import com.macroresearch.data.AiStepStatus
+import kotlinx.coroutines.flow.update
 import com.macroresearch.data.model.AnalysisReport
 import com.macroresearch.data.model.AiAnalysis
 import com.macroresearch.data.model.EconomicEvent
@@ -279,13 +283,16 @@ data class AiAnalysisState(
     val analysis: AiAnalysis? = null,
     val loading: Boolean = false,
     val error: String? = null,
-    val feedbackSent: Boolean = false,
+    val steps: List<AiExecutionStep> = emptyList(),
+    val articles: List<com.macroresearch.data.remote.NewsArticle> = emptyList(),
+    val requests: List<AiRequestRecord> = emptyList(),
 )
 
 data class AiConversationState(
     val messages: List<AiConversationMessage> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null,
+    val requests: List<AiRequestRecord> = emptyList(),
 )
 
 class AnalysisViewModel(
@@ -300,6 +307,7 @@ class AnalysisViewModel(
     val conversation = _conversation.asStateFlow()
     private var refreshJob: Job? = null
     private var refreshedRevision: Int? = null
+    private var generationJob: Job? = null
 
     init {
         refresh()
@@ -313,18 +321,25 @@ class AnalysisViewModel(
         }
     }
 
-    fun refreshSharedAi(language: String) = viewModelScope.launch { loadAi(language) }
-
     fun loadConversation() = viewModelScope.launch {
-        if (!repository.translationSettings.value.configured) return@launch
-        _conversation.value = _conversation.value.copy(messages = repository.aiConversation(id))
+        val history = repository.aiConversationHistory(id)
+        _conversation.update { it.copy(messages = repository.aiConversation(id), requests = history.requests) }
     }
 
     fun askFollowUp(language: String, question: String) = viewModelScope.launch {
+        if (_conversation.value.loading) return@launch
         _conversation.value = _conversation.value.copy(loading = true, error = null)
-        runCatching { repository.askAiFollowUp(id, language, question) }
-            .onSuccess { _conversation.value = AiConversationState(messages = it) }
-            .onFailure { _conversation.value = _conversation.value.copy(loading = false, error = it.message) }
+        try {
+            val messages = repository.askAiFollowUp(id, language, question) { records ->
+                _conversation.update { it.copy(requests = records) }
+            }
+            _conversation.update { it.copy(messages = messages, loading = false) }
+        } catch (cancelled: CancellationException) {
+            _conversation.update { it.copy(loading = false) }
+            throw cancelled
+        } catch (error: Exception) {
+            _conversation.update { it.copy(loading = false, error = error.message) }
+        }
     }
 
     fun resetConversation() = viewModelScope.launch {
@@ -347,24 +362,22 @@ class AnalysisViewModel(
         refreshJob = viewModelScope.launch {
             if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
             if (repository.autoRefreshAttempted(id, refreshMethod, refreshLanguage)) return@launch
-            if (_ai.value.analysis == null || refreshedRevision == _ai.value.analysis?.revision) return@launch
+            if (_ai.value.loading || _ai.value.analysis == null || refreshedRevision == _ai.value.analysis?.revision) return@launch
             val latestGenerated = runCatching { java.time.Instant.parse(_ai.value.analysis?.generatedAt) }.getOrNull()
             if (latestGenerated != null && !latestGenerated.isBefore(boundary)) return@launch
             val oldRevision = _ai.value.analysis?.revision
             repository.recordAutoRefreshAttempt(id, refreshMethod, refreshLanguage)
             refreshedRevision = oldRevision
-            _ai.value = _ai.value.copy(loading = true, error = null)
+            _ai.value = _ai.value.copy(loading = true, error = null, steps = emptyList(), requests = emptyList(), articles = emptyList())
             try {
-                val updated = if (repository.translationSettings.value.configured) {
-                    repository.generateAiAnalysis(id, language, regenerate = true)
-                } else {
-                    repository.sharedAiAnalysis(id, language, refresh = true)
-                }
-                if (updated != null) _ai.value = AiAnalysisState(analysis = updated)
+                val updated = repository.generateAiAnalysis(id, language, regenerate = true, onProgress = ::recordProgress, onRequests = ::recordRequests, onArticles = ::recordArticles)
+                _ai.update { it.copy(analysis = updated, loading = false) }
                 refreshedRevision = oldRevision
             } catch (cancelled: CancellationException) {
+                finishProgress(AiStepStatus.CANCELLED)
                 throw cancelled
             } catch (error: Exception) {
+                finishProgress(AiStepStatus.FAILED)
                 _ai.value = _ai.value.copy(loading = false, error = error.message)
                 refreshedRevision = oldRevision
             }
@@ -372,17 +385,15 @@ class AnalysisViewModel(
     }
 
     private fun _conversationEligible(): Boolean =
-        repository.translationSettings.value.configured || repository.dataSourceSettings.value.baseUrl.isNotBlank()
+        repository.translationSettings.value.configured
 
     suspend fun loadAi(language: String) {
+        if (_ai.value.loading) return
         _ai.value = AiAnalysisState(loading = true)
         try {
-            val result = if (repository.translationSettings.value.configured) {
-                repository.aiAnalysis(id)
-            } else {
-                repository.sharedAiAnalysis(id, language)
-            }
-            _ai.value = AiAnalysisState(analysis = result)
+            val result = repository.aiAnalysis(id)
+            val history = repository.aiHistory(id)
+            _ai.value = AiAnalysisState(analysis = result, steps = history.steps, requests = history.requests, articles = history.articles.orEmpty())
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -390,27 +401,40 @@ class AnalysisViewModel(
         }
     }
 
-    fun feedback(language: String, message: String) = viewModelScope.launch {
-        val result = _ai.value.analysis ?: return@launch
-        _ai.value = _ai.value.copy(error = null)
-        try {
-            repository.submitAnalysisFeedback(language, result, message)
-            _ai.value = _ai.value.copy(feedbackSent = true)
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            _ai.value = _ai.value.copy(error = error.message)
+    /** Runs or re-runs the AI briefing on the user's own endpoint and stores it locally. */
+    fun generateAiAnalysis(languageTag: String) {
+        if (_ai.value.loading || generationJob?.isActive == true) return
+        generationJob = viewModelScope.launch {
+            _ai.value = _ai.value.copy(loading = true, error = null, steps = emptyList(), requests = emptyList(), articles = emptyList())
+            try {
+                val result = repository.generateAiAnalysis(id, languageTag, regenerate = true, onProgress = ::recordProgress, onRequests = ::recordRequests, onArticles = ::recordArticles)
+                _ai.update { it.copy(analysis = result, loading = false) }
+            } catch (cancelled: CancellationException) {
+                finishProgress(AiStepStatus.CANCELLED)
+                throw cancelled
+            } catch (error: Exception) {
+                finishProgress(AiStepStatus.FAILED)
+                _ai.update { it.copy(loading = false, error = error.message) }
+            }
         }
     }
 
-    /** Runs or re-runs the AI briefing on the user's own endpoint and stores it locally. */
-    fun generateAiAnalysis(languageTag: String) = viewModelScope.launch {
-        _ai.value = _ai.value.copy(loading = true, error = null)
-        runCatching { repository.generateAiAnalysis(id, languageTag) }
-            .onSuccess { _ai.value = AiAnalysisState(analysis = it) }
-            .onFailure { error ->
-                _ai.value = _ai.value.copy(loading = false, error = error.message)
-            }
+    private fun recordArticles(articles: List<com.macroresearch.data.remote.NewsArticle>) {
+        _ai.update { it.copy(articles = articles) }
+    }
+
+    private fun recordRequests(records: List<AiRequestRecord>) {
+        _ai.update { it.copy(requests = records) }
+    }
+
+    private fun recordProgress(steps: List<AiExecutionStep>) {
+        _ai.update { it.copy(steps = steps) }
+    }
+
+    private fun finishProgress(status: AiStepStatus) {
+        _ai.update { state -> state.copy(loading = false, steps = state.steps.map {
+            if (it.status == AiStepStatus.RUNNING) it.copy(status = status) else it
+        }) }
     }
 
     fun refresh() = viewModelScope.launch {

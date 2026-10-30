@@ -42,7 +42,7 @@ internal class ForegroundReleaseCoordinator(
         }
         val groups = rows.filter { event ->
             val time = runCatching { Instant.parse(event.eventTime) }.getOrNull()
-            event.actual.isNullOrBlank() && time != null && !time.isAfter(instant) &&
+            event.timeExact && event.actual.isNullOrBlank() && time != null && !time.isAfter(instant) &&
                 Duration.between(time, instant) < Duration.ofMinutes(30)
         }.groupBy { Instant.parse(it.eventTime).atZone(groupingZone()).toLocalDate() }
         attempts.keys.retainAll(groups.keys)

@@ -15,6 +15,7 @@ use crate::{
     llm_usage::{LlmKind, LlmScope, LlmUsageEntry, LlmUsageRepository, TokenUsage, endpoint_host},
     model::{EconomicEvent, MarketSymbol},
     repository::EventRepository,
+    typesafe::system_one_request,
 };
 
 pub const HEALTH_KEY: &str = "market_selection.typesafe";
@@ -54,8 +55,6 @@ impl MarketSelector {
         config: MarketSelectionConfig,
         candidates: Vec<MarketSymbol>,
         events: EventRepository,
-        audit: Option<Arc<LlmUsageRepository>>,
-        health: Option<Arc<HealthRegistry>>,
         api_key: Option<String>,
     ) -> Result<Self, AppError> {
         config.validate()?;
@@ -73,10 +72,20 @@ impl MarketSelector {
             config,
             candidates: unique_symbols(candidates),
             events,
-            audit,
-            health,
+            audit: None,
+            health: None,
             in_flight: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub fn with_audit_opt(mut self, audit: Option<Arc<LlmUsageRepository>>) -> Self {
+        self.audit = audit;
+        self
+    }
+
+    pub fn with_health(mut self, health: Arc<HealthRegistry>) -> Self {
+        self.health = Some(health);
+        self
     }
 
     /// Return the persisted selection or create one once for this event. The per-event lock
@@ -171,67 +180,44 @@ impl MarketSelector {
         let started = Instant::now();
         let request = build_request(&self.model, event, &self.candidates);
         let response = match self.api_key.as_deref().filter(|key| !key.trim().is_empty()) {
-            Some(api_key) => self
-                .client
-                .post(&self.endpoint)
-                .bearer_auth(api_key)
-                .header("accept", "application/json")
-                .timeout(std::time::Duration::from_secs(60))
-                .json(&request)
-                .send()
-                .await
-                .map_err(AppError::Http),
+            Some(api_key) => {
+                system_one_request(&self.client, &self.endpoint, api_key, &request).await
+            }
             None => Err(AppError::Config(
                 "typesafe.api_key is required for market selection".into(),
             )),
         };
         let (answers, outcome) = match response {
-            Ok(response) => {
-                let status = response.status();
-                match response.text().await {
-                    Err(error) => (
-                        None,
-                        Err(AppError::Provider(format!(
-                            "TypeSafe response body could not be read: {error}"
-                        ))),
-                    ),
-                    Ok(body) if !status.is_success() => {
-                        tracing::error!(%status, body = %body, "market-selection AI returned an error response");
-                        (
-                            None,
-                            Err(AppError::Relay {
-                                status: status.as_u16(),
-                                detail: crate::openai_compat::error_detail(status, &body),
-                            }),
-                        )
-                    }
-                    Ok(body) => match serde_json::from_str::<Value>(&body) {
-                        Ok(root) => match parse_answers(&root, &self.candidates) {
-                            Ok(parsed) => (Some(parsed), Ok(())),
-                            Err(error) => (None, Err(error)),
-                        },
-                        Err(error) => (
-                            None,
-                            Err(AppError::Provider(format!(
-                                "TypeSafe returned invalid JSON: {error}"
-                            ))),
-                        ),
-                    },
-                }
+            Ok((status, body)) if !status.is_success() => {
+                tracing::error!(%status, body = %body, "market-selection AI returned an error response");
+                (
+                    None,
+                    Err(AppError::Relay {
+                        status: status.as_u16(),
+                        detail: crate::openai_compat::error_detail(status, &body),
+                    }),
+                )
             }
+            Ok((_, body)) => match serde_json::from_str::<Value>(&body) {
+                Ok(root) => match parse_answers(&root, &self.candidates) {
+                    Ok(parsed) => (Some(parsed), Ok(())),
+                    Err(error) => (None, Err(error)),
+                },
+                Err(error) => (
+                    None,
+                    Err(AppError::Provider(format!(
+                        "TypeSafe returned invalid JSON: {error}"
+                    ))),
+                ),
+            },
             Err(error) => (None, Err(error)),
         };
         let usage = answers
             .as_ref()
             .map(|answers| answers.usage)
             .unwrap_or_default();
-        self.audit_call(
-            event.id,
-            started,
-            usage,
-            outcome.as_ref().map(|_| ()).map_err(|e| e),
-        )
-        .await;
+        self.audit_call(event.id, started, usage, outcome.as_ref().map(|_| ()))
+            .await;
         if answers.as_ref().is_some_and(|answer| answer.partial) {
             if let Some(health) = &self.health {
                 health
@@ -537,7 +523,12 @@ fn unique_symbols(symbols: Vec<MarketSymbol>) -> Vec<MarketSymbol> {
 mod tests {
     use super::*;
     use crate::{config::TypeSafeConfig, model::EventStatus};
-    use axum::{Json, Router, extract::State, routing::post};
+    use axum::{
+        Json, Router,
+        extract::State,
+        response::{IntoResponse, Response},
+        routing::post,
+    };
     use chrono::Utc;
     use rust_decimal::Decimal;
     use sqlx::sqlite::SqlitePoolOptions;
@@ -613,12 +604,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn jev_selection_is_persisted_and_reused_without_second_request() {
+    async fn jev_selection_retries_then_is_persisted_and_reused() {
         async fn mock_system_one(
             State(calls): State<Arc<AtomicUsize>>,
             Json(request): Json<Value>,
-        ) -> Json<Value> {
-            calls.fetch_add(1, Ordering::SeqCst);
+        ) -> Response {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                return (reqwest::StatusCode::SERVICE_UNAVAILABLE, "temporary outage")
+                    .into_response();
+            }
             let questions = request["questions"].as_object().unwrap();
             let answers: Map<String, Value> = questions
                 .keys()
@@ -629,7 +623,7 @@ mod tests {
                 .collect();
             Json(
                 json!({"model":"jev-1.13.0", "answers":answers, "usage":{"input_tokens":100,"output_tokens":20}}),
-            )
+            ).into_response()
         }
 
         let pool = SqlitePoolOptions::new()
@@ -670,8 +664,6 @@ mod tests {
             },
             vec![MarketSymbol::Dxy, MarketSymbol::Wti],
             events,
-            None,
-            None,
             Some("test-key".into()),
         )
         .unwrap();
@@ -680,7 +672,7 @@ mod tests {
         assert_eq!(selected.source, "category_fallback");
         let reused = selector.selection_for(&stored_event).await.unwrap();
         assert_eq!(reused, selected);
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
         server.abort();
     }
 

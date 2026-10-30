@@ -63,6 +63,7 @@ class EventReleaseRefreshTest {
         val dao = FakeEventDao().apply { rows[1] = cachedRow() }
         server { primary ->
             primary.enqueue(MockResponse().setResponseCode(503))
+            primary.enqueue(MockResponse().setResponseCode(503))
             primary.enqueue(MockResponse().setBody(weeklyBody))
         }.use { (_, client) ->
             val result = EventReleaseRefresher(client, dao, ZoneOffset.UTC).refresh(1)
@@ -82,6 +83,7 @@ class EventReleaseRefreshTest {
         server { primary ->
             primary.enqueue(MockResponse().setResponseCode(503))
             primary.enqueue(MockResponse().setResponseCode(503))
+            primary.enqueue(MockResponse().setResponseCode(503))
         }.use { (_, client) ->
             val failure = runCatching { EventReleaseRefresher(client, dao, ZoneOffset.UTC).refresh(1) }
             assertTrue(failure.isFailure)
@@ -96,6 +98,7 @@ class EventReleaseRefreshTest {
             OkHttpClient(),
             ZoneOffset.UTC,
             primaryUrl = server.url("/primary").toString(),
+            biquoteUrl = server.url("/biquote").toString(),
             fallbackUrl = server.url("/fallback").toString(),
         )
         return server to client

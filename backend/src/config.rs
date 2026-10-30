@@ -25,7 +25,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub fcm: FcmConfig,
     #[serde(default)]
-    pub ai: AiConfig,
+    #[serde(rename = "ai")]
+    _legacy_ai: Option<serde::de::IgnoredAny>,
     #[serde(default)]
     pub telegram: TelegramConfig,
     #[serde(default)]
@@ -84,9 +85,12 @@ pub struct DatabaseConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CalendarConfig {
-    /// TradingView's keyless economic calendar endpoint (primary source).
-    #[serde(default = "default_tradingview_url")]
-    pub primary_url: String,
+    /// BiQuote is the first fallback keyless calendar source.
+    #[serde(default = "default_biquote_calendar_url")]
+    pub biquote_url: String,
+    /// TradingView is the primary source. Accept the old config key on upgrade.
+    #[serde(default = "default_tradingview_url", alias = "primary_url")]
+    pub tradingview_url: String,
     /// Forex Factory weekly JSON, used when the primary source cannot answer.
     #[serde(default = "default_forex_factory_url")]
     pub fallback_url: String,
@@ -95,6 +99,10 @@ pub struct CalendarConfig {
     pub base_url: String,
     pub sync_days: i64,
     pub minimum_importance: u8,
+}
+
+fn default_biquote_calendar_url() -> String {
+    "https://biquote.io/api/calendar".into()
 }
 
 fn default_tradingview_url() -> String {
@@ -269,53 +277,6 @@ impl Default for TranslationConfig {
     }
 }
 
-/// Server-side AI market briefing. The API key is read from this configuration file and
-/// never from the database.
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct AiConfig {
-    pub enabled: bool,
-    /// OpenAI-compatible endpoint; `https://relay/v1` and the full
-    /// `.../v1/chat/completions` URL are both accepted.
-    pub base_url: String,
-    pub model: String,
-    /// Key for the relay, written straight into this file.
-    pub api_key: String,
-    /// Extra headers for the relay; an `Authorization` entry replaces the bearer header.
-    pub extra_headers: BTreeMap<String, String>,
-    /// Free-form JSON merged into every request body: reasoning effort, thinking budget and
-    /// any other provider-specific knob the server does not model. `messages` is protected.
-    pub extra_body: BTreeMap<String, serde_json::Value>,
-    /// Name of the output-token parameter. `max_tokens` is the OpenAI classic; reasoning models
-    /// (gpt-5 / o-series) reject it and require `max_completion_tokens`. The server retries with
-    /// the other name automatically when a relay says so, so this is only a manual override.
-    #[serde(default = "default_max_tokens_param")]
-    pub max_tokens_param: String,
-    /// 1 = numbers only, 2 = ex-ante then comparison, 3 = single pass.
-    pub default_method: u8,
-    pub max_tokens: u32,
-}
-
-fn default_max_tokens_param() -> String {
-    "max_tokens".into()
-}
-
-impl Default for AiConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            base_url: "https://api.openai.com/v1".into(),
-            model: "gpt-5-mini".into(),
-            api_key: String::new(),
-            extra_headers: BTreeMap::new(),
-            extra_body: BTreeMap::new(),
-            max_tokens_param: default_max_tokens_param(),
-            default_method: 2,
-            max_tokens: 4096,
-        }
-    }
-}
-
 impl AppConfig {
     pub fn use_typesafe_for_translation(&self) -> bool {
         self.typesafe.enabled && self.translation.use_typesafe_verifier
@@ -325,12 +286,6 @@ impl AppConfig {
 impl TranslationConfig {
     pub fn api_key(&self) -> Result<String, AppError> {
         require_secret(&self.api_key, "translation.api_key")
-    }
-}
-
-impl AiConfig {
-    pub fn api_key(&self) -> Result<String, AppError> {
-        require_secret(&self.api_key, "ai.api_key")
     }
 }
 
@@ -457,7 +412,7 @@ impl TelegramConfig {
         (!value.is_empty()).then(|| value.to_owned())
     }
 
-    /// Only these chats may read status, usage and the analysis-feedback buttons.
+    /// Only these chats may read status, usage and translation-review buttons.
     pub fn admin_chat_ids(&self) -> Vec<i64> {
         self.admin_chat_ids
             .split(',')
@@ -496,11 +451,13 @@ impl Default for AlertConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LimitConfig {
-    pub ai_analysis_per_token_per_day: u32,
-    /// Minimum seconds between two generations of the same (event, method). A caller inside the
-    /// window receives the previous result instead of a new model call.
-    pub ai_regenerate_cooldown_seconds: i64,
-    pub ai_concurrency: usize,
+    // Explicitly accept and discard retired settings so existing installations still start.
+    #[serde(rename = "ai_analysis_per_token_per_day")]
+    legacy_ai_limit: Option<serde::de::IgnoredAny>,
+    #[serde(rename = "ai_regenerate_cooldown_seconds")]
+    legacy_ai_cooldown: Option<serde::de::IgnoredAny>,
+    #[serde(rename = "ai_concurrency")]
+    legacy_ai_concurrency: Option<serde::de::IgnoredAny>,
     /// How long model-call audit records are kept.
     pub llm_usage_retention_days: i64,
 }
@@ -508,9 +465,9 @@ pub struct LimitConfig {
 impl Default for LimitConfig {
     fn default() -> Self {
         Self {
-            ai_analysis_per_token_per_day: 60,
-            ai_regenerate_cooldown_seconds: 600,
-            ai_concurrency: 2,
+            legacy_ai_limit: None,
+            legacy_ai_cooldown: None,
+            legacy_ai_concurrency: None,
             llm_usage_retention_days: 180,
         }
     }
@@ -667,10 +624,23 @@ market_collect_after_minutes = 60
             config.translation.api_key().unwrap(),
             "relay-translation-key"
         );
-        assert_eq!(config.ai.api_key().unwrap(), "relay-ai-key");
+        assert!(config._legacy_ai.is_some());
+        assert!(!format!("{config:?}").contains("relay-ai-key"));
         assert_eq!(config.telegram.bot_token().as_deref(), Some("123456:ABC"));
         assert_eq!(config.telegram.admin_chat_ids(), vec![111, 222]);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn retired_ai_settings_are_discarded_even_when_enabled() {
+        let mut example = include_str!("../config.example.toml").to_owned();
+        example.push_str("\n[ai]\nenabled=true\napi_key='fixture-retired-secret'\nbase_url='https://retired.invalid/v1'\n");
+        let config: AppConfig = toml::from_str(&example).unwrap();
+        assert!(config._legacy_ai.is_some());
+        assert!(!format!("{config:?}").contains("fixture-retired-secret"));
+        let limits: LimitConfig = toml::from_str("ai_analysis_per_token_per_day=123\nai_regenerate_cooldown_seconds=4\nai_concurrency=99\nllm_usage_retention_days=30").unwrap();
+        assert_eq!(limits.llm_usage_retention_days, 30);
+        assert!(toml::from_str::<LimitConfig>("ai_concurency=9").is_err());
     }
 
     #[test]
@@ -694,6 +664,16 @@ market_collect_after_minutes = 60
         let config = TranslationConfig::default();
         let error = config.api_key().unwrap_err().to_string();
         assert!(error.contains("translation.api_key"), "{error}");
+    }
+
+    #[test]
+    fn calendar_defaults_preserve_legacy_tradingview_url_and_enable_biquote_fallback() {
+        let config: CalendarConfig = toml::from_str(
+            "sync_days = 7\nminimum_importance = 3\nprimary_url = 'https://old.example/events'",
+        )
+        .unwrap();
+        assert_eq!(config.biquote_url, "https://biquote.io/api/calendar");
+        assert_eq!(config.tradingview_url, "https://old.example/events");
     }
 
     #[test]

@@ -39,16 +39,14 @@ import java.util.concurrent.TimeUnit
 /**
  * Economic calendar aggregated on-device from keyless JSON sources.
  *
- * Primary source is TradingView's economic calendar endpoint, which covers arbitrary
- * date ranges with actual / previous / forecast values. When TradingView fails or
- * returns nothing and the requested range overlaps the current week, the client falls
- * back to the Forex Factory weekly JSON feed. Neither source needs an API key.
+ * TradingView is primary, BiQuote is the date-range fallback, and Forex Factory is
+ * the last-resort weekly schedule. All three sources are keyless.
  */
 data class CalendarFetchResult(val events: List<EconomicEvent>, val warning: CalendarWarning? = null)
 
-/** Raised when the fallback provider answered HTTP 429. [retryAfterSeconds] comes from the response. */
+/** Raised when a calendar provider answered HTTP 429. [retryAfterSeconds] comes from the response. */
 internal class CalendarRateLimitedException(val retryAfterSeconds: Long) :
-    Exception("Fallback calendar returned HTTP 429")
+    Exception("Calendar provider returned HTTP 429")
 
 class EconomicCalendarClient(
     private val client: OkHttpClient,
@@ -60,16 +58,16 @@ class EconomicCalendarClient(
     private val primaryCallTimeout: Duration = PRIMARY_CALL_TIMEOUT,
     /** Survives process restarts so a cold start does not repeat known failures or rate limits. */
     private val backoff: CalendarBackoffStore = CalendarBackoffStore.inMemory(),
+    private val biquoteUrl: String = BIQUOTE_URL,
 ) {
-    /** Serializes calendar traffic so Home and History cannot race both providers. */
+    /** Serializes calendar traffic so Home and History cannot race calendar providers. */
     private val fetchMutex = Mutex()
 
-    /** If both providers are blocked, retry when the first one becomes available. */
-    internal fun nextRetryAt(now: Instant = Instant.now()): Instant? {
-        val primary = backoff.blockedUntil(CalendarSource.PRIMARY)?.takeIf { it.isAfter(now) } ?: return null
-        val fallback = backoff.blockedUntil(CalendarSource.FALLBACK)?.takeIf { it.isAfter(now) } ?: return null
-        return minOf(primary, fallback)
-    }
+    /** Retry when the first provider becomes available, only if all three are blocked. */
+    internal fun nextRetryAt(now: Instant = Instant.now()): Instant? =
+        CalendarSource.entries.map { source ->
+            backoff.blockedUntil(source)?.takeIf { it.isAfter(now) } ?: return null
+        }.minOrNull()
 
     suspend fun events(
         start: LocalDate,
@@ -96,11 +94,7 @@ class EconomicCalendarClient(
                 .apply { if (activeProxy == null) dns(IPV4_FIRST_DNS) }
                 .build()
             var primaryError: Exception? = null
-            val primaryBlockedFor = if (activeProxy == null) {
-                remainingBlock(CalendarSource.PRIMARY, now)
-            } else {
-                null
-            }
+            val primaryBlockedFor = remainingBlock(CalendarSource.PRIMARY, now)
             val primaryEvents = if (primaryBlockedFor != null) {
                 primaryError = IOException("Primary calendar cooling down for ${primaryBlockedFor}s")
                 emptyList()
@@ -126,7 +120,29 @@ class EconomicCalendarClient(
             }
             if (primaryEvents.isNotEmpty()) return@withContext CalendarFetchResult(primaryEvents)
 
-            val primaryDetail = primaryError?.describe()
+            var primaryDetail = primaryError?.describe() ?: "TradingView returned no events"
+            val secondaryEvents = if (remainingBlock(CalendarSource.BIQUOTE, now) != null) {
+                primaryDetail += "; BiQuote cooling down"
+                emptyList()
+            } else {
+                try {
+                    fetchBiquote(primaryHttp, start, end, countryCodes, now).also {
+                        backoff.clear(CalendarSource.BIQUOTE)
+                        if (it.isEmpty()) primaryDetail += "; BiQuote returned no events"
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    if (activeProxy == null && error is IOException) {
+                        backoff.block(CalendarSource.BIQUOTE, now.plusSeconds(PRIMARY_FAILURE_BACKOFF.seconds))
+                    }
+                    primaryDetail += "; BiQuote: ${error.describe()}"
+                    emptyList()
+                }
+            }
+            if (secondaryEvents.isNotEmpty()) return@withContext CalendarFetchResult(
+                secondaryEvents, CalendarWarning(CalendarWarning.Reason.PRIMARY_UNAVAILABLE, primaryDetail),
+            )
             val blockedFor = remainingBlock(CalendarSource.FALLBACK, now)
             if (blockedFor != null) {
                 // The provider already asked us to wait. Calling it again cannot succeed, so
@@ -153,7 +169,7 @@ class EconomicCalendarClient(
                         CalendarWarning(
                             CalendarWarning.Reason.ALL_SOURCES_UNAVAILABLE,
                             listOfNotNull(
-                                primaryDetail?.let { "primary=$it" },
+                                "primary=$primaryDetail",
                                 "fallback=${error.describe()}",
                             ).joinToString("; "),
                         )
@@ -162,17 +178,62 @@ class EconomicCalendarClient(
             }
             // A weekly schedule is not a successful historical result sync. Expose degradation
             // even when it returned rows, so missing actuals are never mistaken for future releases.
-            val warning = primaryDetail?.let {
-                CalendarWarning(CalendarWarning.Reason.PRIMARY_UNAVAILABLE, it)
-            } ?: if (fallback.isNotEmpty()) {
-                CalendarWarning(
-                    CalendarWarning.Reason.PRIMARY_UNAVAILABLE,
-                    "Primary source returned no events; weekly schedule only",
-                )
-            } else {
-                null
+            CalendarFetchResult(fallback, CalendarWarning(CalendarWarning.Reason.PRIMARY_UNAVAILABLE, primaryDetail))
+        }
+    }
+
+    private suspend fun fetchBiquote(
+        http: OkHttpClient, start: LocalDate, end: LocalDate,
+        countryCodes: Collection<String>?, now: Instant,
+    ): List<EconomicEvent> {
+        val events = linkedMapOf<Long, EconomicEvent>()
+        var day = start
+        var requests = 0
+        while (!day.isAfter(end)) {
+            val windows = java.util.ArrayDeque<Pair<Instant, Instant>>()
+            windows.add(day.atStartOfDay(zone).toInstant() to day.plusDays(1).atStartOfDay(zone).toInstant())
+            while (windows.isNotEmpty()) {
+                check(++requests <= 512) { "BiQuote calendar request budget exceeded" }
+                val (from, to) = windows.removeFirst()
+                val url = biquoteUrl.toHttpUrl().newBuilder()
+                    .addQueryParameter("from", from.toString())
+                    .addQueryParameter("to", to.toString())
+                    .addQueryParameter("limit", "500")
+                    .apply {
+                        countryCodes?.takeIf { it.isNotEmpty() }?.let {
+                            addQueryParameter("countries", it.joinToString(","))
+                        }
+                    }.build()
+                val request = Request.Builder().url(url).header("Accept", "application/json")
+                    .cacheControl(CacheControl.FORCE_NETWORK).build()
+                val rows = http.newCall(request).awaitResponse { response ->
+                    checkRateLimit(response, CalendarSource.BIQUOTE, now)
+                    check(response.isSuccessful) { "BiQuote calendar returned HTTP ${response.code}" }
+                    biquoteRows(response.body?.string().orEmpty())
+                }
+                if (rows.size() >= 500) {
+                    val millis = Duration.between(from, to).toMillis()
+                    check(millis > 1000) { "BiQuote row cap reached; refusing a truncated calendar" }
+                    val middle = from.plusMillis(millis / 2)
+                    windows.addFirst(middle to to)
+                    windows.addFirst(from to middle)
+                } else {
+                    parseBiquoteCalendar(rows, now).filter {
+                        val time = Instant.parse(it.eventTime)
+                        time >= from && time < to
+                    }.forEach { events[it.id] = it }
+                }
             }
-            CalendarFetchResult(fallback, warning)
+            day = day.plusDays(1)
+        }
+        return events.values.sortedBy(EconomicEvent::eventTime)
+    }
+
+    private fun checkRateLimit(response: Response, source: CalendarSource, now: Instant) {
+        if (response.code == HTTP_TOO_MANY_REQUESTS) {
+            val wait = retryAfterSeconds(response, now) ?: DEFAULT_RATE_LIMIT_BACKOFF.seconds
+            backoff.block(source, now.plusSeconds(wait))
+            throw CalendarRateLimitedException(wait)
         }
     }
 
@@ -199,7 +260,8 @@ class EconomicCalendarClient(
             .cacheControl(CacheControl.FORCE_NETWORK)
             .build()
         return http.newCall(request).awaitResponse { response ->
-            check(response.isSuccessful) { "Calendar provider returned HTTP ${response.code}" }
+            checkRateLimit(response, CalendarSource.PRIMARY, now)
+            check(response.isSuccessful) { "TradingView calendar returned HTTP ${response.code}" }
             parseTradingView(response.body?.string().orEmpty(), now)
         }
     }
@@ -372,6 +434,7 @@ class EconomicCalendarClient(
         get(key)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt
 
     companion object {
+        private const val BIQUOTE_URL = "https://biquote.io/api/calendar"
         private const val TRADING_VIEW_URL = "https://economic-calendar.tradingview.com/events"
         private const val FOREX_FACTORY_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
@@ -406,6 +469,8 @@ class EconomicCalendarClient(
         /** Maps supported display names ("United States") onto TradingView codes ("US"). */
         fun codesFor(countries: Collection<String>): List<String> =
             countries.mapNotNull { COUNTRY_CODES[it.trim()] }.distinct()
+
+        internal fun countryName(code: String): String = TRADING_VIEW_COUNTRIES[code] ?: code
 
         private val TRADING_VIEW_COUNTRIES = mapOf(
             "US" to "United States",
@@ -467,6 +532,12 @@ class EconomicCalendarClient(
             "EG" to "Egypt",
             "NG" to "Nigeria",
             "UA" to "Ukraine",
+            "AE" to "United Arab Emirates",
+            "BG" to "Bulgaria",
+            "GE" to "Georgia",
+            "HR" to "Croatia",
+            "KZ" to "Kazakhstan",
+            "WW" to "World",
         )
 
         private val CURRENCIES_BY_FEED = mapOf(

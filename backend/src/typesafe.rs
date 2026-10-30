@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use reqwest::Client;
@@ -27,6 +30,89 @@ pub struct TypeSafeVerifier {
 }
 
 pub const HEALTH_KEY: &str = "translation.typesafe";
+
+/// Retry only transient transport/upstream failures, within the existing 60s total budget.
+/// A successful response is never retried (including malformed JSON or missing answers).
+/// Retried POSTs may still be billed upstream if the response was lost in transit.
+pub(crate) async fn system_one_request(
+    client: &Client,
+    endpoint: &str,
+    api_key: &str,
+    payload: &Value,
+) -> Result<(reqwest::StatusCode, String), AppError> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    for attempt in 1..=3 {
+        let result = async {
+            let response = client
+                .post(endpoint)
+                .bearer_auth(api_key)
+                .header("accept", "application/json")
+                .timeout(deadline.saturating_duration_since(tokio::time::Instant::now()))
+                .json(payload)
+                .send()
+                .await?;
+            let status = response.status();
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| {
+                    value
+                        .parse::<u64>()
+                        .ok()
+                        .map(Duration::from_secs)
+                        .or_else(|| {
+                            chrono::DateTime::parse_from_rfc2822(value)
+                                .ok()
+                                .map(|date| {
+                                    (date.with_timezone(&chrono::Utc) - chrono::Utc::now())
+                                        .to_std()
+                                        .unwrap_or_default()
+                                })
+                        })
+                });
+            let body = response.text().await?;
+            Ok::<_, reqwest::Error>((status, body, retry_after))
+        }
+        .await;
+        let retryable = match &result {
+            Ok((status, _, _)) => matches!(status.as_u16(), 429 | 500 | 502 | 503 | 504),
+            Err(error) => {
+                error.is_connect()
+                    || error.is_timeout()
+                    || error.is_request()
+                    || error.is_body()
+                    || error.is_decode()
+            }
+        };
+        let delay = result
+            .as_ref()
+            .ok()
+            .and_then(|(_, _, delay)| *delay)
+            .unwrap_or_default()
+            .max(Duration::from_millis(500 * attempt));
+        if !retryable
+            || attempt == 3
+            || delay >= deadline.saturating_duration_since(tokio::time::Instant::now())
+        {
+            return result
+                .map(|(status, body, _)| (status, body))
+                .map_err(AppError::Http);
+        }
+        match &result {
+            Ok((status, _, _)) => {
+                tracing::warn!(attempt, %status, delay_ms = delay.as_millis() as u64,
+                "TypeSafe transient upstream failure; retrying")
+            }
+            Err(error) => {
+                tracing::warn!(attempt, error = ?error, delay_ms = delay.as_millis() as u64,
+                "TypeSafe transport failure; retrying")
+            }
+        }
+        tokio::time::sleep(delay).await;
+    }
+    unreachable!("the final attempt always returns")
+}
 
 impl TypeSafeVerifier {
     pub fn new(
@@ -96,17 +182,8 @@ impl TypeSafeVerifier {
     }
 
     async fn request(&self, payload: &Value) -> Result<(Value, TokenUsage), AppError> {
-        let response = self
-            .client
-            .post(&self.endpoint)
-            .bearer_auth(&self.api_key)
-            .header("accept", "application/json")
-            .timeout(std::time::Duration::from_secs(60))
-            .json(payload)
-            .send()
-            .await?;
-        let status = response.status();
-        let text = response.text().await?;
+        let (status, text) =
+            system_one_request(&self.client, &self.endpoint, &self.api_key, payload).await?;
         if !status.is_success() {
             tracing::error!(%status, body = %text, "TypeSafe AI returned an error response");
             return Err(AppError::Relay {
@@ -127,7 +204,7 @@ impl TypeSafeVerifier {
     ) -> Result<Vec<TranslationVerdict>, AppError> {
         let started = Instant::now();
         let payload = build_payload(&self.model, translations);
-        let result = match self.request(&payload).await {
+        match self.request(&payload).await {
             Ok((root, usage)) => {
                 let parsed = parse_verdicts(&root, translations, self.threshold);
                 if let Ok(verdicts) = &parsed {
@@ -160,8 +237,7 @@ impl TypeSafeVerifier {
                     .await;
                 Err(error)
             }
-        };
-        result
+        }
     }
 }
 
@@ -321,6 +397,124 @@ fn parse_verdicts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    async fn mock_responses(
+        statuses: Vec<u16>,
+        retry_after: Option<&'static str>,
+        body: &'static str,
+    ) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+        use axum::{Router, http::StatusCode, response::IntoResponse, routing::post};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let captured = calls.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/v1/systemone", listener.local_addr().unwrap());
+        let app = Router::new().route(
+            "/v1/systemone",
+            post(move || {
+                let index = captured.fetch_add(1, Ordering::SeqCst);
+                let status = statuses[index.min(statuses.len() - 1)];
+                async move {
+                    let mut response =
+                        (StatusCode::from_u16(status).unwrap(), body).into_response();
+                    if let Some(delay) = retry_after {
+                        response
+                            .headers_mut()
+                            .insert("retry-after", delay.parse().unwrap());
+                    }
+                    response
+                }
+            }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (endpoint, calls, server)
+    }
+
+    fn direct_client() -> Client {
+        Client::builder().no_proxy().build().unwrap()
+    }
+
+    #[tokio::test]
+    async fn transient_upstream_failure_is_retried() {
+        let (endpoint, calls, server) = mock_responses(vec![503, 200], None, "{}").await;
+        let (status, _) = system_one_request(&direct_client(), &endpoint, "key", &json!({}))
+            .await
+            .unwrap();
+        assert!(status.is_success());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn permanent_errors_and_successful_invalid_json_are_not_retried() {
+        for status in [400, 401, 403, 404, 200] {
+            let (endpoint, calls, server) = mock_responses(vec![status], None, "not JSON").await;
+            let verifier =
+                TypeSafeVerifier::new(direct_client(), &endpoint, "key", "jev", 0.85).unwrap();
+            assert!(verifier.request(&json!({})).await.is_err());
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn persistent_transient_failure_stops_after_three_attempts() {
+        let (endpoint, calls, server) = mock_responses(vec![502], None, "unavailable").await;
+        let verifier =
+            TypeSafeVerifier::new(direct_client(), &endpoint, "key", "jev", 0.85).unwrap();
+        assert!(matches!(
+            verifier.request(&json!({})).await,
+            Err(AppError::Relay { status: 502, .. })
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn retry_after_beyond_total_budget_returns_without_retrying() {
+        let (endpoint, calls, server) =
+            mock_responses(vec![429], Some("120"), "rate limited").await;
+        let (status, _) = system_one_request(&direct_client(), &endpoint, "key", &json!({}))
+            .await
+            .unwrap();
+        assert_eq!(status.as_u16(), 429);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn dropped_connection_is_retried() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/v1/systemone", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for attempt in 0..2 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buffer = [0; 4096];
+                // Only wait for request bytes; the first request is intentionally not processed.
+                let received = socket.read(&mut buffer).await.unwrap();
+                assert!(received > 0, "client closed before sending request bytes");
+                if attempt == 1 {
+                    socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                        )
+                        .await
+                        .unwrap();
+                }
+                // First connection deliberately closes without HTTP response headers.
+            }
+        });
+        let (status, body) = system_one_request(&direct_client(), &endpoint, "key", &json!({}))
+            .await
+            .unwrap();
+        assert!(status.is_success());
+        assert_eq!(body, "{}");
+        server.await.unwrap();
+    }
 
     fn translation() -> EventNameTranslation {
         EventNameTranslation {

@@ -1,7 +1,6 @@
 package com.macroresearch.data.remote
 
 import com.google.gson.Gson
-import com.macroresearch.data.AnalysisMethod
 import com.macroresearch.data.BackendDataSource
 import com.macroresearch.data.model.EconomicEvent
 import kotlinx.coroutines.runBlocking
@@ -146,31 +145,6 @@ class BackendClientTest {
     }
 
     @Test
-    fun sharedAnalysisByProviderSendsTheAccessToken() = runBlocking {
-        server.enqueue(MockResponse().setBody(briefingJson()))
-        val authenticatedClient = BackendClient(
-            client = OkHttpClient(),
-            gson = gson,
-            baseUrl = { server.url("/").toString().trimEnd('/') },
-            token = { token },
-        )
-        val event = gson.fromJson(eventJson(), EconomicEvent::class.java)
-
-        val analysis = authenticatedClient.aiAnalysisByProvider(
-            event,
-            "zh-CN",
-            AnalysisMethod.EX_ANTE_THEN_COMPARE,
-            "Asia/Shanghai",
-        )
-
-        requireNotNull(analysis)
-        val request = server.takeRequest()
-        assertTrue(request.path.orEmpty().startsWith("/api/v1/ai-analysis/by-provider?"))
-        assertTrue(request.path.orEmpty().contains("timezone=Asia%2FShanghai"))
-        assertEquals("Bearer $token", request.getHeader("authorization"))
-    }
-
-    @Test
     fun historySendsTheCountrySetAndPagingWindow() = runBlocking {
         server.enqueue(MockResponse().setBody("[]"))
         client().history(listOf("United States", "China"), "inflation", 8, 16)
@@ -236,12 +210,9 @@ class BackendClientTest {
     }
 
     @Test
-    fun theCachedBriefingIsNullWhenNothingHasBeenGeneratedYet() = runBlocking {
-        server.enqueue(
-            MockResponse().setResponseCode(404)
-                .setBody("""{"error":{"code":"not_found","message":"missing"}}"""),
-        )
-        assertNull(client().aiAnalysis(7, "zh-CN", AnalysisMethod.EX_ANTE_THEN_COMPARE))
+    fun retiredSharedAiHasNoClientMethodsToCall() {
+        val retired = setOf("aiAnalysis", "aiAnalysisByProvider", "submitAnalysisFeedback")
+        assertTrue(BackendClient::class.java.declaredMethods.none { it.name in retired })
     }
 
     @Test
@@ -291,74 +262,4 @@ class BackendClientTest {
         assertTrue(runCatching { runBlocking { noToken.upcoming() } }.exceptionOrNull() is IllegalStateException)
     }
 
-    // ------------------------------------------------------------------
-    // AI briefing: per-method metadata and the throttle fallback
-    // ------------------------------------------------------------------
-
-    private fun briefingJson() = """
-        {"eventId":7,"method":2,"revision":3,"chain":[],
-         "dataAnalysis":"d","marketOutlook":"o","risks":null,
-         "model":"deepseek-v4-flash","generatedAt":"2026-09-15T09:00:00Z",
-         "usage":{"promptTokens":120,"completionTokens":800,"totalTokens":920,"calls":2},
-         "fromCache":true,"rateLimited":true,"retryAfterSeconds":480}
-    """.trimIndent()
-
-    /** A throttled response carries the previous analysis plus the reason it was served. */
-    @Test
-    fun throttledBriefingDecodesWithItsMetadata() = runBlocking {
-        server.enqueue(MockResponse().setBody(briefingJson()))
-        val analysis = requireNotNull(client().aiAnalysis(
-            id = 7,
-            languageTag = "zh-CN",
-            method = AnalysisMethod.EX_ANTE_THEN_COMPARE,
-        ))
-        assertEquals("GET", server.takeRequest().method)
-        assertEquals(2, analysis.method)
-        assertEquals(3, analysis.revision)
-        assertTrue(analysis.rateLimited)
-        assertTrue(analysis.fromCache)
-        assertEquals(480L, analysis.retryAfterSeconds)
-        assertEquals(920, analysis.usage?.totalTokens)
-        assertEquals(2, analysis.usage?.calls)
-        // The audit line the analysis screen shows must be human-readable.
-        assertEquals("2 × 920 tokens", analysis.usageSummary())
-    }
-
-    /** A cache hit is not throttled, and the method the client asked for is preserved. */
-    @Test
-    fun cachedBriefingIsNotMarkedThrottled() = runBlocking {
-        server.enqueue(
-            MockResponse().setBody(
-                briefingJson()
-                    .replace("\"method\":2", "\"method\":1")
-                    .replace("\"rateLimited\":true", "\"rateLimited\":false")
-                    .replace("\"retryAfterSeconds\":480", "\"retryAfterSeconds\":null"),
-            ),
-        )
-        val analysis = client().aiAnalysis(7, "en", AnalysisMethod.NUMBERS_ONLY)
-        requireNotNull(analysis)
-        assertEquals(1, analysis.method)
-        assertTrue(analysis.fromCache)
-        assertTrue(!analysis.rateLimited)
-        assertNull(analysis.retryAfterSeconds)
-        // A cache hit still reports what its generation cost.
-        assertEquals(2, analysis.usage?.calls)
-        assertEquals("2 × 920 tokens", analysis.usageSummary())
-    }
-
-    /** The method numbers must match the server's `AnalysisMethod::from_u8`. */
-    @Test
-    fun theThreeMethodsMapToDistinctCacheSlots() {
-        assertEquals(1, AnalysisMethod.NUMBERS_ONLY.wireValue)
-        assertEquals(2, AnalysisMethod.EX_ANTE_THEN_COMPARE.wireValue)
-        assertEquals(3, AnalysisMethod.SINGLE_PASS.wireValue)
-        assertEquals(
-            3,
-            setOf(
-                AnalysisMethod.NUMBERS_ONLY,
-                AnalysisMethod.EX_ANTE_THEN_COMPARE,
-                AnalysisMethod.SINGLE_PASS,
-            ).map { it.wireValue }.toSet().size,
-        )
-    }
 }

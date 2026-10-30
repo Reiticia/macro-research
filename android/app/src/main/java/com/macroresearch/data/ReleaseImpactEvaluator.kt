@@ -88,15 +88,15 @@ object ReleaseImpactEvaluator {
                 if (sourceUnit == "number") return BigDecimal.ONE
                 // A weekly row hydrated from TradingView may retain its provider id but carry
                 // the primary's explicit K/M unit. Those values have not yet been expanded.
-                val typedPeople = setOf("thousand persons", "thousand people", "million persons", "million people")
+                val typedPeople = setOf("thousand persons", "thousand people", "million persons", "million people", "k jobs", "m jobs")
                 val typedBarrels = setOf("thousand barrels", "k barrels", "million barrels", "m barrels")
                 if (unit == ReleaseImpactRules.Unit.PEOPLE && sourceUnit in typedBarrels ||
                     unit == ReleaseImpactRules.Unit.BARRELS && sourceUnit in typedPeople) return null
                 when (sourceUnit) {
                     "count", "people", "persons", "person", "jobs" -> if (unit == ReleaseImpactRules.Unit.PEOPLE) BigDecimal.ONE else null
                     "barrels", "barrel", "bbl" -> if (unit == ReleaseImpactRules.Unit.BARRELS) BigDecimal.ONE else null
-                    "k", "thousand", "thousands", "thousand persons", "thousand people", "thousand barrels", "k barrels" -> BigDecimal("1000")
-                    "m", "million", "millions", "million persons", "million people", "million barrels", "m barrels" -> BigDecimal("1000000")
+                    "k", "thousand", "thousands", "thousand persons", "thousand people", "thousand barrels", "k barrels", "k jobs" -> BigDecimal("1000")
+                    "m", "million", "millions", "million persons", "million people", "million barrels", "m barrels", "m jobs" -> BigDecimal("1000000")
                     else -> null // No magnitude guessing from the value itself.
                 }
             }

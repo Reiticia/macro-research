@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentHashMap
 /** Calendar providers whose retry windows are tracked independently. */
 enum class CalendarSource {
     PRIMARY,
+    BIQUOTE,
     FALLBACK,
 }
 
@@ -42,7 +43,7 @@ interface CalendarBackoffStore {
     }
 }
 
-/** Process-restart-safe back-off. Kept out of Room because it is only two scalar deadlines. */
+/** Process-restart-safe per-provider back-off, independent of the event cache. */
 class PreferencesBackoffStore(context: Context) : CalendarBackoffStore {
     private val preferences = context.getSharedPreferences("calendar_backoff", Context.MODE_PRIVATE)
 
@@ -60,7 +61,9 @@ class PreferencesBackoffStore(context: Context) : CalendarBackoffStore {
 
     private val CalendarSource.key: String
         get() = when (this) {
+            // Keep deadlines attached to providers when changing their priority.
             CalendarSource.PRIMARY -> "primary_blocked_until"
+            CalendarSource.BIQUOTE -> "biquote_blocked_until"
             // Keep the existing key so upgrades preserve an active Retry-After window.
             CalendarSource.FALLBACK -> "fallback_blocked_until"
         }

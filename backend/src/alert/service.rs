@@ -347,7 +347,7 @@ mod tests {
             .await
             .unwrap();
         health
-            .record_ai_failure("analysis.ai", "relay failed")
+            .record_ai_failure("translation.relay", "relay failed")
             .await;
         assert_eq!(mock.requests.lock().await.len(), 6);
 

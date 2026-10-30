@@ -1,5 +1,4 @@
 pub mod access_keys;
-pub mod ai_analysis;
 pub mod alert;
 pub mod analysis;
 pub mod api;
@@ -18,7 +17,6 @@ pub mod openai_compat;
 pub mod quota;
 pub mod repository;
 pub mod scheduler;
-pub mod shared_ai;
 pub mod translation;
 pub mod typesafe;
 
@@ -31,8 +29,8 @@ use repository::{AnalysisRepository, EventRepository, MarketRepository};
 use tokio::sync::broadcast;
 
 use crate::{
-    ai_analysis::AiAnalysisService, alert::HealthRegistry, auth::AuthState, config::AppConfig,
-    llm_usage::LlmUsageRepository, model::AppEvent, quota::QuotaService,
+    alert::HealthRegistry, auth::AuthState, config::AppConfig, llm_usage::LlmUsageRepository,
+    model::AppEvent, quota::QuotaService,
 };
 
 #[derive(Clone)]
@@ -44,7 +42,6 @@ pub struct AppState {
     pub calendar_service: Arc<CalendarService>,
     pub market_service: Arc<MarketService>,
     pub analysis_service: Arc<AnalysisService>,
-    pub ai_analysis_service: Option<Arc<AiAnalysisService>>,
     pub health: Arc<HealthRegistry>,
     pub telegram: Option<Arc<alert::TelegramClient>>,
     /// Model-call audit log; absent only when auditing is switched off.

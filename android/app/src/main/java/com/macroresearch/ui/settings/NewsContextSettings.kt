@@ -27,19 +27,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.macroresearch.R
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.NewsPreferences
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import com.macroresearch.data.validNewsSources
 
-/** Opt-in RSS retrieval is only used for personal AI requests, never shared backend analysis. */
+/** Opt-in news retrieval is only used for personal AI requests, never shared backend analysis. */
 @Composable
 fun NewsContextSettings(repository: MacroRepository) {
     val settings by repository.newsSettings.collectAsStateWithLifecycle()
     var enabled by rememberSaveable(settings.enabled) { mutableStateOf(settings.enabled) }
     var urlsText by rememberSaveable(settings.sourceUrls) { mutableStateOf(settings.sourceUrls.joinToString("\n")) }
+    var biquoteEnabled by rememberSaveable(settings.biquoteEnabled) { mutableStateOf(settings.biquoteEnabled) }
+    var articlePreviewEnabled by rememberSaveable(settings.articlePreviewEnabled) { mutableStateOf(settings.articlePreviewEnabled) }
+    val toolsEnabled by repository.aiToolsEnabled.collectAsStateWithLifecycle()
     var saved by remember { mutableStateOf(false) }
     val urls = urlsText.lines().map(String::trim).filter(String::isNotEmpty).distinct()
-    val valid = urls.isNotEmpty() && urls.size <= NewsPreferences.MAX_SOURCES && urls.all { value ->
-        value.toHttpUrlOrNull()?.isHttps == true
-    }
+    val valid = validNewsSources(enabled, biquoteEnabled, urls)
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -57,6 +58,25 @@ fun NewsContextSettings(repository: MacroRepository) {
                 Text(stringResource(R.string.ai_news_context_toggle))
                 Switch(checked = enabled, onCheckedChange = { enabled = it; saved = false })
             }
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(stringResource(R.string.ai_news_biquote), modifier = Modifier.weight(1f))
+                Switch(checked = biquoteEnabled, onCheckedChange = { biquoteEnabled = it; saved = false })
+            }
+            Text(
+                stringResource(R.string.ai_news_biquote_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.ai_article_preview_toggle), modifier = Modifier.weight(1f))
+                Switch(checked = articlePreviewEnabled, onCheckedChange = { articlePreviewEnabled = it; saved = false })
+            }
+            Text(stringResource(R.string.ai_article_preview_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (articlePreviewEnabled && !toolsEnabled) Text(stringResource(R.string.ai_article_preview_tools_required), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             OutlinedTextField(
                 value = urlsText,
                 onValueChange = { urlsText = it; saved = false },
@@ -66,7 +86,7 @@ fun NewsContextSettings(repository: MacroRepository) {
                 minLines = 3,
                 maxLines = 8,
             )
-            if (urlsText.isNotBlank() && !valid) {
+            if (!valid) {
                 Text(
                     stringResource(R.string.ai_news_sources_invalid),
                     color = MaterialTheme.colorScheme.error,
@@ -77,6 +97,8 @@ fun NewsContextSettings(repository: MacroRepository) {
                 Button(
                     onClick = {
                         repository.setNewsSources(urls)
+                        repository.setBiquoteNewsEnabled(biquoteEnabled)
+                        repository.setArticlePreviewEnabled(articlePreviewEnabled)
                         repository.setNewsSearchEnabled(enabled)
                         saved = true
                     },

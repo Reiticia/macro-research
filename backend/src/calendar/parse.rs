@@ -73,7 +73,17 @@ pub fn release_status(
     }
 }
 
-/// Canonical key identifying "the same occurrence" across the two calendar feeds.
+/// Public calendar precedence; authenticated historical imports are kept separate.
+pub fn provider_priority(provider: &str) -> u8 {
+    match provider {
+        "biquote" => 2,
+        "trading_view" => 3,
+        "forex_factory" => 1,
+        _ => 0,
+    }
+}
+
+/// Canonical key identifying "the same occurrence" across calendar feeds.
 ///
 /// The weekly fallback uses different titles for the same indicator, so a closed and
 /// individually verified alias table maps them onto one key. Guessing here would attach
@@ -124,6 +134,9 @@ const TITLE_ALIASES: &[(&str, &str)] = &[
     ("consumercreditmom", "consumercreditchange"),
     ("adpweeklyemploymentchange", "adpemploymentchangeweekly"),
     ("unemploymentclaims", "initialjoblessclaims"),
+    // Same release: ISM renamed its Non-Manufacturing report to Services PMI, and the impact
+    // rule table already treats both titles as one indicator.
+    ("ismnonmanufacturingpmi", "ismservicespmi"),
 ];
 
 #[cfg(test)]
@@ -170,6 +183,10 @@ mod tests {
         assert_ne!(
             occurrence_key("United States", time, "CPI m/m").2,
             occurrence_key("United States", time, "Core CPI m/m").2,
+        );
+        assert_eq!(
+            occurrence_key("United States", time, "ISM Non-Manufacturing PMI").2,
+            occurrence_key("United States", time, "ISM Services PMI").2,
         );
     }
 }

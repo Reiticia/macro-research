@@ -26,6 +26,7 @@ private fun localizedEventName(source: String, zhCn: String?, zhTw: String?, loc
 }
 
 fun EconomicEvent.localTime(): String = runCatching {
+    if (!timeExact) return "--:--"
     Instant.parse(eventTime).atZone(ZoneId.systemDefault()).format(timeFormatter)
 }.getOrDefault("--:--")
 

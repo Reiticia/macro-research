@@ -260,7 +260,7 @@ private fun ReleaseRetryCard(
 private fun CountdownCard(event: EconomicEvent) {
     var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(event.id) { while (true) { now = Instant.now(); delay(1_000) } }
-    val awaitingFutureRelease = event.actual == null && runCatching {
+    val awaitingFutureRelease = event.timeExact && event.actual == null && runCatching {
         Instant.parse(event.eventTime).isAfter(now)
     }.getOrDefault(false)
     Card(colors = CardDefaults.cardColors(

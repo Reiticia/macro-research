@@ -1,8 +1,10 @@
 name: Backend build & deploy
 
 on:
+  # Only main builds and deploys. Feature-branch pushes stay silent; pull requests still
+  # compile and test without deployment credentials.
   push:
-    branches: ['**']
+    branches: [main]
     paths:
       - "backend/**"
       - ".github/workflows/backend-release.yml"

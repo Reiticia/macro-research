@@ -36,6 +36,13 @@ class AnalysisPreferences(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val _method = MutableStateFlow(AnalysisMethod.fromKey(preferences.getString(METHOD_KEY, null)))
     val method: StateFlow<AnalysisMethod> = _method.asStateFlow()
+    private val _toolsEnabled = MutableStateFlow(preferences.getBoolean(TOOLS_KEY, false))
+    val toolsEnabled: StateFlow<Boolean> = _toolsEnabled.asStateFlow()
+
+    fun setToolsEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean(TOOLS_KEY, enabled).apply()
+        _toolsEnabled.value = enabled
+    }
 
     fun setMethod(method: AnalysisMethod) {
         preferences.edit().putString(METHOD_KEY, method.key).apply()
@@ -45,5 +52,6 @@ class AnalysisPreferences(context: Context) {
     companion object {
         private const val PREFERENCES_NAME = "research_preferences"
         private const val METHOD_KEY = "ai_analysis_method"
+        private const val TOOLS_KEY = "ai_read_only_tools_enabled"
     }
 }

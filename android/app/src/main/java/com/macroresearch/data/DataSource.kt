@@ -28,6 +28,10 @@ data class AiAnalysisRequest(
     val newsSearchRequested: Boolean = false,
     val newsSearchStatus: String? = null,
     val newsArticles: List<NewsArticle> = emptyList(),
+    val toolsEnabled: Boolean = false,
+    val articlePreviewEnabled: Boolean = false,
+    val trace: AiExecutionTrace? = null,
+    val requestLog: AiRequestLog? = null,
 )
 
 /**
@@ -73,21 +77,9 @@ interface DataSource {
 
     suspend fun aiAnalysis(request: AiAnalysisRequest): AiAnalysis
 
-    suspend fun cachedAiAnalysis(
-        event: EconomicEvent,
-        language: String,
-        method: AnalysisMethod,
-        timezone: String = ZoneId.systemDefault().id,
-        refresh: Boolean = false,
-    ): AiAnalysis? = null
-
     suspend fun serverEventId(event: EconomicEvent): Long = event.id
 
     suspend fun translations(names: List<String>): Map<String, Pair<String, String>> = emptyMap()
-
-    suspend fun feedback(id: Long, language: String, method: Int, revision: Int, message: String) {
-        error("Configure a backend to submit feedback")
-    }
 
     suspend fun eventMarket(event: EconomicEvent): MarketResponse
 
@@ -160,6 +152,10 @@ class DirectDataSource(
                 newsSearchRequested = request.newsSearchRequested,
                 newsSearchStatus = request.newsSearchStatus,
                 newsArticles = request.newsArticles,
+                toolsEnabled = request.toolsEnabled,
+                articlePreviewEnabled = request.articlePreviewEnabled,
+                trace = request.trace,
+                requestLog = request.requestLog,
             ),
             settings = settings,
             apiKey = apiKey,
@@ -235,24 +231,12 @@ class BackendDataSource(
     ): AnalysisReport = client.analysis(event.id)
 
     override suspend fun aiAnalysis(request: AiAnalysisRequest): AiAnalysis =
-        error("Shared server analysis is read-only")
+        error("AI analysis requires a personally configured model endpoint")
 
     override suspend fun serverEventId(event: EconomicEvent): Long =
         client.eventByProvider(event.provider, event.providerId).id
 
     override suspend fun translations(names: List<String>): Map<String, Pair<String, String>> = client.translations(names)
-
-    override suspend fun cachedAiAnalysis(
-        event: EconomicEvent,
-        language: String,
-        method: AnalysisMethod,
-        timezone: String,
-        refresh: Boolean,
-    ): AiAnalysis? = client.aiAnalysisByProvider(event, language, method, timezone, refresh)
-
-    override suspend fun feedback(id: Long, language: String, method: Int, revision: Int, message: String) {
-        client.submitAnalysisFeedback(id, language, method, revision, message)
-    }
 
     override suspend fun eventMarket(event: EconomicEvent): MarketResponse = client.market(event.id)
 

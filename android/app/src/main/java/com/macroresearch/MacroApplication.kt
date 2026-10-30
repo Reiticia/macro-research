@@ -94,6 +94,7 @@ class MacroApplication : Application() {
                 MacroDatabase.MIGRATION_5_6,
                 MacroDatabase.MIGRATION_6_7,
                 MacroDatabase.MIGRATION_7_8,
+                MacroDatabase.MIGRATION_8_9,
             )
             .build()
         if (BuildConfig.DEBUG) {
@@ -134,6 +135,7 @@ class MacroApplication : Application() {
             analysisPreferences = analysisPreferences,
             newsPreferences = NewsPreferences(this),
             newsRssClient = NewsRssClient(http),
+            aiHistoryStore = com.macroresearch.data.AiHistoryStore(noBackupFilesDir.resolve("ai-history")),
             backendPreferences = backendPreferences,
             translationClient = TranslationClient(translationHttp, gson),
             aiAnalysisClient = aiAnalysisClient,

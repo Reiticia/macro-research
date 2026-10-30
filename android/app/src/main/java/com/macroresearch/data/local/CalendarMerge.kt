@@ -16,12 +16,18 @@ internal fun mergeCalendarRows(
         val previous = sources[fresh.provider to fresh.providerId]?.singleOrNull()
             ?: if (key != null && incomingOccurrences[key] == 1) {
                 occurrences[key]?.singleOrNull()?.takeIf {
-                    setOf(it.provider, fresh.provider) == setOf("trading_view", "forex_factory")
+                    it.timeExact && fresh.timeExact && it.provider != fresh.provider &&
+                        providerPriority(it.provider) > 0 && providerPriority(fresh.provider) > 0
                 }
             } else null
         if (previous == null) return@map fresh
-        // Never replace primary observations with a degraded weekly schedule.
-        if (previous.provider == "trading_view" && fresh.provider == "forex_factory") return@map previous
+        // Never demote primary observations. A fallback can still fill a missing release.
+        if (providerPriority(previous.provider) > providerPriority(fresh.provider)) {
+            return@map if (previous.actual != null || fresh.actual == null) previous else previous.copy(
+                actual = fresh.actual, previous = fresh.previous, consensus = fresh.consensus,
+                forecast = fresh.forecast, unit = fresh.unit, status = fresh.status,
+            )
+        }
         val merged = fresh.copy(
             id = previous.id,
             eventZhCn = previous.eventZhCn ?: fresh.eventZhCn,
@@ -54,8 +60,10 @@ internal fun fillMissingValues(rows: List<CachedEventEntity>): List<CachedEventE
         if (target.provider != FOREX_FACTORY || !target.actual.isNullOrBlank()) return@mapNotNull null
         val key = target.occurrenceKey() ?: return@mapNotNull null
         // Exactly one primary row may match; ambiguity leaves the row untouched.
-        val source = byKey[key].orEmpty().filter { it.provider == TRADING_VIEW }.singleOrNull()
-            ?.takeIf { !it.actual.isNullOrBlank() } ?: return@mapNotNull null
+        val candidates = byKey[key].orEmpty().filter { providerPriority(it.provider) > 1 && !it.actual.isNullOrBlank() }
+        val priority = candidates.maxOfOrNull { providerPriority(it.provider) }
+        val source = candidates.filter { providerPriority(it.provider) == priority }.singleOrNull()
+            ?: return@mapNotNull null
         target.copy(
             actual = source.actual,
             previous = source.previous,
@@ -68,6 +76,7 @@ internal fun fillMissingValues(rows: List<CachedEventEntity>): List<CachedEventE
 }
 
 internal fun CachedEventEntity.occurrenceKey(): Triple<String, Instant, String>? {
+    if (!timeExact) return null
     val time = runCatching { Instant.parse(eventTime) }.getOrNull() ?: return null
     val name = event.lowercase(Locale.ROOT)
         .replace("m/m", "mom").replace("y/y", "yoy").replace("q/q", "qoq")
@@ -75,7 +84,12 @@ internal fun CachedEventEntity.occurrenceKey(): Triple<String, Instant, String>?
     return Triple(country, time, TITLE_ALIASES[name] ?: name)
 }
 
-private const val TRADING_VIEW = "trading_view"
+private fun providerPriority(provider: String): Int = when (provider) {
+    "biquote" -> 2
+    "trading_view" -> 3
+    "forex_factory" -> 1
+    else -> 0
+}
 private const val FOREX_FACTORY = "forex_factory"
 
 /**
@@ -98,4 +112,7 @@ private val TITLE_ALIASES = mapOf(
     "consumercreditmom" to "consumercreditchange",
     "adpweeklyemploymentchange" to "adpemploymentchangeweekly",
     "unemploymentclaims" to "initialjoblessclaims",
+    // Same release: ISM renamed its Non-Manufacturing report to Services PMI, and the impact
+    // rule table already treats both titles as one indicator.
+    "ismnonmanufacturingpmi" to "ismservicespmi",
 )

@@ -8,11 +8,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The model-reply parser exists twice: on the device (direct mode) and on the server
- * (backend mode). Both suites read the same corpus in `src/test/resources/ai-analysis`, so the
- * two implementations cannot drift apart.
- */
+/** Regression corpus for the personal AI parser; the server-side AI service is retired. */
 class AiAnalysisFixtureTest {
     private val gson = Gson()
     private val client = AiAnalysisClient(OkHttpClient(), gson)
@@ -21,7 +17,7 @@ class AiAnalysisFixtureTest {
         javaClass.getResourceAsStream("/ai-analysis/$name")!!.bufferedReader().use { it.readText() }
 
     @Test
-    fun bothParsersShareOneCorpus() {
+    fun personalParserPreservesTheRegressionCorpus() {
         val cases = gson.fromJson(fixture("manifest.json"), Array<JsonObject>::class.java)
         assertTrue("the fixture manifest must not be empty", cases.isNotEmpty())
         for (case in cases) {
