@@ -11,7 +11,7 @@ pub enum AppError {
     Config(String),
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
-    #[error("http provider error: {0}")]
+    #[error("http provider error: {}", http_error_detail(.0))]
     Http(#[from] reqwest::Error),
     #[error("provider data error: {0}")]
     Provider(String),
@@ -32,6 +32,28 @@ pub enum AppError {
     Relay { status: u16, detail: String },
     #[error("internal error: {0}")]
     Internal(String),
+}
+
+/// reqwest's Display omits the source (DNS, TLS, proxy, connection reset, etc.).
+/// Keep that chain in operator logs/health alerts; public API errors remain generic.
+fn http_error_detail(error: &reqwest::Error) -> String {
+    use std::error::Error;
+
+    let kind = if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connection"
+    } else {
+        "transport"
+    };
+    let mut detail = format!("{kind}: {error}");
+    let mut source = error.source();
+    for _ in 0..8 {
+        let Some(cause) = source else { break };
+        detail.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
+    detail
 }
 
 impl AppError {
@@ -98,6 +120,34 @@ impl IntoResponse for AppError {
             Some(seconds) => (status, [("retry-after", seconds.to_string())], body).into_response(),
             None => (status, body).into_response(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[tokio::test]
+    async fn http_alert_includes_timeout_and_underlying_cause_but_public_message_does_not() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        // Keep the listener open without responding to force a request timeout.
+        let error = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(format!("http://{}", listener.local_addr().unwrap()))
+            .timeout(std::time::Duration::from_millis(50))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(error.is_timeout());
+        let cause = error.source().unwrap().to_string();
+        let error = AppError::Http(error);
+        assert!(error.to_string().contains("timeout:"));
+        assert!(error.to_string().contains(&cause));
+        assert_eq!(error.public_message(), "internal server error");
+        assert_eq!(error.code(), "upstream_error");
     }
 }
 

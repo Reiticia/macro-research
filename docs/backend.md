@@ -270,6 +270,18 @@ fallback_to_all_on_jev_error = true
 
 选择器读取事件名称、国家、货币、类别、重要性、前值和预期值；不依赖尚未公布的 Actual。不会改变客户端每 5 秒实时行情刷新、事件行情每 15 秒采样、分钟 OHLC 聚合或规则报告接口。模型请求按 `market_selection` 类别记录到 `/api/v1/usage`，健康键为 `market_selection.typesafe`。需要代理 TypeSafe 时在 `[network].proxied` 加上 `typesafe`。
 
+TypeSafe 市场选择与翻译校对共用有限重试：连接/传输失败和 HTTP 429、500、502、503、504 最多尝试 3 次，退避 0.5/1 秒，并遵守 `Retry-After`；请求、读响应和等待合计仍使用 60 秒预算。401/403 等配置或鉴权错误、成功响应中的无效 JSON 不重试。重试最终失败后仍保留原有安全兜底；已经持久化的选择（包括兜底）不会自动重算。丢失响应的 POST 重试可能产生额外上游计费，`/api/v1/usage` 仅记录最终逻辑调用及可获取的 token 用量。
+
+`http provider error: ... error sending request` 是传输失败，不代表模型拒绝请求。日志和告警会保留底层错误链，区分 timeout、DNS、TLS、代理连接和连接重置。可在**运行后端的服务器**上测试：
+
+```bash
+curl -I --connect-timeout 10 --max-time 20 https://api.typesafe.ai/v1/systemone
+# HEAD 返回 405 属正常现象，说明 DNS/TCP/TLS/HTTP 可达，不证明 API Key 或推理调用正常。
+# 如配置了代理，再加 --proxy <与 network.proxy_url 相同的地址> 对比。
+```
+
+如果服务器直连失败但代理可达，需同时设置 `[network].proxy_url` 并在 `proxied` 中保留其他源、加入 `"typesafe"`，随后重启后端。不要通过关闭 TLS 证书校验来规避连接错误。
+
 ## 数据源与降级
 
 | 子系统 | 主源 | 回退 |
