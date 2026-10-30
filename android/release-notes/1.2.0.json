@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.2.0",
+  "notes": {
+    "en": {
+      "client": [
+        "Use BiQuote as the primary calendar source in direct mode, with TradingView and Forex Factory as fallbacks. Improve event merging and preserve release times, values and units.",
+        "Run personal AI analysis on the device using your configured provider, with read-only tools for event and market evidence.",
+        "Inspect AI execution timelines, request logs and saved analysis history to review the evidence and steps behind a result.",
+        "Add BiQuote news, article previews and Google News link resolution. Review news before analysis, open articles in your default browser or supply context manually.",
+        "Update calendar and news source settings. Existing local data is migrated automatically; there is no need to uninstall the app."
+      ],
+      "backend": [
+        "Add BiQuote calendar support while keeping TradingView as the primary backend source. Improve event matching and preserve existing event IDs and observations.",
+        "Retire shared backend AI analysis and its interfaces; configure personal AI analysis in the client instead.",
+        "Retry transient TypeSafe transport and upstream failures up to three attempts within a shared 60-second budget, and include underlying network errors in diagnostics. Market collection retains its safe fallback.",
+        "Add administrator Telegram commands for event lookup and FCM diagnostics."
+      ]
+    },
+    "zh-CN": {
+      "client": [
+        "直连模式优先使用 BiQuote 财经日历，TradingView 和 Forex Factory 作为备用源；改进事件合并，保留公布时间、数值及单位。",
+        "个人 AI 分析改由客户端使用你配置的模型接口执行，并可通过只读工具获取事件与行情证据。",
+        "新增 AI 执行时间线、请求日志和分析历史，便于查看分析所用证据及执行过程。",
+        "新增 BiQuote 新闻、文章预览和 Google News 链接解析；分析前可审阅新闻，用默认浏览器打开文章，或手动补充分析上下文。",
+        "更新日历与新闻源设置；已有本地数据会自动迁移，无需卸载应用。"
+      ],
+      "backend": [
+        "新增 BiQuote 日历支持，后端仍以 TradingView 为主源；改进事件匹配并保留已有事件 ID 与观测记录。",
+        "移除共享后端 AI 分析及相关接口；请改为在客户端配置个人 AI 分析。",
+        "TypeSafe 短暂传输及上游故障最多尝试三次，共用 60 秒预算；诊断信息显示底层网络错误，行情采集继续保留安全兜底。",
+        "新增 Telegram 管理员事件查询及 FCM 诊断命令。"
+      ]
+    },
+    "zh-TW": {
+      "client": [
+        "直連模式優先使用 BiQuote 財經日曆，TradingView 和 Forex Factory 作為備用來源；改善事件合併，保留公布時間、數值與單位。",
+        "個人 AI 分析改由用戶端使用你設定的模型介面執行，並可透過唯讀工具取得事件與行情證據。",
+        "新增 AI 執行時間軸、請求紀錄與分析歷史，方便檢視分析所用證據及執行過程。",
+        "新增 BiQuote 新聞、文章預覽及 Google News 連結解析；分析前可檢閱新聞，以預設瀏覽器開啟文章，或手動補充分析脈絡。",
+        "更新日曆與新聞來源設定；既有本機資料會自動遷移，無須解除安裝應用程式。"
+      ],
+      "backend": [
+        "新增 BiQuote 日曆支援，後端仍以 TradingView 為主要來源；改善事件比對並保留既有事件 ID 與觀測紀錄。",
+        "移除共用後端 AI 分析及相關介面；請改為在用戶端設定個人 AI 分析。",
+        "TypeSafe 暫時性傳輸與上游故障最多嘗試三次，共用 60 秒預算；診斷資訊顯示底層網路錯誤，行情採集仍保留安全備援。",
+        "新增 Telegram 管理員事件查詢及 FCM 診斷命令。"
+      ]
+    }
+  }
+}
