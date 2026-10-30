@@ -204,7 +204,7 @@ impl TypeSafeVerifier {
     ) -> Result<Vec<TranslationVerdict>, AppError> {
         let started = Instant::now();
         let payload = build_payload(&self.model, translations);
-        let result = match self.request(&payload).await {
+        match self.request(&payload).await {
             Ok((root, usage)) => {
                 let parsed = parse_verdicts(&root, translations, self.threshold);
                 if let Ok(verdicts) = &parsed {
@@ -237,8 +237,7 @@ impl TypeSafeVerifier {
                     .await;
                 Err(error)
             }
-        };
-        result
+        }
     }
 }
 
@@ -495,7 +494,9 @@ mod tests {
             for attempt in 0..2 {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let mut buffer = [0; 4096];
-                socket.read(&mut buffer).await.unwrap();
+                // Only wait for request bytes; the first request is intentionally not processed.
+                let received = socket.read(&mut buffer).await.unwrap();
+                assert!(received > 0, "client closed before sending request bytes");
                 if attempt == 1 {
                     socket
                         .write_all(

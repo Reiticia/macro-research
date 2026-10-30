@@ -51,7 +51,11 @@ impl EventRepository {
         let mut occurrences = HashMap::new();
         for event in events {
             *occurrences
-                .entry(occurrence_key(&event.country, event.event_time, &event.event))
+                .entry(occurrence_key(
+                    &event.country,
+                    event.event_time,
+                    &event.event,
+                ))
                 .or_insert(0) += 1;
         }
         for incoming in events {
@@ -60,7 +64,8 @@ impl EventRepository {
             // observations and analysis foreign keys. Never conflate authenticated archives or
             // two indicators sharing a release time.
             let key = occurrence_key(&event.country, event.event_time, &event.event);
-            if event.time_exact && provider_priority(&event.provider) > 0 && occurrences[&key] == 1 {
+            if event.time_exact && provider_priority(&event.provider) > 0 && occurrences[&key] == 1
+            {
                 let same_source: bool = sqlx::query_scalar(
                     "SELECT EXISTS(SELECT 1 FROM economic_event WHERE provider = ? AND provider_id = ?)"
                 )
@@ -82,7 +87,8 @@ impl EventRepository {
                         .collect::<Result<Vec<_>, _>>()?
                         .into_iter()
                         .filter(|old| {
-                            old.time_exact && provider_priority(&old.provider) > 0
+                            old.time_exact
+                                && provider_priority(&old.provider) > 0
                                 && occurrence_key(&old.country, old.event_time, &old.event) == key
                         })
                         .collect();

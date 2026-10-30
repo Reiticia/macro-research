@@ -55,8 +55,6 @@ impl MarketSelector {
         config: MarketSelectionConfig,
         candidates: Vec<MarketSymbol>,
         events: EventRepository,
-        audit: Option<Arc<LlmUsageRepository>>,
-        health: Option<Arc<HealthRegistry>>,
         api_key: Option<String>,
     ) -> Result<Self, AppError> {
         config.validate()?;
@@ -74,10 +72,20 @@ impl MarketSelector {
             config,
             candidates: unique_symbols(candidates),
             events,
-            audit,
-            health,
+            audit: None,
+            health: None,
             in_flight: Mutex::new(HashMap::new()),
         })
+    }
+
+    pub fn with_audit_opt(mut self, audit: Option<Arc<LlmUsageRepository>>) -> Self {
+        self.audit = audit;
+        self
+    }
+
+    pub fn with_health(mut self, health: Arc<HealthRegistry>) -> Self {
+        self.health = Some(health);
+        self
     }
 
     /// Return the persisted selection or create one once for this event. The per-event lock
@@ -208,13 +216,8 @@ impl MarketSelector {
             .as_ref()
             .map(|answers| answers.usage)
             .unwrap_or_default();
-        self.audit_call(
-            event.id,
-            started,
-            usage,
-            outcome.as_ref().map(|_| ()).map_err(|e| e),
-        )
-        .await;
+        self.audit_call(event.id, started, usage, outcome.as_ref().map(|_| ()))
+            .await;
         if answers.as_ref().is_some_and(|answer| answer.partial) {
             if let Some(health) = &self.health {
                 health
@@ -661,8 +664,6 @@ mod tests {
             },
             vec![MarketSymbol::Dxy, MarketSymbol::Wti],
             events,
-            None,
-            None,
             Some("test-key".into()),
         )
         .unwrap();

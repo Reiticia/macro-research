@@ -396,11 +396,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.market_selection.clone(),
             market_candidates,
             events.clone(),
-            llm_usage.clone(),
-            Some(health.clone()),
             api_key,
         ) {
-            Ok(selector) => Some(Arc::new(selector)),
+            Ok(selector) => Some(Arc::new(
+                selector
+                    .with_audit_opt(llm_usage.clone())
+                    .with_health(health.clone()),
+            )),
             Err(error) => {
                 tracing::warn!(%error, "Jev market selector unavailable; all-symbol fallback will be used");
                 None

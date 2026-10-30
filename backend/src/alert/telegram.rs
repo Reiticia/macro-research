@@ -8,6 +8,11 @@ use tokio::sync::Mutex;
 
 use crate::error::AppError;
 
+struct CachedBotLink {
+    checked_at: Instant,
+    url: Option<String>,
+}
+
 /// Minimal Telegram Bot API client.
 ///
 /// Long polling is used instead of a webhook: the server is behind a domestic proxy and has no
@@ -19,7 +24,7 @@ pub struct TelegramClient {
     api_base: String,
     token: String,
     /// Cache successful and failed discovery; concurrent public requests share one lookup.
-    bot_link: Arc<Mutex<Option<(Instant, Option<String>)>>>,
+    bot_link: Arc<Mutex<Option<CachedBotLink>>>,
 }
 
 /// One button of an inline keyboard row.
@@ -46,13 +51,16 @@ impl TelegramClient {
     /// Only a validated public username leaves the server, never the Bot API token or URL.
     pub async fn public_bot_url(&self) -> Option<String> {
         let mut cached = self.bot_link.lock().await;
-        if let Some((checked_at, url)) = cached.as_ref()
-            && checked_at.elapsed() < Duration::from_secs(300)
+        if let Some(entry) = cached.as_ref()
+            && entry.checked_at.elapsed() < Duration::from_secs(300)
         {
-            return url.clone();
+            return entry.url.clone();
         }
         let url = self.discover_bot_url().await;
-        *cached = Some((Instant::now(), url.clone()));
+        *cached = Some(CachedBotLink {
+            checked_at: Instant::now(),
+            url: url.clone(),
+        });
         url
     }
 

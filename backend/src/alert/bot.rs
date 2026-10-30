@@ -621,12 +621,8 @@ async fn test_ai_module(state: &BotState, module: &str) -> Result<(), String> {
     if model.trim().is_empty() {
         return Err("模型名称为空".into());
     }
-    match module {
-        "translation" => crate::openai_compat::merge_extra_body(
-            &mut payload,
-            &state.config.translation.extra_body,
-        ),
-        _ => {}
+    if module == "translation" {
+        crate::openai_compat::merge_extra_body(&mut payload, &state.config.translation.extra_body);
     }
     let route = match module {
         "translation" => "translation",

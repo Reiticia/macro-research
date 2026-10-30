@@ -123,6 +123,18 @@ impl IntoResponse for AppError {
     }
 }
 
+impl From<std::io::Error> for AppError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Internal(value.to_string())
+    }
+}
+
+impl From<toml::de::Error> for AppError {
+    fn from(value: toml::de::Error) -> Self {
+        Self::Config(value.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,17 +160,5 @@ mod tests {
         assert!(error.to_string().contains(&cause));
         assert_eq!(error.public_message(), "internal server error");
         assert_eq!(error.code(), "upstream_error");
-    }
-}
-
-impl From<std::io::Error> for AppError {
-    fn from(value: std::io::Error) -> Self {
-        Self::Internal(value.to_string())
-    }
-}
-
-impl From<toml::de::Error> for AppError {
-    fn from(value: toml::de::Error) -> Self {
-        Self::Config(value.to_string())
     }
 }

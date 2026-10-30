@@ -79,29 +79,41 @@ async fn watch_once(
     let start = active.iter().map(|event| event.event_time).min().unwrap() - Duration::hours(12);
     let end = active.iter().map(|event| event.event_time).max().unwrap() + Duration::hours(12);
     let remote = state.calendar_service.lookup(start, end).await?.events;
-    let relevant: Vec<EconomicEvent> = active.iter().filter_map(|watched| {
-        let exact = remote.iter().find(|event|
-            event.provider == watched.provider && event.provider_id == watched.provider_id);
-        exact.or_else(|| {
-            if active.iter().filter(|event| same_occurrence(event, watched)).count() != 1 {
-                return None;
-            }
-            let mut matching = remote.iter().filter(|event| same_occurrence(event, watched));
-            let first = matching.next()?;
-            matching.next().is_none().then_some(first)
-        }).cloned()
-    }).collect();
+    let relevant: Vec<EconomicEvent> = active
+        .iter()
+        .filter_map(|watched| {
+            let exact = remote.iter().find(|event| {
+                event.provider == watched.provider && event.provider_id == watched.provider_id
+            });
+            exact
+                .or_else(|| {
+                    if active
+                        .iter()
+                        .filter(|event| same_occurrence(event, watched))
+                        .count()
+                        != 1
+                    {
+                        return None;
+                    }
+                    let mut matching = remote
+                        .iter()
+                        .filter(|event| same_occurrence(event, watched));
+                    let first = matching.next()?;
+                    matching.next().is_none().then_some(first)
+                })
+                .cloned()
+        })
+        .collect();
     state
         .events
         .save_events_without_observations(&relevant)
         .await?;
 
     for watched in active {
-        if let Some(updated) = relevant
-            .iter()
-            .find(|event| (event.provider == watched.provider && event.provider_id == watched.provider_id)
-                || same_occurrence(event, &watched))
-            && updated.has_release()
+        if let Some(updated) = relevant.iter().find(|event| {
+            (event.provider == watched.provider && event.provider_id == watched.provider_id)
+                || same_occurrence(event, &watched)
+        }) && updated.has_release()
         {
             let released = state.events.get(watched.id).await?;
             release(state, &released).await?;
@@ -112,7 +124,8 @@ async fn watch_once(
 }
 
 fn same_occurrence(left: &EconomicEvent, right: &EconomicEvent) -> bool {
-    left.time_exact && right.time_exact
+    left.time_exact
+        && right.time_exact
         && occurrence_key(&left.country, left.event_time, &left.event)
             == occurrence_key(&right.country, right.event_time, &right.event)
 }

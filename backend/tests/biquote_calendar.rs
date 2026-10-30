@@ -218,7 +218,10 @@ async fn production_priority_is_tradingview_then_biquote_then_weekly() {
 async fn promotion_preserves_ids_observations_and_primary_values() {
     let repository = repository().await;
     let old = event("biquote", "old");
-    let id = repository.save_events(&[old.clone()]).await.unwrap()[0];
+    let id = repository
+        .save_events(std::slice::from_ref(&old))
+        .await
+        .unwrap()[0];
     repository
         .set_status(id, EventStatus::Watching)
         .await
@@ -228,7 +231,10 @@ async fn promotion_preserves_ids_observations_and_primary_values() {
     new.actual = Some(Decimal::new(3, 1));
     new.event_zh_cn = None;
     assert_eq!(
-        repository.save_events(&[new.clone()]).await.unwrap(),
+        repository
+            .save_events(std::slice::from_ref(&new))
+            .await
+            .unwrap(),
         vec![id]
     );
     assert_eq!(repository.get(id).await.unwrap().provider, "trading_view");

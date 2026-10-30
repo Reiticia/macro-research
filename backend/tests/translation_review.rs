@@ -119,15 +119,16 @@ async fn rejected_names_are_retried_with_the_reviewer_note_and_only_approved_row
         "one draft round plus one retry round"
     );
     assert_eq!(translator.verifies.load(Ordering::SeqCst), 2);
-    let revisions = translator.revisions.lock().unwrap();
-    assert_eq!(revisions.len(), 2, "both names are handed back with a note");
-    assert!(
-        revisions
-            .iter()
-            .all(|row| row.reason == "use the standard term"
-                && row.previous_zh_cn == format!("初稿{}", row.source))
-    );
-    drop(revisions);
+    {
+        let revisions = translator.revisions.lock().unwrap();
+        assert_eq!(revisions.len(), 2, "both names are handed back with a note");
+        assert!(
+            revisions
+                .iter()
+                .all(|row| row.reason == "use the standard term"
+                    && row.previous_zh_cn == format!("初稿{}", row.source))
+        );
+    }
 
     assert_eq!(events[0].event_zh_cn.as_deref(), Some("修订CPI y/y"));
     assert_eq!(
