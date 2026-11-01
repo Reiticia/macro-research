@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity() {
             MacroTheme {
                 MacroApp(
                     repository = app.repository,
+                    earningsRepository = app.earningsRepository,
                     notificationEventId = notificationEventId,
                     onNotificationHandled = { notificationEventId = null },
                     updates = app.updates,

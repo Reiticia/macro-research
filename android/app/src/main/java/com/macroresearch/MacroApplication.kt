@@ -37,6 +37,8 @@ import java.util.concurrent.TimeUnit
 class MacroApplication : Application() {
     lateinit var repository: MacroRepository
         private set
+    lateinit var earningsRepository: com.macroresearch.data.EarningsRepository
+        private set
     lateinit var notificationCenter: NotificationCenter
         private set
     lateinit var updates: com.macroresearch.update.UpdateCoordinator
@@ -95,6 +97,7 @@ class MacroApplication : Application() {
                 MacroDatabase.MIGRATION_6_7,
                 MacroDatabase.MIGRATION_7_8,
                 MacroDatabase.MIGRATION_8_9,
+                MacroDatabase.MIGRATION_9_10,
             )
             .build()
         if (BuildConfig.DEBUG) {
@@ -117,6 +120,16 @@ class MacroApplication : Application() {
             http,
             proxy = networkPreferences::proxy,
             backoff = PreferencesBackoffStore(this),
+        )
+        val earningsClient = com.macroresearch.data.remote.EarningsClient(http, proxy = networkPreferences::proxy)
+        val logoClient = com.macroresearch.data.remote.CompanyLogoClient(http, proxy = networkPreferences::proxy)
+        earningsRepository = com.macroresearch.data.EarningsRepository(
+            settings = backendPreferences.settings,
+            store = com.macroresearch.data.local.RoomEarningsStore(database.earningsDao()),
+            direct = earningsClient::fetch,
+            backend = backendClient::earnings,
+            gson = gson,
+            logos = com.macroresearch.data.CompanyLogoLoader(backendPreferences.settings, logoClient::image, backendClient::companyLogo),
         )
         val marketClient = DirectMarketClient(http, proxy = networkPreferences::proxy)
         val aiAnalysisClient = AiAnalysisClient(translationHttp, gson)

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="earnings_macro_tab">總經</string>
+    <string name="earnings_tab">財報</string>
+    <string name="earnings_title">美股財報</string>
+    <string name="earnings_basis">美東日期 · 預估日程，非公司確認</string>
+    <string name="earnings_refresh">重新整理財報</string>
+    <string name="earnings_previous_day">前一天</string>
+    <string name="earnings_next_day">後一天</string>
+    <string name="earnings_today">今天</string>
+    <string name="earnings_search">搜尋股票代碼或公司</string>
+    <string name="earnings_all">全部時段</string>
+    <string name="earnings_pre_market">盤前</string>
+    <string name="earnings_after_hours">盤後</string>
+    <string name="earnings_unknown">時間未知</string>
+    <string name="earnings_count">%1$d 家公司</string>
+    <string name="earnings_updated">更新於 %1$s</string>
+    <string name="earnings_unauthorized">後端驗證失敗，請至設定檢查存取金鑰。</string>
+    <string name="earnings_unsupported">目前後端尚不支援財報，請升級後端或手動切換直連模式。</string>
+    <string name="earnings_failed">財報重新整理失敗，既有快取會保留。</string>
+    <string name="earnings_stale">正在顯示較舊的日曆快取，實際日程可能已變更。</string>
+    <string name="earnings_nasdaq_unavailable">Nasdaq 暫時無法使用，可能顯示 TradingView 備用資料或舊快取。</string>
+    <string name="earnings_tv_unavailable">TradingView 暫時無法使用，未能更新補充預測。</string>
+    <string name="earnings_conflict">兩個來源的下一次財報日期不一致，請以公司公告核實。</string>
+    <string name="earnings_cooldown">重新整理冷卻中，請至少等待一分鐘。</string>
+    <string name="earnings_empty">此日期及篩選條件下沒有財報紀錄，不代表完整涵蓋全市場。</string>
+    <string name="earnings_disclaimer">日期與盤前／盤後安排可能變更。來源時間戳記不代表公司確認的精確發布時間；不提供分鐘級提醒，不自動混算優於預期幅度。</string>
+    <string name="earnings_source_times">來源更新（裝置時間）· Nasdaq %1$s · TradingView %2$s</string>
+    <string name="earnings_quarter">財季結束月份：%1$s</string>
+    <string name="earnings_eps_forecast">Nasdaq EPS 預期</string>
+    <string name="earnings_analysts">分析師數量</string>
+    <string name="earnings_actual_eps">Nasdaq 已公布 EPS</string>
+    <string name="earnings_surprise">Nasdaq EPS 優於預期</string>
+    <string name="earnings_primary_source">日曆來源：%1$s</string>
+    <string name="earnings_hide_tv">收合 TradingView 預測</string>
+    <string name="earnings_show_tv">TradingView 下一期預測</string>
+    <string name="earnings_tv_date">TradingView 下一次日期（美東）：%1$s</string>
+    <string name="earnings_tv_eps">下一期 EPS 預期</string>
+    <string name="earnings_tv_revenue">下一期營收預期</string>
+    <string name="earnings_alignment_warning">財季、EPS 口徑及財務幣別尚未核實。此處預測與 Nasdaq 分開顯示，不直接與歷史實際值比較。</string>
+    <string name="earnings_company_logo">%1$s 的公司標誌</string>
+    <string name="earnings_logo_source">公司標誌來源：Financial Modeling Prep（可能缺少或過期）</string>
+</resources>

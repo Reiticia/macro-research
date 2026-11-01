@@ -154,6 +154,23 @@ class BackendClient(
         }.let(::events)
     }
 
+    suspend fun companyLogo(symbol: String): ByteArray? {
+        val safe = companyLogoSymbol(symbol) ?: return null
+        val request = requestBuilder("/api/v1/earnings/logo/$safe", authenticated = true) {}
+            .header("Accept", "image/png")
+            .cacheControl(okhttp3.CacheControl.Builder().noCache().noStore().build()).get().build()
+        return client.newBuilder().callTimeout(15, java.util.concurrent.TimeUnit.SECONDS).build()
+            .newCall(request).awaitResponse(::readCompanyLogo)
+    }
+
+    suspend fun earnings(date: java.time.LocalDate, force: Boolean = false): com.macroresearch.data.model.EarningsCalendar = withContext(Dispatchers.IO) {
+        val root = getJson("/api/v1/earnings") {
+            it.addQueryParameter("date", date.toString())
+            if (force) it.addQueryParameter("refresh", "true")
+        }
+        com.macroresearch.data.decodeEarningsCalendar(root.toString(), date, gson)
+    }
+
     suspend fun history(
         countries: Collection<String>,
         category: String?,
@@ -234,7 +251,7 @@ class BackendClient(
     ): com.google.gson.JsonElement {
         val builder = requestBuilder(path, authenticated, configure)
         // A release POST syncs the server, but cannot invalidate OkHttp's separate calendar URL.
-        if (path == "/api/v1/calendar") builder.cacheControl(okhttp3.CacheControl.FORCE_NETWORK)
+        if (path == "/api/v1/calendar" || path == "/api/v1/earnings") builder.cacheControl(okhttp3.CacheControl.FORCE_NETWORK)
         if (path == "/api/v1/meta" || path == "/api/v1/status") {
             builder.cacheControl(okhttp3.CacheControl.Builder().noCache().noStore().build())
         }

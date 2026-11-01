@@ -5,6 +5,7 @@ import com.macroresearch.R
 import com.macroresearch.ui.common.appLocale
 import com.macroresearch.ui.common.dateLabel
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -57,7 +58,33 @@ import java.time.format.TextStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CalendarScreen(repository: MacroRepository, padding: PaddingValues, onEvent: (Long) -> Unit) {
+fun CalendarScreen(
+    repository: MacroRepository,
+    padding: PaddingValues,
+    earningsRepository: com.macroresearch.data.EarningsRepository? = null,
+    onEvent: (Long) -> Unit,
+) {
+    var earnings by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().padding(padding)) {
+        if (earningsRepository != null) Row(
+            Modifier.fillMaxWidth().padding(horizontal = ResearchLayout.pagePadding),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(selected = !earnings, onClick = { earnings = false }, label = { Text(stringResource(R.string.earnings_macro_tab)) })
+            FilterChip(selected = earnings, onClick = { earnings = true }, label = { Text(stringResource(R.string.earnings_tab)) })
+        }
+        Box(Modifier.weight(1f)) {
+            if (earnings && earningsRepository != null) {
+                com.macroresearch.ui.earnings.EarningsScreen(earningsRepository)
+            } else {
+                MacroCalendarScreen(repository, PaddingValues(0.dp), onEvent)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MacroCalendarScreen(repository: MacroRepository, padding: PaddingValues, onEvent: (Long) -> Unit) {
     val vm: CalendarViewModel = viewModel(factory = viewModelFactory { CalendarViewModel(repository) })
     val state by vm.state.collectAsStateWithLifecycle()
     val warning by repository.calendarWarning.collectAsStateWithLifecycle()

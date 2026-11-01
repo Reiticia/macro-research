@@ -73,6 +73,10 @@ TradingView 接口失败或返回空、且请求范围与当前周重叠时，�
 
 唯一例外是 Material3 日期选择器的毫秒值：`CalendarDatePickerState.selectedDateMillis` 按 API 约定用 UTC 编码“日期”而非“瞬时”，改成系统时区会让高亮日期偏移一天；它输出的 `LocalDate` 再按系统时区分桶。
 
+## 美股财报
+
+日历页通过“宏观 / 财报”切换进入独立财报模块，两种数据模式均支持。`EarningsRepository` 复用数据源设置，直连由 `EarningsClient` 获取 Nasdaq 日历并补充 TradingView 下一期预测，后端模式请求受保护的 `/api/v1/earnings`；后端失败不静默直连。Room 9 → 10 增量新增财报快照表，缓存按模式及后端地址哈希隔离，来源变更取消旧请求并丢弃迟到结果，不改变宏观事件/关注/分析。财报选日按美东日期而非设备日期；日期与精度、季度口径、限流和覆盖边界见 [财报日历](earnings-calendar.md)。
+
 ## 行情与分析
 
 - Binance 用于 BTC、ETH。

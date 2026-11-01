@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="earnings_macro_tab">Economic</string>
+    <string name="earnings_tab">Earnings</string>
+    <string name="earnings_title">US earnings</string>
+    <string name="earnings_basis">New York dates · Estimated, not company-confirmed</string>
+    <string name="earnings_refresh">Refresh earnings</string>
+    <string name="earnings_previous_day">Previous day</string>
+    <string name="earnings_next_day">Next day</string>
+    <string name="earnings_today">Today</string>
+    <string name="earnings_search">Search symbol or company</string>
+    <string name="earnings_all">All sessions</string>
+    <string name="earnings_pre_market">Pre-market</string>
+    <string name="earnings_after_hours">After-hours</string>
+    <string name="earnings_unknown">Time unknown</string>
+    <string name="earnings_count">%1$d companies</string>
+    <string name="earnings_updated">Updated %1$s</string>
+    <string name="earnings_unauthorized">Backend authorization failed. Check your access key in Settings.</string>
+    <string name="earnings_unsupported">This backend does not support earnings yet. Upgrade it or manually switch to direct mode.</string>
+    <string name="earnings_failed">Earnings refresh failed. Cached records, if any, are retained.</string>
+    <string name="earnings_stale">Showing an older cached calendar; it may have changed.</string>
+    <string name="earnings_nasdaq_unavailable">Nasdaq is unavailable. A TradingView fallback or older cache may be shown.</string>
+    <string name="earnings_tv_unavailable">TradingView is unavailable; supplemental forecasts could not be refreshed.</string>
+    <string name="earnings_conflict">Sources disagree on the next earnings date. Verify with the company.</string>
+    <string name="earnings_cooldown">Refresh cooldown: please wait at least one minute.</string>
+    <string name="earnings_empty">No earnings match this date and filter. This does not imply complete market coverage.</string>
+    <string name="earnings_disclaimer">Dates and sessions can change. Provider timestamps are not confirmed exact release times. No minute-level reminders or automatic surprise calculation.</string>
+    <string name="earnings_source_times">Source updates (device time) · Nasdaq %1$s · TradingView %2$s</string>
+    <string name="earnings_quarter">Fiscal quarter ending: %1$s</string>
+    <string name="earnings_eps_forecast">Nasdaq EPS forecast</string>
+    <string name="earnings_analysts">Analysts</string>
+    <string name="earnings_actual_eps">Nasdaq reported EPS</string>
+    <string name="earnings_surprise">Nasdaq EPS surprise</string>
+    <string name="earnings_primary_source">Calendar source: %1$s</string>
+    <string name="earnings_hide_tv">Hide TradingView forecasts</string>
+    <string name="earnings_show_tv">TradingView next-period forecasts</string>
+    <string name="earnings_tv_date">TradingView next date (New York): %1$s</string>
+    <string name="earnings_tv_eps">Next-period EPS forecast</string>
+    <string name="earnings_tv_revenue">Next-period revenue forecast</string>
+    <string name="earnings_alignment_warning">Fiscal period, EPS basis and financial currency are not verified. These forecasts are separate from Nasdaq; do not directly compare them with historical actuals.</string>
+    <string name="earnings_company_logo">Company logo: %1$s</string>
+    <string name="earnings_logo_source">Company logos: Financial Modeling Prep (may be missing or outdated)</string>
+</resources>
