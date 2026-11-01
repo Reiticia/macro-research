@@ -185,6 +185,8 @@ impl Default for NetworkConfig {
             proxy_url: String::new(),
             proxied: vec![
                 "tradingview".into(),
+                "nasdaq".into(),
+                "earnings_logo".into(),
                 "forexfactory".into(),
                 "cnbc".into(),
                 "yahoo".into(),

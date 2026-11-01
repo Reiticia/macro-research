@@ -107,6 +107,7 @@ fn fixture_event(hours_from_now: i64) -> EconomicEvent {
 
 struct TestApp {
     state: AppState,
+    pool: sqlx::SqlitePool,
 }
 
 async fn app() -> TestApp {
@@ -185,6 +186,11 @@ async fn app() -> TestApp {
         market,
         analyses,
         calendar_service,
+        earnings_service: Arc::new(market_event_analyzer::earnings::EarningsService::new(
+            pool.clone(),
+            reqwest::Client::new(),
+            reqwest::Client::new(),
+        )),
         market_service,
         analysis_service,
         health,
@@ -197,7 +203,124 @@ async fn app() -> TestApp {
         market_selector: None,
         backfill,
     };
-    TestApp { state }
+    TestApp { state, pool }
+}
+
+#[tokio::test]
+async fn company_logo_route_authenticates_and_returns_only_bounded_png_assets() {
+    let mut app = app().await;
+    let png = include_bytes!("../../android/app/src/test/resources/earnings/logo.png").to_vec();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/asset", listener.local_addr().unwrap());
+    let assets = axum::Router::new().route(
+        "/asset/{symbol}",
+        axum::routing::get(move || {
+            let png = png.clone();
+            async move { ([("content-type", "image/png")], png) }
+        }),
+    );
+    let task = tokio::spawn(async move { axum::serve(listener, assets).await.unwrap() });
+    let http = reqwest::Client::builder().no_proxy().build().unwrap();
+    app.state.earnings_service = Arc::new(
+        market_event_analyzer::earnings::EarningsService::new(
+            app.pool.clone(),
+            http.clone(),
+            http.clone(),
+        )
+        .with_logos(
+            market_event_analyzer::earnings_logo::CompanyLogoService::new(http).with_base(base),
+        ),
+    );
+    let router = api::router(app.state);
+    let denied = router
+        .clone()
+        .oneshot(request("GET", "/api/v1/earnings/logo/AAPL", None))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+    let response = router
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/api/v1/earnings/logo/AAPL",
+            Some("secret-token"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "image/png");
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), 256 * 1024)
+            .await
+            .unwrap()
+            .as_ref(),
+        include_bytes!("../../android/app/src/test/resources/earnings/logo.png")
+    );
+    let invalid = router
+        .oneshot(request(
+            "GET",
+            "/api/v1/earnings/logo/AAPL%3Fbad",
+            Some("secret-token"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    task.abort();
+}
+
+#[tokio::test]
+async fn earnings_route_is_authenticated_and_has_a_separate_wire_contract() {
+    let app = app().await;
+    let router = api::router(app.state);
+    let today = Utc::now()
+        .with_timezone(&chrono_tz::America::New_York)
+        .date_naive();
+    let payload = serde_json::json!({
+        "date": today, "timezone":"America/New_York", "updatedAt":Utc::now(),
+        "nasdaqUpdatedAt":Utc::now(), "tradingViewUpdatedAt":null,
+        "stale":false, "warnings":[], "events":[{
+            "symbol":"AAPL", "name":"Apple", "source":"nasdaq", "session":"after_hours",
+            "fiscalQuarterEnding":"Sep/2026", "epsForecast":"1.98", "analystCount":7,
+            "marketCap":null, "actualEps":null, "surprisePercent":null, "lastYearEps":null, "tradingView":null
+        }]
+    });
+    sqlx::query("INSERT INTO earnings_calendar(date,payload) VALUES (?,?)")
+        .bind(today.to_string())
+        .bind(payload.to_string())
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    let uri = format!("/api/v1/earnings?date={today}");
+    let denied = router
+        .clone()
+        .oneshot(request("GET", &uri, None))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+    let response = router
+        .clone()
+        .oneshot(request("GET", &uri, Some("secret-token")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    let bytes = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
+    let root: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(root["events"][0]["epsForecast"], "1.98");
+    assert!(root["events"][0].get("eventTime").is_none());
+    let invalid = router
+        .oneshot(request(
+            "GET",
+            "/api/v1/earnings?date=2000-01-01",
+            Some("secret-token"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
 }
 
 fn request(method: &str, uri: &str, token: Option<&str>) -> Request<Body> {

@@ -6,6 +6,8 @@ pub mod auth;
 pub mod backfill;
 pub mod calendar;
 pub mod config;
+pub mod earnings;
+pub mod earnings_logo;
 pub mod error;
 pub mod event_description;
 pub mod fcm;
@@ -40,6 +42,7 @@ pub struct AppState {
     pub market: MarketRepository,
     pub analyses: AnalysisRepository,
     pub calendar_service: Arc<CalendarService>,
+    pub earnings_service: Arc<earnings::EarningsService>,
     pub market_service: Arc<MarketService>,
     pub analysis_service: Arc<AnalysisService>,
     pub health: Arc<HealthRegistry>,
