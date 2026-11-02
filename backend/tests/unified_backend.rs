@@ -26,6 +26,9 @@ use sqlx::sqlite::SqlitePoolOptions;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
 
+#[path = "support/logo_cache.rs"]
+mod logo_cache;
+
 struct StubCalendar(Vec<EconomicEvent>);
 
 #[async_trait]
@@ -208,6 +211,7 @@ async fn app() -> TestApp {
 
 #[tokio::test]
 async fn company_logo_route_authenticates_and_returns_only_bounded_png_assets() {
+    let cache_dir = logo_cache::CacheDir::new();
     let mut app = app().await;
     let png = include_bytes!("../../android/app/src/test/resources/earnings/logo.png").to_vec();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -228,7 +232,9 @@ async fn company_logo_route_authenticates_and_returns_only_bounded_png_assets() 
             http.clone(),
         )
         .with_logos(
-            market_event_analyzer::earnings_logo::CompanyLogoService::new(http).with_base(base),
+            market_event_analyzer::earnings_logo::CompanyLogoService::new(http)
+                .with_base(base)
+                .with_cache_dir(cache_dir.path()),
         ),
     );
     let router = api::router(app.state);

@@ -15,6 +15,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub network: NetworkConfig,
     #[serde(default)]
+    pub earnings_logo: EarningsLogoConfig,
+    #[serde(default)]
     pub auth: AuthConfig,
     #[serde(default)]
     pub translation: TranslationConfig,
@@ -80,6 +82,33 @@ impl ServerConfig {
 #[serde(deny_unknown_fields)]
 pub struct DatabaseConfig {
     pub url: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EarningsLogoConfig {
+    pub cache_dir: String,
+}
+
+impl Default for EarningsLogoConfig {
+    fn default() -> Self {
+        Self {
+            cache_dir: crate::earnings_logo::DEFAULT_CACHE_DIR.into(),
+        }
+    }
+}
+
+impl EarningsLogoConfig {
+    /// Resolve relative paths beside config.toml, independent of the process working directory.
+    pub fn resolve_cache_dir(&self, config_dir: &Path) -> Result<std::path::PathBuf, AppError> {
+        let value = self.cache_dir.trim();
+        if value.is_empty() {
+            return Err(AppError::Config(
+                "earnings_logo.cache_dir must not be empty".into(),
+            ));
+        }
+        Ok(config_dir.join(value))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -535,9 +564,11 @@ impl AppConfig {
     }
 
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, AppError> {
+        let path = path.as_ref();
         let contents = fs::read_to_string(path)?;
         let config: Self = toml::from_str(&contents)?;
         config.server.validate_tls().map_err(AppError::Config)?;
+        config.earnings_logo.resolve_cache_dir(&config.dir(path))?;
         Ok(config)
     }
 }
@@ -676,6 +707,33 @@ market_collect_after_minutes = 60
         .unwrap();
         assert_eq!(config.biquote_url, "https://biquote.io/api/calendar");
         assert_eq!(config.tradingview_url, "https://old.example/events");
+    }
+
+    #[test]
+    fn logo_cache_directory_defaults_and_resolves_against_configuration() {
+        let legacy: EarningsLogoConfig = toml::from_str("").unwrap();
+        assert_eq!(legacy.cache_dir, "data/earnings-logos");
+        let root = std::env::temp_dir();
+        assert_eq!(
+            legacy.resolve_cache_dir(&root).unwrap(),
+            root.join("data/earnings-logos")
+        );
+        let absolute = root.join("custom-logos");
+        let explicit = EarningsLogoConfig {
+            cache_dir: absolute.to_string_lossy().into_owned(),
+        };
+        assert_eq!(
+            explicit.resolve_cache_dir(Path::new("ignored")).unwrap(),
+            absolute
+        );
+        assert!(
+            EarningsLogoConfig {
+                cache_dir: "  ".into()
+            }
+            .resolve_cache_dir(&root)
+            .is_err()
+        );
+        assert!(toml::from_str::<EarningsLogoConfig>("cache_dri = 'bad'").is_err());
     }
 
     #[test]

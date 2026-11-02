@@ -480,7 +480,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_logos(
             market_event_analyzer::earnings_logo::CompanyLogoService::new(client_for(
                 "earnings_logo",
-            )),
+            ))
+            .with_cache_dir(config.earnings_logo.resolve_cache_dir(&config_dir)?),
         ),
     );
     tokio::spawn(market_event_analyzer::earnings::sync_loop(

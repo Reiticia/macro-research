@@ -19,6 +19,11 @@ tls_key = ""
 [database]
 url = "sqlite://data/market.db"
 
+[earnings_logo]
+# 公司 Logo 保存为独立 PNG 文件，不存 SQLite；相对路径以 config.toml 所在目录为基准。
+# 目录自动创建，需要服务进程有读写权限；也可填写绝对路径。
+cache_dir = "data/earnings-logos"
+
 # 哪些上游必须走代理。主机本身能直连日历、行情与 Telegram 时留空即可。
 [network]
 proxy_url = ""
