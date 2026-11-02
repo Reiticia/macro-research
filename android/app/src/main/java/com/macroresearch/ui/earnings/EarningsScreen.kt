@@ -137,13 +137,13 @@ fun EarningsScreen(repository: EarningsRepository) {
     }
 }
 
-private fun sessionLabel(session: String): Int = when (session) {
+internal fun sessionLabel(session: String): Int = when (session) {
     "pre_market" -> R.string.earnings_pre_market
     "after_hours" -> R.string.earnings_after_hours
     else -> R.string.earnings_unknown
 }
 
-private fun updatedLabel(value: String, locale: java.util.Locale): String = runCatching {
+internal fun updatedLabel(value: String, locale: java.util.Locale): String = runCatching {
     DateTimeFormatter.ofPattern("MM-dd HH:mm", locale).withZone(ZoneId.systemDefault()).format(Instant.parse(value))
 }.getOrDefault("—")
 
@@ -153,7 +153,7 @@ private fun WarningText(resource: Int) {
 }
 
 @Composable
-private fun EarningsCard(event: EarningsEvent, logos: com.macroresearch.data.CompanyLogoLoader?, source: com.macroresearch.data.BackendSettings) {
+internal fun EarningsCard(event: EarningsEvent, logos: com.macroresearch.data.CompanyLogoLoader?, source: com.macroresearch.data.BackendSettings) {
     var expanded by rememberSaveable(event.symbol, event.source) { mutableStateOf(false) }
     Surface(shape = MaterialTheme.shapes.medium, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="calendar_overview">MARKET CALENDAR</string>
+    <string name="calendar_all">All</string>
+    <string name="calendar_refresh">Refresh calendar</string>
+    <string name="calendar_previous_month">Previous month</string>
+    <string name="calendar_next_month">Next month</string>
+    <string name="calendar_loading_month">Loading dates progressively · Tap a date to see its agenda</string>
+    <string name="calendar_partial">Some dates are unavailable or cached. Open a date for details.</string>
+    <string name="calendar_timezones">Earnings: New York dates · Economic events: device time</string>
+    <string name="calendar_day_description">%1$s · Earnings: %2$d · Economic: %3$d</string>
+    <string name="calendar_day_agenda">Daily agenda</string>
+    <string name="calendar_close_day">Close daily agenda</string>
+    <string name="calendar_search">Search event, symbol or company</string>
+    <string name="calendar_economic_timezone">Economic release times · %1$s</string>
+    <string name="calendar_economic_failed">Economic calendar refresh failed. Cached events may be shown; an empty date is not confirmed empty.</string>
+    <string name="calendar_earnings_range">Earnings are available from 120 days before to 60 days after today (New York date).</string>
+    <string name="calendar_legend">Company logos: earnings · Colored dot: economic events</string>
+    <string name="calendar_day_pending">Date not fully loaded</string>
+    <string name="calendar_day_unavailable">Date has unavailable or cached data</string>
+</resources>
