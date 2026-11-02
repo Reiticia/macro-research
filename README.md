@@ -26,6 +26,7 @@ macro-research/
 ## 数据流（直连模式）
 
 - 财经日历：TradingView 为主源，失败或无数据时依次回退 BiQuote（`biquote.io/api/calendar`）、Forex Factory；两种模式均无需日历 API Key
+- 统一月历：日期格展示美股财报公司 Logo 与经济事件数量，支持“全部 / 财报 / 经济事件”筛选，点击日期查看当天列表。直连/后端模式均支持 Nasdaq 日历 + TradingView 下一期预测；财报按美东日期展示盘前/盘后、EPS 与营收预期、来源冲突和缓存状态，经济事件按设备时区展示时间。见 [财报日历](docs/earnings-calendar.md)
 - 美债收益率：CNBC 报价与 1 分钟 K 线，失败时回退 Yahoo Finance
 - 股票指数、外汇与贵金属：BiQuote，失败时回退 Yahoo Finance
 - 加密资产：Binance

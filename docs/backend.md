@@ -169,6 +169,8 @@ request_timeout_seconds = 20
 | GET | `/api/v1/status` | 各数据源健康状态 + 本令牌今日配额用量 |
 | GET | `/api/v1/events/upcoming?days=7` | 近期事件 |
 | GET | `/api/v1/calendar?from&to&country&minimum_importance` | 单日区间 ≤90 天 |
+| GET | `/api/v1/earnings/logo/{symbol}` | 受保护的公司 PNG Logo 转发与本地文件有界缓存（`[earnings_logo].cache_dir`，不存内存/SQLite）；不可用返回 404，不允许传入任意 URL |
+| GET | `/api/v1/earnings?date=YYYY-MM-DD&refresh=true` | 独立美股财报日历；美东日期，过去 120 天至未来 60 天；省略 refresh 使用缓存策略，详见 [财报日历](earnings-calendar.md) |
 | GET | `/api/v1/events/history?country=a,b&category&importance&limit&offset&from&to` | 历史分页，`country` 支持逗号分隔多值；`importance` 精确筛选 0–3，支持逗号分隔多值（如 `1,3`），省略则包含全部等级，筛选在分页前执行 |
 | GET | `/api/v1/events/{id}` | `{event, observations}` |
 | POST | `/api/v1/events/{id}/refresh` | 绕过同步间隔按事件当日重取公布值 |

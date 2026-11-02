@@ -470,6 +470,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    let earnings_service = Arc::new(
+        market_event_analyzer::earnings::EarningsService::new(
+            pool.clone(),
+            client_for("nasdaq"),
+            client_for("tradingview"),
+        )
+        .with_health(health.clone())
+        .with_logos(
+            market_event_analyzer::earnings_logo::CompanyLogoService::new(client_for(
+                "earnings_logo",
+            ))
+            .with_cache_dir(config.earnings_logo.resolve_cache_dir(&config_dir)?),
+        ),
+    );
+    tokio::spawn(market_event_analyzer::earnings::sync_loop(
+        earnings_service.clone(),
+    ));
     let (event_bus, _) = broadcast::channel(256);
     let state = AppState {
         config: Arc::new(config.clone()),
@@ -477,6 +494,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         market: market.clone(),
         analyses: analyses.clone(),
         calendar_service: calendar_service.clone(),
+        earnings_service,
         market_service: market_service.clone(),
         analysis_service,
         health: health.clone(),

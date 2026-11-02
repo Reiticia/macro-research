@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="calendar_overview">市場日曆</string>
+    <string name="calendar_all">全部</string>
+    <string name="calendar_refresh">重新整理日曆</string>
+    <string name="calendar_previous_month">上個月</string>
+    <string name="calendar_next_month">下個月</string>
+    <string name="calendar_loading_month">正在逐日載入 · 點選日期查看當日日程</string>
+    <string name="calendar_partial">部分日期載入失敗或使用舊快取，點選日期查看詳情。</string>
+    <string name="calendar_timezones">財報按紐約日期 · 經濟事件按裝置時間</string>
+    <string name="calendar_day_description">%1$s · %2$d 項財報 · %3$d 項經濟事件</string>
+    <string name="calendar_day_agenda">當日日程</string>
+    <string name="calendar_close_day">關閉當日日程</string>
+    <string name="calendar_search">搜尋事件、股票代碼或公司</string>
+    <string name="calendar_economic_timezone">經濟事件公布時間 · %1$s</string>
+    <string name="calendar_economic_failed">經濟日曆重新整理失敗，可能顯示快取事件；空白日期不代表當天沒有事件。</string>
+    <string name="calendar_earnings_range">財報支援紐約今天之前 120 天至之後 60 天，目前日期超出範圍。</string>
+    <string name="calendar_legend">公司圖示：財報 · 彩色圓點：經濟事件</string>
+    <string name="calendar_day_pending">當天資料尚未載入完成</string>
+    <string name="calendar_day_unavailable">當天部分資料無法使用或來自舊快取</string>
+</resources>

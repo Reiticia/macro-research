@@ -59,6 +59,7 @@ fun MacroApp(
     notificationEventId: Long? = null,
     onNotificationHandled: () -> Unit = {},
     updates: com.macroresearch.update.UpdateCoordinator? = null,
+    earningsRepository: com.macroresearch.data.EarningsRepository? = null,
     onShowWhatsNew: () -> Unit = {},
     onInstallUpdate: () -> Unit = {},
 ) {
@@ -146,7 +147,7 @@ fun MacroApp(
                 )
             }
             composable("calendar") {
-                CalendarScreen(repository, padding) { navController.navigate("event/$it") }
+                CalendarScreen(repository, padding, earningsRepository) { navController.navigate("event/$it") }
             }
             composable("market") { MarketScreen(repository, padding) }
             composable("history") {

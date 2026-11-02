@@ -318,12 +318,37 @@ class MacroRepository(
             events.map { it.asExternalModel() }
         }
 
-    fun observeCalendar(date: LocalDate): Flow<List<EconomicEvent>> {
+    fun observeCalendar(date: LocalDate): Flow<List<EconomicEvent>> = observeCalendar(date, date)
+
+    fun observeCalendar(start: LocalDate, end: LocalDate): Flow<List<EconomicEvent>> {
         val zone = ZoneId.systemDefault()
         return dao.observeRange(
-            date.atStartOfDay(zone).toInstant().toString(),
-            date.plusDays(1).atStartOfDay(zone).toInstant().minusNanos(1).toString(),
+            start.atStartOfDay(zone).toInstant().toString(),
+            end.plusDays(1).atStartOfDay(zone).toInstant().minusNanos(1).toString(),
         ).map { rows -> rows.map { it.asExternalModel() } }
+    }
+
+    /** One bounded range request for the month grid, not one request per date. */
+    suspend fun refreshCalendarRange(start: LocalDate, end: LocalDate) {
+        require(!end.isBefore(start) && java.time.temporal.ChronoUnit.DAYS.between(start, end) < 90)
+        val (generation, activeSource) = releaseCommitMutex.withLock { releaseGeneration.value to source }
+        val result = try {
+            activeSource.calendar(start, end)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (generation == releaseGeneration.value) publishWarning(warningFor(error))
+            throw error
+        }
+        val translated = mergeCachedTranslations(result.events)
+        releaseCommitMutex.withLock {
+            if (generation != releaseGeneration.value) throw CancellationException("Data source changed")
+            dao.mergeCalendar(translated.map(EconomicEvent::asEntity))
+            publishWarning(result.warning)
+        }
+        if (translated.isNotEmpty()) {
+            repositoryScope.launch { runCatching { enrichTranslations(translated) } }
+        }
     }
 
     fun observeEvent(id: Long): Flow<EconomicEvent?> =

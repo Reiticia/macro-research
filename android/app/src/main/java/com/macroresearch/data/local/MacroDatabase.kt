@@ -6,15 +6,22 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CachedEventEntity::class, FollowedEventEntity::class, AiAnalysisEntity::class, AiConversationEntity::class, AiAutoRefreshEntity::class],
-    version = 9,
+    entities = [CachedEventEntity::class, FollowedEventEntity::class, AiAnalysisEntity::class, AiConversationEntity::class, AiAutoRefreshEntity::class, EarningsCacheEntity::class],
+    version = 10,
     exportSchema = true,
 )
 abstract class MacroDatabase : RoomDatabase() {
     abstract fun eventDao(): EventDao
     abstract fun analysisDao(): AnalysisDao
+    abstract fun earningsDao(): EarningsDao
 
     companion object {
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS earnings_calendar (sourceKey TEXT NOT NULL, date TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(sourceKey, date))")
+            }
+        }
+
         val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE cached_event ADD COLUMN timeExact INTEGER NOT NULL DEFAULT 1")
