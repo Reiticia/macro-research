@@ -349,7 +349,7 @@ base_url 可填 API 根地址或完整的 /chat/completions 地址。显式在 [
 4. 采纳 → 写入 `event_name_translation` 并回写所有同名事件，所有设备下次刷新即生效；
    屏蔽 → 写入 `translation_correction_mute`，该词条不再接受勘正、不再通知。
 
-机器人命令：`/status`（数据源健康）、`/usage`（近 24 小时模型用量）、`/notifications`（通知开关按钮）、`/events [关键词]`（查询事件 ID）、`/test_fcm [事件ID]`（FCM 验证/测试推送）。
+机器人命令：`/status`（数据源健康）、`/usage`（近 24 小时模型用量）、`/notifications`（通知开关按钮）、`/events [关键词]`（查询事件 ID）、`/test_fcm [事件ID]`（FCM 验证/测试推送）、`/test_calendar_api`（宏观/财报日历源按钮）、`/test_earnings_api [YYYY-MM-DD] [股票代码]`（按纽约日期独立测试 Nasdaq、TradingView 财报及实时 Logo，默认今天/AAPL）。财报诊断仅限管理员本人私聊，使用生产服务共享代理与冷却；显示日期、HTTP 与安全结构摘要，不靠缓存/备用源判定成功，不重置后台健康计数。见[财报诊断](earnings-calendar.md#telegram-财报-api-诊断)。
 仅配置文件里 `telegram.admin_chat_ids` 白名单中的 chat 会被响应。
 
 ## 告警
@@ -372,7 +372,7 @@ quiet_hours_timezone = "Asia/Shanghai"
 
 告警键：`service.startup`、`calendar.primary`（TradingView）、`calendar.biquote`、`calendar.fallback`（Forex Factory）、`calendar.all_sources`、
 `calendar.data_missing`、`market.cnbc`、`market.yahoo`、`market.biquote`、`market.binance`、
-`translation.relay`。
+`translation.relay`、`earnings_nasdaq`、`earnings_tradingview`。财报源错误附带请求日期、HTTP 状态与响应结构；连续失败按日期请求次数累计，并非连续几个小时。
 
 触发规则：
 

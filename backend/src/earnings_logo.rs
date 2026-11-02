@@ -1,5 +1,8 @@
 //! Fixed-host public PNG assets with a file-backed cache, independent of calendar refresh.
-use crate::error::AppError;
+use crate::{
+    earnings::{content_kind, network_failure},
+    error::AppError,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -54,6 +57,11 @@ struct Metadata {
 #[derive(Deserialize, Serialize)]
 struct Cooldown {
     blocked_until: i64,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ProbeAttempt {
+    attempted_at: i64,
 }
 
 pub struct CompanyLogoService {
@@ -118,7 +126,7 @@ impl CompanyLogoService {
         }
         let mut blocked_until = None;
         let downloaded = match self.download(&symbol, &mut blocked_until).await {
-            Ok(image) => image,
+            Ok((image, _)) => image,
             Err(error) => {
                 tracing::debug!(%symbol, %error, "company logo unavailable");
                 None
@@ -144,6 +152,49 @@ impl CompanyLogoService {
         .await?;
         self.prune().await?;
         Ok(image)
+    }
+
+    /// Always checks the live PNG endpoint, never reports a cached/stale logo as network success.
+    /// Shares the production lock and persisted Retry-After gate; does not overwrite cached PNGs.
+    pub async fn probe(&self, symbol: &str) -> Result<String, AppError> {
+        let symbol = normalize_symbol(symbol)
+            .ok_or_else(|| AppError::InvalidRequest("invalid logo symbol".into()))?;
+        let _guard = self.requests.lock().await;
+        fs::create_dir_all(&self.cache_dir).await?;
+        let now = Utc::now().timestamp();
+        let cooldown_path = self.cache_dir.join("cooldown.json");
+        if let Some(state) = read_json::<Cooldown>(&cooldown_path).await?
+            && state.blocked_until > now
+        {
+            return Err(AppError::QuotaExceeded {
+                retry_after_seconds: state.blocked_until - now,
+            });
+        }
+        let probe_path = self.cache_dir.join("probe.json");
+        if let Some(state) = read_json::<ProbeAttempt>(&probe_path).await?
+            && state.attempted_at.saturating_add(60) > now
+        {
+            return Err(AppError::QuotaExceeded {
+                retry_after_seconds: state
+                    .attempted_at
+                    .saturating_add(60)
+                    .saturating_sub(now)
+                    .clamp(1, 86400),
+            });
+        }
+        write_json(&probe_path, &ProbeAttempt { attempted_at: now }).await?;
+        let mut blocked_until = None;
+        let result = self.download(&symbol, &mut blocked_until).await;
+        if let Some(blocked_until) = blocked_until {
+            write_json(&cooldown_path, &Cooldown { blocked_until }).await?;
+        }
+        let (image, evidence) = result?;
+        if image.is_none() {
+            return Err(AppError::Provider(format!(
+                "earnings logo unavailable; symbol={symbol}; {evidence}"
+            )));
+        }
+        Ok(format!("symbol={symbol}; live_request=true; {evidence}"))
     }
 
     async fn prune(&self) -> io::Result<()> {
@@ -185,14 +236,25 @@ impl CompanyLogoService {
         &self,
         symbol: &str,
         blocked_until: &mut Option<i64>,
-    ) -> Result<Option<Vec<u8>>, AppError> {
+    ) -> Result<(Option<Vec<u8>>, String), AppError> {
         let mut response = self
             .http
             .get(format!("{}/{symbol}.png", self.base.trim_end_matches('/')))
             .header("Accept", "image/png")
             .timeout(Duration::from_secs(10))
             .send()
-            .await?;
+            .await
+            .map_err(|error| {
+                AppError::Provider(format!(
+                    "earnings logo; symbol={symbol}; HTTP=not_received; network={}",
+                    network_failure(&error)
+                ))
+            })?;
+        let mut evidence = format!(
+            "HTTP={}; content-type={}",
+            response.status().as_u16(),
+            content_kind(response.headers())
+        );
         if matches!(response.status().as_u16(), 403 | 429) {
             let delay = response
                 .headers()
@@ -208,35 +270,47 @@ impl CompanyLogoService {
                 .unwrap_or(300)
                 .clamp(60, 86400);
             *blocked_until = Some(Utc::now().timestamp() + delay as i64);
+            evidence.push_str(&format!("; retry_after_seconds={delay}"));
         }
-        if !response.status().is_success()
-            || response
-                .content_length()
-                .is_some_and(|n| n > MAX_LOGO_BYTES as u64)
-            || !response
-                .headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .is_some_and(|v| {
-                    v.split(';')
-                        .next()
-                        .unwrap_or("")
-                        .trim()
-                        .eq_ignore_ascii_case("image/png")
-                })
+        if !response.status().is_success() {
+            return Ok((None, format!("{evidence}; PNG=unavailable")));
+        }
+        if response
+            .content_length()
+            .is_some_and(|n| n > MAX_LOGO_BYTES as u64)
         {
-            return Ok(None);
+            return Ok((None, format!("{evidence}; PNG=too_large")));
+        }
+        if content_kind(response.headers()) != "image/png" {
+            return Ok((None, format!("{evidence}; PNG=content_type_mismatch")));
         }
         let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await? {
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            AppError::Provider(format!(
+                "earnings logo; {evidence}; response_body={}",
+                network_failure(&error)
+            ))
+        })? {
             if bytes.len() + chunk.len() > MAX_LOGO_BYTES {
-                return Ok(None);
+                return Ok((None, format!("{evidence}; PNG=too_large")));
             }
             bytes.extend_from_slice(&chunk);
         }
         // Decorative images do not gate or change the calendar's health/status.
         tokio::time::sleep(Duration::from_millis(100)).await;
-        Ok(valid_png(&bytes).then_some(bytes))
+        if !valid_png(&bytes) {
+            return Ok((
+                None,
+                format!("{evidence}; PNG=invalid; bytes={}", bytes.len()),
+            ));
+        }
+        let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        evidence.push_str(&format!(
+            "; PNG=valid; bytes={}; dimensions={width}x{height}",
+            bytes.len()
+        ));
+        Ok((Some(bytes), evidence))
     }
 }
 

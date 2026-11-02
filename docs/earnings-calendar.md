@@ -81,8 +81,23 @@ GET /api/v1/earnings?date=2026-11-02&refresh=true
 
 数据库升级：后端启动执行 `023_earnings_calendar.sql`（Logo 文件缓存不新增数据库迁移）；Android Room 9 → 10 只新增独立财报快照表，保留宏观事件、关注和分析。发布/部署仍遵循项目原有流程；本功能不自动部署或改动本机私人配置。
 
+## Telegram 财报 API 诊断
+
+管理员私聊发送 `/test_earnings_api [YYYY-MM-DD] [股票代码]`，默认纽约今天与 `AAPL`，通过按钮分别测试 Nasdaq 财报、TradingView 财报和公司 Logo。也可以从原 `/test_calendar_api` 菜单进入默认财报测试；新命令已加入机器人命令菜单与 `/help`。
+
+- 日期支持纽约今天前 120 天至后 60 天，股票代码只接受经过校验的代码，不接受 URL 或路径。TradingView 仅测试今天及未来的下一期快照，历史日期不会发起请求。
+- 使用运行中的同一个 `EarningsService` / `CompanyLogoService`，因此代理路由、请求串行化及 403/429 冷却与生产请求一致，不额外创建能绕过冷却的诊断客户端。Nasdaq/TradingView 同源同日期测试至少间隔 60 秒；Logo 测试全局至少间隔 60 秒，间隔记录在缓存目录 `probe.json`，重启仍保留。
+- 每次独立请求所选上游，不使用日历缓存、磁盘旧 Logo 或其他源的成功结果掩盖失败；不写财报快照、不覆盖缓存 PNG，也不重置后台健康计数。仅更新必要的限流/诊断间隔状态。
+- 回复显示纽约请求日期、直连/代理、HTTP 状态、响应格式、`rCode`、`data`/`rows` 类型和数量、规范化 `asOf`、`totalCount` 等白名单证据。Logo 显示 HTTP、MIME、PNG 校验、字节数与尺寸。JSON 上限 2 MiB，PNG 上限仍为 256 KiB；单次上游请求最长 10 秒。
+- 有效空数组或合法 `rows:null` 可以显示 `validated_rows=0`；`data:null`、字段缺失、错日期、HTML 和截断仍判失败，不推断为空日。日期数据缺失也不等于全源断网，需结合请求日期和上游覆盖范围判断。
+- 后台健康错误同样附带请求日期与响应结构。连续失败次数按实际日期请求累计，而不是按小时；本次未改变告警阈值或把结构异常降格为成功。
+- 测试只对白名单管理员的本人私聊开放，先确认 Telegram 回调再等待上游，结果编辑原消息；不回显原始响应正文、上游任意消息、请求 URL、代理凭据或服务器真实配置。
+
+本功能仅需更新后端，不需要更新 APP；未改动配置模板或新增数据库迁移。
+
 ## 验证
 
+- `cd backend && cargo test alert::bot::earnings_tests --lib`：机器人入口/菜单、管理员与回调校验、分源请求、缓存与健康隔离、HTTP/结构错误证据、限流复用、响应体大小限制及 Logo 实时校验；测试使用本地模拟服务，不依赖公开上游。
 - `cd backend && cargo test`：共享样例、十进制精度、空日历、来源故障、缓存保护、请求合并/冷却、已披露与历史记录隔离、API 鉴权与独立响应模型。`cargo test --test earnings_logos` 还验证指定目录自动创建与独立 PNG 保存、服务重建后复用图片/失败缓存/冷却、过期刷新与旧图兜底、文件损坏/缺失恢复、非法路径拦截及 128 项 LRU 文件淘汰。
 - `cd android && ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest`：两源解析、夏令时 23/25 小时日界、故障与限流、模式/地址隔离、迟到结果丢弃、筛选与构建；`MonthCalendarTest` 覆盖跨月/跨年/闰年网格、时区分格、可见类型请求隔离、选中日期优先、旧月份结果隔离与认证失败限流。
 - `MonthCalendarUiTest`（包 `com.macroresearch.ui.calendar`）验证月格类型筛选、日期与月份选择、经济事件详情跳转及财报错误/时段筛选；需连接设备后运行仪器测试，构建成功不等同于已在设备执行。

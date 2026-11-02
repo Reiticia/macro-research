@@ -15,6 +15,10 @@ use std::{
 };
 use tokio::{sync::Mutex, time::Instant};
 
+mod diagnostics;
+pub(crate) use diagnostics::{content_kind, network_failure};
+use diagnostics::{response_shape, with_evidence};
+
 pub const NASDAQ_URL: &str = "https://api.nasdaq.com/api/calendar/earnings";
 pub const TRADINGVIEW_URL: &str = "https://scanner.tradingview.com/america/scan";
 pub const TV_COLUMNS: &[&str] = &[
@@ -66,6 +70,16 @@ pub struct TradingViewForecast {
     /// Quote currency is NOT proof of the currency of financial statements.
     pub quote_currency: Option<String>,
     pub date_conflict: bool,
+}
+
+pub fn validate_date(date: NaiveDate) -> Result<(), AppError> {
+    let today = Utc::now().with_timezone(&New_York).date_naive();
+    if date < today - Duration::days(120) || date > today + Duration::days(60) {
+        return Err(AppError::InvalidRequest(
+            "earnings date must be within the last 120 or next 60 days".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn provider(message: &str) -> AppError {
@@ -234,9 +248,16 @@ fn ttl(date: NaiveDate, today: NaiveDate) -> Duration {
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum EarningsSource {
+    Nasdaq,
+    TradingView,
+}
+
 #[derive(Default)]
 struct Requests {
     attempted: HashMap<NaiveDate, Instant>,
+    probes: HashMap<(EarningsSource, NaiveDate), Instant>,
     nasdaq_next: Option<Instant>,
     tradingview_next: Option<Instant>,
 }
@@ -287,20 +308,70 @@ impl EarningsService {
         raw.map(|raw| serde_json::from_str(&raw).map_err(|e| AppError::Internal(e.to_string())))
             .transpose()
     }
+    /// A real single-source request, with no daily cache read/write or fallback. Shares the
+    /// production provider gates; a successful probe never resets background health counters.
+    pub async fn probe(&self, source: EarningsSource, date: NaiveDate) -> Result<String, AppError> {
+        validate_date(date)?;
+        if source == EarningsSource::TradingView
+            && date < Utc::now().with_timezone(&New_York).date_naive()
+        {
+            return Err(AppError::InvalidRequest(
+                "TradingView earnings scans next-period snapshots, not historical actuals; HTTP=not_requested".into(),
+            ));
+        }
+        let mut requests = self.requests.lock().await;
+        requests
+            .probes
+            .retain(|_, at| at.elapsed() < StdDuration::from_secs(60));
+        if let Some(at) = requests.probes.get(&(source, date)) {
+            return Err(AppError::QuotaExceeded {
+                retry_after_seconds: (60 - at.elapsed().as_secs() as i64).max(1),
+            });
+        }
+        requests.probes.insert((source, date), Instant::now());
+        let (events, evidence) = match source {
+            EarningsSource::Nasdaq => self.nasdaq(date, &mut requests).await?,
+            EarningsSource::TradingView => self.tradingview(date, None, &mut requests).await?,
+        };
+        Ok(format!("{evidence}; validated_rows={}", events.len()))
+    }
+
     async fn request(
         &self,
         builder: reqwest::RequestBuilder,
         next: &mut Option<Instant>,
-    ) -> Result<Value, AppError> {
+        date: NaiveDate,
+    ) -> Result<(Value, String), AppError> {
         if next.is_some_and(|at| at > Instant::now() + StdDuration::from_secs(2)) {
-            return Err(provider("provider cooldown"));
+            let remaining = next
+                .unwrap()
+                .saturating_duration_since(Instant::now())
+                .as_secs();
+            return Err(provider(&format!(
+                "provider cooldown; date={date}; retry_after_seconds={remaining}; HTTP=not_requested"
+            )));
         }
         if let Some(at) = *next {
             tokio::time::sleep_until(at).await;
         }
         *next = Some(Instant::now() + StdDuration::from_secs(1));
-        let response = builder.send().await?;
-        if matches!(response.status().as_u16(), 403 | 429) {
+        let mut response = builder
+            .timeout(StdDuration::from_secs(10))
+            .send()
+            .await
+            .map_err(|error| {
+                provider(&format!(
+                    "date={date}; HTTP=not_received; network={}",
+                    network_failure(&error)
+                ))
+            })?;
+        let status = response.status();
+        let mut evidence = format!(
+            "date={date} (America/New_York); HTTP={}; content-type={}",
+            status.as_u16(),
+            content_kind(response.headers())
+        );
+        if matches!(status.as_u16(), 403 | 429) {
             let delay = response
                 .headers()
                 .get("retry-after")
@@ -315,15 +386,40 @@ impl EarningsService {
                 .unwrap_or(300)
                 .clamp(60, 86400);
             *next = Some(Instant::now() + StdDuration::from_secs(delay));
+            evidence.push_str(&format!("; retry_after_seconds={delay}"));
         }
-        let root: Value = response.error_for_status()?.json().await?;
-        Ok(root)
+        if !status.is_success() {
+            return Err(provider(&evidence));
+        }
+        const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+        if response
+            .content_length()
+            .is_some_and(|n| n > MAX_RESPONSE_BYTES as u64)
+        {
+            return Err(provider(&format!("{evidence}; response=too_large")));
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            provider(&format!(
+                "{evidence}; response_body={}",
+                network_failure(&error)
+            ))
+        })? {
+            if bytes.len() + chunk.len() > MAX_RESPONSE_BYTES {
+                return Err(provider(&format!("{evidence}; response=too_large")));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let root: Value = serde_json::from_slice(&bytes)
+            .map_err(|_| provider(&format!("{evidence}; JSON=invalid")))?;
+        evidence.push_str(&format!("; {}", response_shape(&root)));
+        Ok((root, evidence))
     }
     async fn nasdaq(
         &self,
         date: NaiveDate,
         requests: &mut Requests,
-    ) -> Result<Vec<EarningsEvent>, AppError> {
+    ) -> Result<(Vec<EarningsEvent>, String), AppError> {
         let request = self
             .nasdaq
             .get(&self.nasdaq_url)
@@ -331,21 +427,25 @@ impl EarningsService {
             .header("Accept", "application/json, text/plain, */*")
             .header("Origin", "https://www.nasdaq.com")
             .header("Referer", "https://www.nasdaq.com/");
-        parse_nasdaq(
-            &self.request(request, &mut requests.nasdaq_next).await?,
-            date,
-        )
+        let (root, evidence) = self
+            .request(request, &mut requests.nasdaq_next, date)
+            .await?;
+        let events = parse_nasdaq(&root, date).map_err(|error| with_evidence(error, &evidence))?;
+        Ok((events, evidence))
     }
     async fn tradingview(
         &self,
         date: NaiveDate,
         symbols: Option<Vec<String>>,
         requests: &mut Requests,
-    ) -> Result<Vec<EarningsEvent>, AppError> {
+    ) -> Result<(Vec<EarningsEvent>, String), AppError> {
         let date_scan = symbols.is_none();
         let filters = if let Some(symbols) = symbols {
             if symbols.is_empty() {
-                return Ok(vec![]);
+                return Ok((
+                    vec![],
+                    format!("date={date}; HTTP=not_requested; symbols=empty"),
+                ));
             }
             vec![
                 json!({"left":"is_primary", "operation":"equal", "right":true}),
@@ -373,20 +473,21 @@ impl EarningsService {
             .post(&self.tradingview_url)
             .header("Origin", "https://www.tradingview.com")
             .json(&json!({"filter":filters,"columns":TV_COLUMNS,"range":[0,2000]}));
-        let events = parse_tradingview(
-            &self
-                .request(request, &mut requests.tradingview_next)
-                .await?,
-            date,
-        )?;
+        let (root, evidence) = self
+            .request(request, &mut requests.tradingview_next, date)
+            .await?;
+        let events =
+            parse_tradingview(&root, date).map_err(|error| with_evidence(error, &evidence))?;
         if date_scan
             && events
                 .iter()
                 .any(|event| event.trading_view.as_ref().and_then(|tv| tv.next_date) != Some(date))
         {
-            return Err(provider("TradingView fallback date mismatch"));
+            return Err(provider(&format!(
+                "TradingView fallback date mismatch; {evidence}"
+            )));
         }
-        Ok(events)
+        Ok((events, evidence))
     }
     pub async fn calendar(
         &self,
@@ -395,11 +496,7 @@ impl EarningsService {
     ) -> Result<EarningsCalendar, AppError> {
         let now = Utc::now();
         let today = now.with_timezone(&New_York).date_naive();
-        if date < today - Duration::days(120) || date > today + Duration::days(60) {
-            return Err(AppError::InvalidRequest(
-                "earnings date must be within the last 120 or next 60 days".into(),
-            ));
-        }
+        validate_date(date)?;
         // Serializes cache fill and provider pacing across HTTP callers and the scheduler.
         let mut requests = self.requests.lock().await;
         let cached = self.cached(date).await?;
@@ -428,7 +525,10 @@ impl EarningsService {
             .attempted
             .retain(|_, at| at.elapsed() < StdDuration::from_secs(86400));
         requests.attempted.insert(date, Instant::now());
-        let primary = self.nasdaq(date, &mut requests).await;
+        let primary = self
+            .nasdaq(date, &mut requests)
+            .await
+            .map(|(events, _)| events);
         let mut warnings = vec![];
         self.record("earnings_nasdaq", &primary).await;
         let symbols: Option<Vec<String>> = primary.as_ref().ok().map(|events| {
@@ -442,7 +542,9 @@ impl EarningsService {
         let fetch_secondary =
             date >= today && symbols.as_ref().is_none_or(|symbols| !symbols.is_empty());
         let secondary = if fetch_secondary {
-            self.tradingview(date, symbols, &mut requests).await
+            self.tradingview(date, symbols, &mut requests)
+                .await
+                .map(|(events, _)| events)
         } else {
             Ok(vec![])
         };

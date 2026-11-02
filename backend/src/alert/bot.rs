@@ -29,6 +29,7 @@ pub struct BotState {
     pub telegram: Arc<TelegramClient>,
     pub chat_ids: Vec<i64>,
     pub health: Arc<HealthRegistry>,
+    pub earnings: Arc<crate::earnings::EarningsService>,
     /// Model-call audit log, backing the `/usage` command.
     pub llm_usage: Option<Arc<LlmUsageRepository>>,
     pub pool: SqlitePool,
@@ -95,7 +96,9 @@ async fn handle_update(state: &BotState, update: &Value) -> Result<(), crate::er
 }
 
 async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate::error::AppError> {
-    if super::key_commands::callback(state, callback).await? {
+    if super::key_commands::callback(state, callback).await?
+        || super::earnings_commands::callback(state, callback).await?
+    {
         return Ok(());
     }
     let chat_id = callback
@@ -290,7 +293,9 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
 }
 
 async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::error::AppError> {
-    if super::key_commands::message(state, message).await? {
+    if super::key_commands::message(state, message).await?
+        || super::earnings_commands::message(state, message).await?
+    {
         return Ok(());
     }
     let chat_id = message
@@ -329,11 +334,13 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
             return Ok(());
         }
         "/test_calendar_api" => {
-            state.telegram.send_message(chat_id, "请选择要测试的日历源：", Some(vec![
+            let mut buttons = vec![
                 vec![InlineButton { text: "BiQuote（备用源）".into(), callback_data: "apitest:biquote_calendar".into() }],
-                vec![InlineButton { text: "TradingView（主源）".into(), callback_data: "apitest:tradingview".into() }, InlineButton { text: "Forex Factory".into(), callback_data: "apitest:forexfactory".into() }],
+                vec![InlineButton { text: "TradingView（宏观主源）".into(), callback_data: "apitest:tradingview".into() }, InlineButton { text: "Forex Factory".into(), callback_data: "apitest:forexfactory".into() }],
                 vec![InlineButton { text: "Trading Economics 页面".into(), callback_data: "apitest:tradingeconomics".into() }, InlineButton { text: "Trading Economics API".into(), callback_data: "apitest:te_api".into() }],
-            ])).await?;
+            ];
+            buttons.extend(super::earnings_commands::buttons(chrono::Utc::now().with_timezone(&chrono_tz::America::New_York).date_naive(), "AAPL"));
+            state.telegram.send_message(chat_id, "请选择宏观/财报日历源。财报默认纽约今天、AAPL；用 /test_earnings_api 日期 股票代码 可指定诊断目标。", Some(buttons)).await?;
             return Ok(());
         }
         "/test_ai" => {
@@ -359,7 +366,7 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
             return Ok(());
         }
         "/help" | "/start" => {
-            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/events [关键词] — 查询事件 ID、名称和公布时间\n/test_fcm [事件ID] — 验证 FCM；指定 ID 向关注者发送测试通知\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试日历源连通性\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
+            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/events [关键词] — 查询事件 ID、名称和公布时间\n/test_fcm [事件ID] — 验证 FCM；指定 ID 向关注者发送测试通知\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试宏观/财报日历源\n/test_earnings_api [日期] [股票代码] — 独立测试财报源及实时 Logo\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
         }
         _ => return Ok(()),
     };
@@ -732,6 +739,10 @@ mod fcm_tests;
 #[cfg(test)]
 #[path = "bot_event_tests.rs"]
 mod event_tests;
+
+#[cfg(test)]
+#[path = "bot_earnings_tests.rs"]
+mod earnings_tests;
 
 async fn read_offset(pool: &SqlitePool) -> Result<i64, crate::error::AppError> {
     Ok(

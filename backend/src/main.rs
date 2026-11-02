@@ -593,6 +593,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 telegram,
                 chat_ids: config.telegram.admin_chat_ids(),
                 health,
+                earnings: state.earnings_service.clone(),
                 llm_usage,
                 pool: pool.clone(),
                 config: config.clone(),

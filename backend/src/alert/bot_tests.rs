@@ -8,6 +8,11 @@ pub(super) async fn fixture(mock: &TelegramMock) -> BotState {
         telegram: mock.client.clone(),
         chat_ids: vec![42],
         health: Arc::new(HealthRegistry::new(pool.clone(), None, 3, 3600)),
+        earnings: Arc::new(crate::earnings::EarningsService::new(
+            pool.clone(),
+            reqwest::Client::new(),
+            reqwest::Client::new(),
+        )),
         llm_usage: None,
         pool,
         config: AppConfig::from_path("config.example.toml").unwrap(),

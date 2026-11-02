@@ -1,4 +1,5 @@
 pub mod bot;
+mod earnings_commands;
 mod event_commands;
 mod key_commands;
 pub mod preferences;

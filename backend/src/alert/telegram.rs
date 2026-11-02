@@ -114,7 +114,8 @@ impl TelegramClient {
             {"command": "test_fcm", "description": "验证 FCM 或向事件关注者发送测试通知"},
             {"command": "test_ai", "description": "测试 AI 接口可用性"},
             {"command": "test_market_api", "description": "测试行情 API 连通性"},
-            {"command": "test_calendar_api", "description": "测试日历源连通性"},
+            {"command": "test_calendar_api", "description": "测试宏观/财报日历源连通性"},
+            {"command": "test_earnings_api", "description": "按纽约日期测试 Nasdaq、TradingView 财报及 Logo"},
             {"command": "translation_failed", "description": "查询翻译失败事件名"},
             {"command": "help", "description": "查看管理员帮助"},
             {"command": "start", "description": "打开管理员菜单"}
