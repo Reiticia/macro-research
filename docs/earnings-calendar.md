@@ -61,7 +61,7 @@ GET /api/v1/earnings?date=2026-11-02&refresh=true
 
 公司图片接口为 `GET /api/v1/earnings/logo/{symbol}`，使用相同 Bearer / 设备绑定鉴权；成功返回 `image/png` 与 `X-Content-Type-Options: nosniff`，图片不可用返回 404，非法代码返回 400。该接口只接受股票代码，不接受来源 URL；不经过财报同步锁。
 
-`date` 为 `YYYY-MM-DD`，省略时使用美东今天。查询受现有鉴权保护、响应 `Cache-Control: no-store`；上游免鉴权不改变后端访问密钥要求。`/api/v1/meta` 的 capabilities 新增 `earnings` / `earningsLogos`，API 协议版本仍为 1。
+`date` 为 `YYYY-MM-DD`，省略时使用美东今天。查询受现有鉴权保护、响应 `Cache-Control: no-store`；上游免鉴权不改变后端访问密钥要求。`/api/v1/meta` 的 capabilities 包含 `earnings` / `earningsLogos` / `earningsMarket`，API 协议版本仍为 1。
 
 响应为单日对象（camelCase）：
 
@@ -79,7 +79,50 @@ GET /api/v1/earnings?date=2026-11-02&refresh=true
 
 服务启动后独立后台任务每小时扫描今天至未来 60 天及过去 7 天，仅刷新到期日期，不阻塞 HTTP 启动。健康键为 `earnings_nasdaq` / `earnings_tradingview`，沿用现有来源健康与告警机制。
 
-数据库升级：后端启动执行 `023_earnings_calendar.sql`（Logo 文件缓存不新增数据库迁移）；Android Room 9 → 10 只新增独立财报快照表，保留宏观事件、关注和分析。发布/部署仍遵循项目原有流程；本功能不自动部署或改动本机私人配置。
+数据库升级：后端启动执行 `023_earnings_calendar.sql` 与 `024_earnings_stock_collection.sql`（Logo 仍为文件缓存，不存数据库）；Android Room 9 → 10 只新增独立财报快照表，保留宏观事件、关注和分析。发布/部署仍遵循项目原有流程；本功能不自动部署或改动本机私人配置。
+
+## 财报公布后的个股行情采集
+
+后端增加独立财报监测与行情任务，不需要 APP 发起请求才运行，并提供对应股票的只读分钟行情查询接口。
+
+### 触发和时刻口径
+
+- 约每 65 秒强制刷新纽约今天及昨天的财报，复用原有单日请求合并、至少 60 秒间隔及 403/429 冷却，不受日历一小时缓存新鲜度限制。
+- 只接受校验通过的 Nasdaq 主源，同一纽约日期、准确股票代码的实际 EPS 从未公布变为已公布（包括实际值为 0）时创建任务。需要此前 5 分钟内见过该条未公布记录；日历写入、监测状态和任务创建同事务提交。历史记录、TradingView 下一期快照、旧缓存及机器人诊断均不能触发任务。
+- `detectedAt` 是首次读到该次 EPS 变化的时间（在可选 TradingView 补充工作之前记录），不是公司确认的精确发布时间。公开接口可能延迟更新，因此是近分钟级检测，并不保证从公司发布瞬间开始完整捕获。
+- 初次启动就已公布的记录标为 `already_reported`，长时间断线后才发现实际值标为 `missed_after_gap`，明确的财季冲突标为 `quarter_changed`，不会把旧财报当成新发布而启动当前价格采集。
+
+### 60 分钟采样与恢复
+
+- 每次触发固定采集 `detectedAt` 起 **60 分钟**；采样周期沿用 `[scheduler].market_poll_seconds`（默认 15 秒，最低 5 秒），按来源报价时间聚合为 UTC 分钟 OHLC。该 OHLC 是采样价格的开/高/低/收，不承诺等同交易所逐笔成交生成的完整分钟 K 线。
+- 从 Yahoo 获取准确股票代码的 `EQUITY` 报价，使用 `includePrePost=true` 请求盘前/盘后数据。优先选择最新有效报价；只能取得分钟 K 线时，仅使用已收盘分钟的收盘价并以分钟结束时间记录，`timestampBasis` 区分 `provider_quote`、`minute_bar_close` 与混合采样 `mixed`。
+- 已核查 BiQuote 的股票目录、报价和 OHLC：本次盘后 AAPL/NVDA 同名标的仅有陈旧数据，实时的 `NVDAUSDT` 不能直接替代正股，暂不切换主源。特别是报价 404 也可能表示数据过期，不能作为“标的不存在”的唯一依据；详见 [BiQuote 个股与盘前盘后核查](biquote-stock-data-source.md)。
+- 不猜股份类别别名；例如来源若把请求的 `BRK.B` 返回成 `BRK-B`，会记录缺失，不把另一代码的价格混入。报价币种独立保存，不据此推断财报财务币种。
+- 旧于 90 秒、未来时间、触发前、窗口结束后、股票代码/币种冲突、非正数或非有限数的报价都不写入；闭市或上游故障留下真实缺口，不用昨日收盘价或当前价格伪造历史点。
+- 监测状态、起止时间及分钟数据保存在独立 SQLite 表，重启后续采原窗口剩余时间，不重置或延长 60 分钟；EPS 修订或重复刷新也不重启任务。过期任务不再请求新价格，`completed` 只表示窗口已结束，不代表数据完整。
+- 个股与宏观 Yahoo 请求复用同一实例的节流与 403/429 冷却；每轮最多处理 32 个任务，按上次尝试时间公平轮换，同一股票在一轮内只请求一次。大量同时公布或上游限流时采样可能延迟，覆盖情况如实返回。单只股票取价失败不阻止其他股票采集，也不直接把整个行情源判定为断网。
+- 财报行情独立于宏观事件的标识、分析、关注及推送，不改变已有事件流程；相关记录随数据库备份，保留 120 个纽约日期。新增迁移 `024_earnings_stock_collection.sql`，不新增配置字段。
+
+### 读取行情
+
+```http
+GET /api/v1/earnings/market/2026-11-02/AAPL
+Authorization: Bearer <existing backend key>
+```
+
+受现有鉴权保护，仅查询已采集数据，**GET 不会创建采集任务或触发抓价**。`date` 为财报的纽约日期，股票代码必须经过校验，非法输入返回 400。响应为：
+
+```text
+{ date, symbol, timeBasis: "first_detected_actual_eps", releaseTimeExact: false,
+  observationStatus,
+  tracking: { id, companyName, fiscalQuarterEnding, actualEps, detectedAt, endsAt,
+              status, currency, lastAttemptAt, lastSuccessAt, lastError } | null,
+  snapshots: [{ timestamp, firstQuoteAt, lastQuoteAt, price, open, high, low, close,
+                provider: "yahoo", timestampBasis }],
+  coverage: { minuteCount, expectedMinuteCount, missingMinuteCount, windowEnded } }
+```
+
+`observationStatus` 区分 `not_observed`、`watching`、`tracking`、`already_reported`、`missed_after_gap`、`quarter_changed`。分钟桶可能从触发所在分钟开始，但 `firstQuoteAt` / `lastQuoteAt` 保留桶内真实采样时间，桶内不混入触发前报价。当前没有完整的公布前股价基线，因此不据此伪造相对公司公布时刻的涨跌或利好/利空结论。
 
 ## Telegram 财报 API 诊断
 
@@ -93,9 +136,12 @@ GET /api/v1/earnings?date=2026-11-02&refresh=true
 - 后台健康错误同样附带请求日期与响应结构。连续失败次数按实际日期请求累计，而不是按小时；本次未改变告警阈值或把结构异常降格为成功。
 - 测试只对白名单管理员的本人私聊开放，先确认 Telegram 回调再等待上游，结果编辑原消息；不回显原始响应正文、上游任意消息、请求 URL、代理凭据或服务器真实配置。
 
-本功能仅需更新后端，不需要更新 APP；未改动配置模板或新增数据库迁移。
+Telegram 诊断本身仅需更新后端，不需要更新 APP；不改配置模板，不单独增加数据库迁移。上文个股行情采集另需迁移 024。
 
 ## 验证
+
+- `cd backend && cargo test earnings_market::tests --lib`：触发去重、首见已公布/历史/备用源隔离、检测间断与财季冲突、事务回滚、60 分钟边界、重启续采、分钟 OHLC、无效报价与真实缺口、单股故障隔离、采样公平性、币种冲突及保留期。
+- `cd backend && cargo test market::yahoo::stock_tests --lib`：准确个股识别、盘前/盘后报价、分钟结束时间、未收盘/陈旧/未来报价过滤及与宏观行情共用限流。集成测试另验证真实日历更新触发任务和新接口鉴权/只读语义。
 
 - `cd backend && cargo test alert::bot::earnings_tests --lib`：机器人入口/菜单、管理员与回调校验、分源请求、缓存与健康隔离、HTTP/结构错误证据、限流复用、响应体大小限制及 Logo 实时校验；测试使用本地模拟服务，不依赖公开上游。
 - `cd backend && cargo test`：共享样例、十进制精度、空日历、来源故障、缓存保护、请求合并/冷却、已披露与历史记录隔离、API 鉴权与独立响应模型。`cargo test --test earnings_logos` 还验证指定目录自动创建与独立 PNG 保存、服务重建后复用图片/失败缓存/冷却、过期刷新与旧图兜底、文件损坏/缺失恢复、非法路径拦截及 128 项 LRU 文件淘汰。

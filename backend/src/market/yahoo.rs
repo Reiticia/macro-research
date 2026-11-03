@@ -8,6 +8,7 @@ use tokio::{sync::Mutex, time::Instant};
 use crate::{
     error::AppError,
     market::MarketDataProvider,
+    market::{StockQuote, StockQuoteProvider, StockTimestampBasis},
     model::{Candle, Interval, LiveQuote, MarketSymbol, Quote},
 };
 
@@ -65,7 +66,14 @@ impl YahooProvider {
         symbol: MarketSymbol,
         parameters: &[(&str, String)],
     ) -> Result<YahooChartResult, AppError> {
-        let ticker = Self::ticker(symbol)?;
+        self.chart_ticker(Self::ticker(symbol)?, parameters).await
+    }
+
+    async fn chart_ticker(
+        &self,
+        ticker: &str,
+        parameters: &[(&str, String)],
+    ) -> Result<YahooChartResult, AppError> {
         let url = format!("{}/{}", self.base_url, ticker);
         let mut gate = self.request_gate.lock().await;
         let now = Instant::now();
@@ -84,7 +92,10 @@ impl YahooProvider {
         let response = self.client.get(url).query(parameters).send().await;
         gate.next_request = Instant::now() + MIN_REQUEST_INTERVAL;
         let response = response?;
-        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+        if matches!(
+            response.status(),
+            StatusCode::TOO_MANY_REQUESTS | StatusCode::FORBIDDEN
+        ) {
             let retry_after = response
                 .headers()
                 .get(reqwest::header::RETRY_AFTER)
@@ -250,6 +261,102 @@ impl MarketDataProvider for YahooProvider {
     }
 }
 
+#[async_trait]
+impl StockQuoteProvider for YahooProvider {
+    async fn stock_quote(&self, symbol: &str) -> Result<StockQuote, AppError> {
+        let symbol = crate::earnings_logo::normalize_symbol(symbol)
+            .ok_or_else(|| AppError::InvalidRequest("invalid stock symbol".into()))?;
+        let result = self
+            .chart_ticker(
+                &symbol,
+                &[
+                    ("interval", "1m".into()),
+                    ("range", "1d".into()),
+                    ("includePrePost", "true".into()),
+                ],
+            )
+            .await?;
+        stock_quote_from_chart(result, &symbol, Utc::now())
+    }
+}
+
+fn stock_quote_from_chart(
+    result: YahooChartResult,
+    symbol: &str,
+    now: DateTime<Utc>,
+) -> Result<StockQuote, AppError> {
+    if !result
+        .meta
+        .symbol
+        .as_deref()
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(symbol))
+        || !result
+            .meta
+            .instrument_type
+            .as_deref()
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("EQUITY"))
+    {
+        return Err(AppError::Provider(
+            "stock_symbol_or_instrument_mismatch".into(),
+        ));
+    }
+    let mut candidates = Vec::new();
+    for (time, price) in [
+        (
+            result.meta.regular_market_time,
+            result.meta.regular_market_price,
+        ),
+        (result.meta.pre_market_time, result.meta.pre_market_price),
+        (result.meta.post_market_time, result.meta.post_market_price),
+    ] {
+        if let (Some(time), Some(price)) = (time, price)
+            && let Some(time) = Utc.timestamp_opt(time, 0).single()
+        {
+            candidates.push((time, price, StockTimestampBasis::ProviderQuote));
+        }
+    }
+    if let Some(values) = result.indicators.quote.first() {
+        for (index, timestamp) in result.timestamp.unwrap_or_default().into_iter().enumerate() {
+            if let Some(time) = Utc
+                .timestamp_opt(timestamp, 0)
+                .single()
+                .and_then(|time| time.checked_add_signed(chrono::Duration::minutes(1)))
+                && let Some(close) = value_at(&values.close, index)
+            {
+                // Yahoo candle timestamps are OPEN times. Only use a closed bar's close, never
+                // relabel an unfinished candle or yesterday's regular-session price as live.
+                candidates.push((time, close, StockTimestampBasis::MinuteBarClose));
+            }
+        }
+    }
+    let (timestamp, price, timestamp_basis) = candidates
+        .into_iter()
+        .filter(|(time, price, _)| {
+            *time <= now
+                && now.signed_duration_since(*time).num_seconds() <= 90
+                && price.is_finite()
+                && *price > 0.0
+        })
+        .max_by_key(|(time, _, basis)| (*time, matches!(basis, StockTimestampBasis::ProviderQuote)))
+        .ok_or_else(|| AppError::Provider("stock_no_fresh_quote".into()))?;
+    let currency = result
+        .meta
+        .currency
+        .filter(|currency| currency.len() == 3 && currency.bytes().all(|c| c.is_ascii_alphabetic()))
+        .map(|currency| currency.to_ascii_uppercase());
+    Ok(StockQuote {
+        symbol: symbol.into(),
+        timestamp,
+        price,
+        currency,
+        timestamp_basis,
+    })
+}
+
+#[cfg(test)]
+#[path = "yahoo_stock_tests.rs"]
+mod stock_tests;
+
 fn value_at(values: &[Option<f64>], index: usize) -> Option<f64> {
     values.get(index).copied().flatten()
 }
@@ -282,6 +389,13 @@ struct YahooChartResult {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct YahooMeta {
+    symbol: Option<String>,
+    instrument_type: Option<String>,
+    currency: Option<String>,
+    pre_market_price: Option<f64>,
+    pre_market_time: Option<i64>,
+    post_market_price: Option<f64>,
+    post_market_time: Option<i64>,
     regular_market_price: Option<f64>,
     regular_market_time: Option<i64>,
     chart_previous_close: Option<f64>,

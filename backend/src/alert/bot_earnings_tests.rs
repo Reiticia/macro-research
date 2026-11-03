@@ -16,8 +16,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 
-#[path = "../../tests/support/logo_cache.rs"]
-mod logo_cache;
+use crate::alert::test_support::temporary as logo_cache;
 use logo_cache::CacheDir;
 const PNG: &[u8] = include_bytes!("../../../android/app/src/test/resources/earnings/logo.png");
 

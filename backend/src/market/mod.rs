@@ -3,6 +3,7 @@ mod biquote;
 mod cnbc;
 mod monitored;
 mod provider;
+mod stock;
 mod yahoo;
 
 pub use binance::BinanceProvider;
@@ -10,6 +11,7 @@ pub use biquote::BiquoteProvider;
 pub use cnbc::CnbcProvider;
 pub use monitored::MonitoredProvider;
 pub use provider::MarketDataProvider;
+pub use stock::{StockQuote, StockQuoteProvider, StockTimestampBasis};
 pub use yahoo::YahooProvider;
 
 use std::{

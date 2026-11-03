@@ -329,6 +329,77 @@ async fn earnings_route_is_authenticated_and_has_a_separate_wire_contract() {
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
 }
 
+#[tokio::test]
+async fn earnings_stock_timeline_is_authenticated_read_only_and_time_basis_is_explicit() {
+    let app = app().await;
+    let router = api::router(app.state);
+    let date = Utc::now()
+        .with_timezone(&chrono_tz::America::New_York)
+        .date_naive();
+    let uri = format!("/api/v1/earnings/market/{date}/AAPL");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request("GET", &uri, None))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let empty = router
+        .clone()
+        .oneshot(request("GET", &uri, Some("secret-token")))
+        .await
+        .unwrap();
+    assert_eq!(empty.status(), StatusCode::OK);
+    let empty: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(empty.into_body(), 16384)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(empty["tracking"].is_null());
+    assert_eq!(empty["observationStatus"], "not_observed");
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM earnings_stock_tracking")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0); // GET must never manufacture a collection.
+    let detected = Utc::now().timestamp() - 30;
+    sqlx::query("INSERT INTO earnings_stock_tracking(date,symbol,company_name,actual_eps,detected_at,ends_at) VALUES(?,'AAPL','Apple','1.2',?,?)")
+        .bind(date.to_string()).bind(detected).bind(detected+3600).execute(&app.pool).await.unwrap();
+    let reply = router
+        .clone()
+        .oneshot(request("GET", &uri, Some("secret-token")))
+        .await
+        .unwrap();
+    assert_eq!(reply.status(), StatusCode::OK);
+    let body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(reply.into_body(), 16384)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["releaseTimeExact"], false);
+    assert_eq!(body["timeBasis"], "first_detected_actual_eps");
+    assert_eq!(body["tracking"]["status"], "collecting");
+    assert_eq!(body["coverage"]["minuteCount"], 0);
+    for path in [
+        format!("/api/v1/earnings/market/{date}/AAPL%3Fkey%3Dx"),
+        "/api/v1/earnings/market/2000-01-01/AAPL".into(),
+    ] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request("GET", &path, Some("secret-token")))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+}
+
 fn request(method: &str, uri: &str, token: Option<&str>) -> Request<Body> {
     let mut builder = Request::builder().method(method).uri(uri);
     if let Some(token) = token {

@@ -8,6 +8,7 @@ pub mod calendar;
 pub mod config;
 pub mod earnings;
 pub mod earnings_logo;
+pub mod earnings_market;
 pub mod error;
 pub mod event_description;
 pub mod fcm;

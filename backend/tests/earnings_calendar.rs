@@ -97,6 +97,40 @@ fn service(server: &Server, pool: &sqlx::SqlitePool) -> EarningsService {
     )
 }
 
+#[tokio::test]
+async fn validated_primary_eps_transition_atomically_creates_the_stock_tracking_job() {
+    let (server, pool, _) = setup().await;
+    let date = Utc::now().with_timezone(&New_York).date_naive();
+    sqlx::query("INSERT INTO earnings_release_watch(date,symbol,fiscal_quarter_ending,last_seen_at,observation_status) VALUES(?,'AAPL','Sep/2026',?,'watching')")
+        .bind(date.to_string()).bind(Utc::now().timestamp()-65).execute(&pool).await.unwrap();
+    server.fixture.nasdaq.lock().await.1 = json!({"status":{"rCode":200},"data":{"asOf":date.format("%a, %b %-d, %Y").to_string(),"rows":[{"symbol":"AAPL","name":"Apple","time":"time-after-hours","fiscalQuarterEnding":"Sep/2026","eps":"$0"}]}});
+    let earnings = service(&server, &pool);
+    earnings.calendar(date, false).await.unwrap();
+    let response = earnings.stock_market(date, "AAPL").await.unwrap();
+    assert!(!response.release_time_exact);
+    let tracking = response.tracking.unwrap();
+    assert_eq!(tracking.actual_eps, "0");
+    assert_eq!(
+        tracking.ends_at - tracking.detected_at,
+        Duration::minutes(60)
+    );
+    assert_eq!(response.observation_status, "tracking");
+    assert!(response.snapshots.is_empty());
+    assert_eq!(server.fixture.nasdaq_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(server.fixture.tv_calls.load(Ordering::SeqCst), 0);
+    earnings.calendar(date, false).await.unwrap();
+    assert_eq!(
+        earnings
+            .stock_market(date, "AAPL")
+            .await
+            .unwrap()
+            .tracking
+            .unwrap()
+            .id,
+        tracking.id
+    );
+}
+
 #[test]
 fn shared_fixtures_preserve_precision_and_source_separation() {
     let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 2).unwrap();

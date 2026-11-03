@@ -332,12 +332,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| format!("invalid market symbol configuration: {error}"))?;
     let market_candidates = symbols.clone();
+    // Macro assets and company equities share Yahoo pacing and rate-limit cooldowns.
+    let yahoo_provider = Arc::new(YahooProvider::new(
+        client_for("yahoo"),
+        &config.market.yahoo_base_url,
+    ));
     let market_service = Arc::new(
         MarketService::new(
-            Arc::new(YahooProvider::new(
-                client_for("yahoo"),
-                &config.market.yahoo_base_url,
-            )),
+            yahoo_provider.clone(),
             Arc::new(BinanceProvider::new(
                 client_for("binance"),
                 &config.market.binance_base_url,
@@ -487,6 +489,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(market_event_analyzer::earnings::sync_loop(
         earnings_service.clone(),
     ));
+    tokio::spawn(market_event_analyzer::earnings::release_watch_loop(
+        earnings_service.clone(),
+    ));
+    let earnings_collector = Arc::new(
+        market_event_analyzer::earnings_market::EarningsMarketCollector::new(
+            pool.clone(),
+            yahoo_provider,
+        ),
+    );
+    tokio::spawn(earnings_collector.collect_loop(config.scheduler.market_poll_seconds));
     let (event_bus, _) = broadcast::channel(256);
     let state = AppState {
         config: Arc::new(config.clone()),

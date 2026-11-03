@@ -7,6 +7,9 @@ use tokio::{sync::Mutex, task::JoinHandle};
 
 use super::TelegramClient;
 
+#[path = "../../tests/support/logo_cache.rs"]
+pub(crate) mod temporary;
+
 pub struct TelegramMock {
     pub client: Arc<TelegramClient>,
     pub requests: Arc<Mutex<Vec<(String, Value)>>>,

@@ -28,6 +28,16 @@ pub async fn logo(
     ))
 }
 
+/// Read-only persistent company-price timeline; this endpoint never starts a new collection.
+pub async fn stock_market(
+    State(state): State<AppState>,
+    Path((date, symbol)): Path<(NaiveDate, String)>,
+) -> Result<Json<crate::earnings_market::EarningsStockResponse>, AppError> {
+    Ok(Json(
+        state.earnings_service.stock_market(date, &symbol).await?,
+    ))
+}
+
 #[derive(Deserialize)]
 pub struct EarningsQuery {
     date: Option<NaiveDate>,

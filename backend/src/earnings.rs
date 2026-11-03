@@ -529,6 +529,9 @@ impl EarningsService {
             .nasdaq(date, &mut requests)
             .await
             .map(|(events, _)| events);
+        // Keep the detection origin before optional TradingView work/health notifications.
+        // Slow enrichment must not shift a release's 60-minute collection window forward.
+        let primary_observed_at = Utc::now();
         let mut warnings = vec![];
         self.record("earnings_nasdaq", &primary).await;
         let symbols: Option<Vec<String>> = primary.as_ref().ok().map(|events| {
@@ -601,18 +604,55 @@ impl EarningsService {
         };
         let payload =
             serde_json::to_string(&calendar).map_err(|e| AppError::Internal(e.to_string()))?;
-        sqlx::query("INSERT INTO earnings_calendar(date, payload) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET payload=excluded.payload").bind(date.to_string()).bind(payload).execute(&self.pool).await?;
+        let mut tx = self.pool.begin().await?;
+        let observed_at = primary_observed_at;
+        let started = if nasdaq_ok {
+            crate::earnings_market::observe_calendar(&mut tx, date, &calendar.events, observed_at)
+                .await?
+        } else {
+            0
+        };
+        sqlx::query("INSERT INTO earnings_calendar(date, payload) VALUES (?, ?) ON CONFLICT(date) DO UPDATE SET payload=excluded.payload").bind(date.to_string()).bind(payload).execute(&mut *tx).await?;
         sqlx::query("DELETE FROM earnings_calendar WHERE date < ?")
             .bind((today - Duration::days(120)).to_string())
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
+        tx.commit().await?;
+        if started > 0 {
+            tracing::info!(%date, started, %observed_at, "earnings EPS transitions detected; starting 60-minute stock collection");
+        }
         Ok(calendar)
     }
+    pub async fn stock_market(
+        &self,
+        date: NaiveDate,
+        symbol: &str,
+    ) -> Result<crate::earnings_market::EarningsStockResponse, AppError> {
+        validate_date(date)?;
+        crate::earnings_market::market_response(&self.pool, date, symbol, Utc::now()).await
+    }
+
     async fn record<T>(&self, key: &str, result: &Result<T, AppError>) {
         if let Some(health) = &self.health {
             match result {
                 Ok(_) => health.record_success(key).await,
                 Err(error) => health.record_failure(key, error.to_string()).await,
+            }
+        }
+    }
+}
+
+/// Minute-scale detection, independent of the broad calendar cache TTL. A request already
+/// attempted by another caller remains subject to the same 60-second/provider cooldown gates.
+pub async fn release_watch_loop(service: Arc<EarningsService>) {
+    let mut interval = tokio::time::interval(StdDuration::from_secs(65));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        let today = Utc::now().with_timezone(&New_York).date_naive();
+        for date in [today, today - Duration::days(1)] {
+            if let Err(error) = service.calendar(date, true).await {
+                tracing::debug!(%date, %error, "earnings release observation unavailable");
             }
         }
     }
