@@ -14,6 +14,8 @@ use crate::{
     market::{StockQuote, StockQuoteProvider},
 };
 
+#[path = "earnings_market_calendar.rs"]
+mod calendar;
 #[cfg(test)]
 #[path = "earnings_market_tests.rs"]
 mod tests;
@@ -86,6 +88,18 @@ pub(crate) async fn observe_calendar(
                 .bind(date.to_string()).bind(&symbol).bind(&event.name).bind(&event.fiscal_quarter_ending)
                 .bind(&event.actual_eps).bind(now).bind(now + COLLECTION_SECONDS).execute(&mut **tx).await?;
             created += result.rows_affected();
+            if result.rows_affected() == 1 {
+                if let Some(start) = calendar::opening(date, &event.session) {
+                    sqlx::query(
+                        "INSERT INTO earnings_stock_opening(id,starts_at,ends_at) VALUES(?,?,?)",
+                    )
+                    .bind(result.last_insert_rowid())
+                    .bind(start.timestamp())
+                    .bind(start.timestamp() + COLLECTION_SECONDS)
+                    .execute(&mut **tx)
+                    .await?;
+                }
+            }
         }
         // A null/corrected value must not turn an already observed release into a new release.
         sqlx::query("INSERT INTO earnings_release_watch(date,symbol,fiscal_quarter_ending,actual_eps,last_seen_at,observation_status) VALUES(?,?,?,?,?,?) ON CONFLICT(date,symbol) DO UPDATE SET fiscal_quarter_ending=COALESCE(excluded.fiscal_quarter_ending,earnings_release_watch.fiscal_quarter_ending), actual_eps=COALESCE(excluded.actual_eps,earnings_release_watch.actual_eps), last_seen_at=excluded.last_seen_at, observation_status=excluded.observation_status")
@@ -106,6 +120,16 @@ pub struct EarningsStockResponse {
     pub tracking: Option<StockTracking>,
     pub snapshots: Vec<StockSnapshot>,
     pub coverage: StockCoverage,
+    pub opening_session: Option<StockWindow>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockWindow {
+    pub time_basis: &'static str,
+    pub tracking: StockTracking,
+    pub snapshots: Vec<StockSnapshot>,
+    pub coverage: StockCoverage,
 }
 
 #[derive(Serialize)]
@@ -116,6 +140,7 @@ pub struct StockTracking {
     pub fiscal_quarter_ending: Option<String>,
     pub actual_eps: String,
     pub detected_at: DateTime<Utc>,
+    pub starts_at: DateTime<Utc>,
     pub ends_at: DateTime<Utc>,
     pub status: String,
     pub currency: Option<String>,
@@ -169,26 +194,68 @@ pub async fn market_response(
     .bind(&symbol)
     .fetch_optional(pool)
     .await?;
-    let row = sqlx::query("SELECT * FROM earnings_stock_tracking WHERE date=? AND symbol=?")
-        .bind(date.to_string())
-        .bind(&symbol)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query(
+        "SELECT *,detected_at AS starts_at FROM earnings_stock_tracking WHERE date=? AND symbol=?",
+    )
+    .bind(date.to_string())
+    .bind(&symbol)
+    .fetch_optional(pool)
+    .await?;
+    let release = read_window(pool, row, false, now).await?;
+    let row = sqlx::query("SELECT t.company_name,t.fiscal_quarter_ending,t.actual_eps,t.detected_at,o.* FROM earnings_stock_opening o JOIN earnings_stock_tracking t ON t.id=o.id WHERE t.date=? AND t.symbol=?")
+        .bind(date.to_string()).bind(&symbol).fetch_optional(pool).await?;
+    let opening_session = read_window(pool, row, true, now).await?;
+    let (tracking, snapshots, coverage) = match release {
+        Some(window) => (Some(window.tracking), window.snapshots, window.coverage),
+        None => (
+            None,
+            Vec::new(),
+            StockCoverage {
+                minute_count: 0,
+                expected_minute_count: 0,
+                missing_minute_count: 0,
+                window_ended: false,
+            },
+        ),
+    };
+    Ok(EarningsStockResponse {
+        date,
+        symbol,
+        time_basis: "first_detected_actual_eps",
+        release_time_exact: false,
+        observation_status: observation_status.unwrap_or_else(|| "not_observed".into()),
+        tracking,
+        snapshots,
+        coverage,
+        opening_session,
+    })
+}
+
+async fn read_window(
+    pool: &SqlitePool,
+    row: Option<sqlx::sqlite::SqliteRow>,
+    opening: bool,
+    now: DateTime<Utc>,
+) -> Result<Option<StockWindow>, AppError> {
+    let Some(row) = row else {
+        return Ok(None);
+    };
     let mut snapshots = Vec::new();
     let mut expected = 0;
-    let mut window_ended = false;
-    let tracking = if let Some(row) = row {
-        let id: i64 = row.try_get("id")?;
-        let detected: i64 = row.try_get("detected_at")?;
+    let id: i64 = row.try_get("id")?;
+    let detected: i64 = row.try_get("detected_at")?;
+    let start: i64 = row.try_get("starts_at")?;
+    let tracking = {
         let ends: i64 = row.try_get("ends_at")?;
-        window_ended = now.timestamp() >= ends;
+        let window_ended = now.timestamp() >= ends;
         let through = now.timestamp().min(ends.saturating_sub(1));
-        if through >= detected {
-            expected = (through.div_euclid(60) - detected.div_euclid(60) + 1) as usize;
+        if through >= start {
+            expected = (through.div_euclid(60) - start.div_euclid(60) + 1) as usize;
         }
-        for row in sqlx::query(
-            "SELECT * FROM earnings_stock_snapshot WHERE tracking_id=? ORDER BY timestamp",
-        )
+        let table = snapshot_table(opening);
+        for row in sqlx::query(&format!(
+            "SELECT * FROM {table} WHERE tracking_id=? ORDER BY timestamp"
+        ))
         .bind(id)
         .fetch_all(pool)
         .await?
@@ -206,16 +273,19 @@ pub async fn market_response(
                 timestamp_basis: row.try_get("timestamp_basis")?,
             });
         }
-        Some(StockTracking {
+        StockTracking {
             id,
             company_name: row.try_get("company_name")?,
             fiscal_quarter_ending: row.try_get("fiscal_quarter_ending")?,
             actual_eps: row.try_get("actual_eps")?,
             detected_at: datetime(detected)?,
+            starts_at: datetime(start)?,
             ends_at: datetime(ends)?,
             // Reads remain truthful even if a busy collector has not finalized this row yet.
             status: if window_ended {
                 "completed".into()
+            } else if now.timestamp() < start {
+                "scheduled".into()
             } else {
                 row.try_get("status")?
             },
@@ -229,17 +299,16 @@ pub async fn market_response(
                 .map(datetime)
                 .transpose()?,
             last_error: row.try_get("last_error")?,
-        })
-    } else {
-        None
+        }
     };
     let count = snapshots.len();
-    Ok(EarningsStockResponse {
-        date,
-        symbol,
-        time_basis: "first_detected_actual_eps",
-        release_time_exact: false,
-        observation_status: observation_status.unwrap_or_else(|| "not_observed".into()),
+    let window_ended = now >= tracking.ends_at;
+    Ok(Some(StockWindow {
+        time_basis: if opening {
+            "regular_session_open"
+        } else {
+            "first_detected_actual_eps"
+        },
         tracking,
         snapshots,
         coverage: StockCoverage {
@@ -248,7 +317,7 @@ pub async fn market_response(
             missing_minute_count: expected.saturating_sub(count),
             window_ended,
         },
-    })
+    }))
 }
 
 pub struct EarningsMarketCollector {
@@ -283,6 +352,8 @@ impl EarningsMarketCollector {
         let now = (self.clock)();
         sqlx::query("UPDATE earnings_stock_tracking SET status='completed' WHERE status='collecting' AND ends_at<=?")
             .bind(now.timestamp()).execute(&self.pool).await?;
+        sqlx::query("UPDATE earnings_stock_opening SET status='completed' WHERE status='collecting' AND ends_at<=?")
+            .bind(now.timestamp()).execute(&self.pool).await?;
         let cutoff = (now.with_timezone(&New_York).date_naive() - Duration::days(120)).to_string();
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM earnings_release_watch WHERE date<?")
@@ -294,21 +365,24 @@ impl EarningsMarketCollector {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
-        let jobs = sqlx::query("SELECT id,symbol,detected_at,ends_at,currency FROM earnings_stock_tracking WHERE status='collecting' AND detected_at<=? AND ends_at>? ORDER BY last_attempt_at ASC,id ASC LIMIT ?")
-            .bind(now.timestamp()).bind(now.timestamp()).bind(MAX_BATCH).fetch_all(&self.pool).await?;
+        let jobs = sqlx::query("SELECT id,symbol,detected_at AS starts_at,ends_at,currency,last_attempt_at,0 AS opening FROM earnings_stock_tracking WHERE status='collecting' AND detected_at<=? AND ends_at>? UNION ALL SELECT o.id,t.symbol,o.starts_at,o.ends_at,o.currency,o.last_attempt_at,1 AS opening FROM earnings_stock_opening o JOIN earnings_stock_tracking t ON t.id=o.id WHERE o.status='collecting' AND o.starts_at<=? AND o.ends_at>? ORDER BY last_attempt_at ASC,id ASC,opening ASC LIMIT ?")
+            .bind(now.timestamp()).bind(now.timestamp()).bind(now.timestamp()).bind(now.timestamp())
+            .bind(MAX_BATCH).fetch_all(&self.pool).await?;
         let mut sampled: HashMap<String, Result<StockQuote, String>> = HashMap::new();
         let mut saved = 0;
         for job in jobs {
             let id: i64 = job.try_get("id")?;
             let symbol: String = job.try_get("symbol")?;
-            let detected: i64 = job.try_get("detected_at")?;
+            let detected: i64 = job.try_get("starts_at")?;
+            let opening: bool = job.try_get("opening")?;
+            let table = tracking_table(opening);
             let ends: i64 = job.try_get("ends_at")?;
             let currency: Option<String> = job.try_get("currency")?;
             let current = (self.clock)();
             if current.timestamp() >= ends {
                 continue;
             }
-            sqlx::query("UPDATE earnings_stock_tracking SET last_attempt_at=? WHERE id=?")
+            sqlx::query(&format!("UPDATE {table} SET last_attempt_at=? WHERE id=?"))
                 .bind(current.timestamp())
                 .bind(id)
                 .execute(&self.pool)
@@ -355,11 +429,11 @@ impl EarningsMarketCollector {
                 });
             match result {
                 Ok(quote) => {
-                    save_quote(&self.pool, id, quote, observed).await?;
+                    save_window_quote(&self.pool, id, opening, quote, observed).await?;
                     saved += 1;
                 }
                 Err(error) => {
-                    sqlx::query("UPDATE earnings_stock_tracking SET last_error=? WHERE id=?")
+                    sqlx::query(&format!("UPDATE {table} SET last_error=? WHERE id=?"))
                         .bind(error)
                         .bind(id)
                         .execute(&self.pool)
@@ -401,19 +475,47 @@ fn safe_error(error: AppError) -> String {
     }
 }
 
+fn tracking_table(opening: bool) -> &'static str {
+    if opening {
+        "earnings_stock_opening"
+    } else {
+        "earnings_stock_tracking"
+    }
+}
+fn snapshot_table(opening: bool) -> &'static str {
+    if opening {
+        "earnings_stock_opening_snapshot"
+    } else {
+        "earnings_stock_snapshot"
+    }
+}
+
+#[cfg(test)]
 async fn save_quote(
     pool: &SqlitePool,
     id: i64,
     quote: &StockQuote,
     observed: DateTime<Utc>,
 ) -> Result<(), AppError> {
+    save_window_quote(pool, id, false, quote, observed).await
+}
+
+async fn save_window_quote(
+    pool: &SqlitePool,
+    id: i64,
+    opening: bool,
+    quote: &StockQuote,
+    observed: DateTime<Utc>,
+) -> Result<(), AppError> {
     let time = quote.timestamp.timestamp();
     let minute = time.div_euclid(60) * 60;
     let mut tx = pool.begin().await?;
-    sqlx::query("INSERT INTO earnings_stock_snapshot(tracking_id,timestamp,first_quote_at,last_quote_at,open,high,low,close,timestamp_basis) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(tracking_id,timestamp) DO UPDATE SET open=CASE WHEN excluded.first_quote_at<earnings_stock_snapshot.first_quote_at THEN excluded.open ELSE earnings_stock_snapshot.open END, close=CASE WHEN excluded.last_quote_at>=earnings_stock_snapshot.last_quote_at THEN excluded.close ELSE earnings_stock_snapshot.close END, high=MAX(earnings_stock_snapshot.high,excluded.high), low=MIN(earnings_stock_snapshot.low,excluded.low), first_quote_at=MIN(earnings_stock_snapshot.first_quote_at,excluded.first_quote_at), last_quote_at=MAX(earnings_stock_snapshot.last_quote_at,excluded.last_quote_at), timestamp_basis=CASE WHEN excluded.timestamp_basis=earnings_stock_snapshot.timestamp_basis THEN earnings_stock_snapshot.timestamp_basis ELSE 'mixed' END")
+    let snapshots = snapshot_table(opening);
+    let tracking = tracking_table(opening);
+    sqlx::query(&format!("INSERT INTO {snapshots}(tracking_id,timestamp,first_quote_at,last_quote_at,open,high,low,close,timestamp_basis) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(tracking_id,timestamp) DO UPDATE SET open=CASE WHEN excluded.first_quote_at<{snapshots}.first_quote_at THEN excluded.open ELSE {snapshots}.open END, close=CASE WHEN excluded.last_quote_at>={snapshots}.last_quote_at THEN excluded.close ELSE {snapshots}.close END, high=MAX({snapshots}.high,excluded.high), low=MIN({snapshots}.low,excluded.low), first_quote_at=MIN({snapshots}.first_quote_at,excluded.first_quote_at), last_quote_at=MAX({snapshots}.last_quote_at,excluded.last_quote_at), timestamp_basis=CASE WHEN excluded.timestamp_basis={snapshots}.timestamp_basis THEN {snapshots}.timestamp_basis ELSE 'mixed' END"))
         .bind(id).bind(minute).bind(time).bind(time).bind(quote.price).bind(quote.price).bind(quote.price).bind(quote.price)
         .bind(quote.timestamp_basis.as_str()).execute(&mut *tx).await?;
-    sqlx::query("UPDATE earnings_stock_tracking SET currency=COALESCE(currency,?),last_success_at=?,last_error=NULL WHERE id=?")
+    sqlx::query(&format!("UPDATE {tracking} SET currency=COALESCE(currency,?),last_success_at=?,last_error=NULL WHERE id=?"))
         .bind(&quote.currency).bind(observed.timestamp()).bind(id).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())

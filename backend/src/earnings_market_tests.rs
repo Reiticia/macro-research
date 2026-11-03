@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "earnings_opening_tests.rs"]
+mod opening_tests;
 use crate::market::StockTimestampBasis;
 use async_trait::async_trait;
 use serde_json::json;

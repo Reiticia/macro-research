@@ -96,7 +96,7 @@ GET /api/v1/earnings?date=2026-11-02&refresh=true
 
 服务启动后独立后台任务每小时扫描今天至未来 60 天及过去 7 天，仅刷新到期日期，不阻塞 HTTP 启动。健康键为 `earnings_nasdaq` / `earnings_tradingview`，沿用现有来源健康与告警机制。
 
-数据库升级：后端启动执行 `023_earnings_calendar.sql` 与 `024_earnings_stock_collection.sql`（Logo 仍为文件缓存，不存数据库）；Android Room 9 → 10 只新增独立财报快照表，保留宏观事件、关注和分析。发布/部署仍遵循项目原有流程；本功能不自动部署或改动本机私人配置。
+数据库升级：后端启动执行 `023_earnings_calendar.sql`、`024_earnings_stock_collection.sql` 与 `025_earnings_opening_collection.sql`（Logo 仍为文件缓存，不存数据库）；Android Room 9 → 10 只新增独立财报快照表，保留宏观事件、关注和分析。发布/部署仍遵循项目原有流程；本功能不自动部署或改动本机私人配置。
 
 ## 财报公布后的个股行情采集
 
@@ -120,6 +120,16 @@ GET /api/v1/earnings?date=2026-11-02&refresh=true
 - 个股与宏观 Yahoo 请求复用同一实例的节流与 403/429 冷却；每轮最多处理 32 个任务，按上次尝试时间公平轮换，同一股票在一轮内只请求一次。大量同时公布或上游限流时采样可能延迟，覆盖情况如实返回。单只股票取价失败不阻止其他股票采集，也不直接把整个行情源判定为断网。
 - 财报行情独立于宏观事件的标识、分析、关注及推送，不改变已有事件流程；相关记录随数据库备份，保留 120 个纽约日期。新增迁移 `024_earnings_stock_collection.sql`，不新增配置字段。
 
+### 盘前／盘后财报的开盘阶段
+
+- 在同一次已验证的 Nasdaq 实际 EPS 变化事务内，为 `pre_market` / `after_hours` 额外保存一个独立的开盘窗口：盘前取财报纽约日期当日（或其后首个交易日）09:30，盘后取该日期之后首个交易日 09:30；未知时段不猜测。不是简单地给检测时刻加 24 小时，也不会因稍晚检测把窗口移动到另一天。
+- 以**目标开盘日**的 `America/New_York` IANA 时区转换 UTC，自动跨夏令时／冬令时。EDT 时 09:30 = 13:30 UTC / 北京 21:30，EST 时为 14:30 UTC / 北京 22:30；例如 2026-10-30 周五盘后对应 2026-11-02 周一 14:30 UTC，不能沿用周五的 UTC−4。无需 TG 手动切换或新增配置。
+- 内置现代 NYSE 常规交易日规则（2022–2099）：跳过周末、新年、MLK、总统日、耶稣受难日、阵亡将士纪念日、Juneteenth、独立日、劳动节、感恩节、圣诞节及适用补休日；保留“新年落周六不在前一年 12/31 补休”例外。已列入 2025-01-09 特别休市；半日市仍于 09:30 开盘，不影响前 60 分钟。规则参考 [NYSE Hours & Calendars](https://www.nyse.com/markets/hours-calendars)。未来临时休市、个股停牌和临时延迟开盘无法由离线日历预知，届时保留真实报价缺口，不据此保证交易所完整行情。
+- 窗口严格为 `[open, open + 60min)`，开盘前不取价；检测稍晚或重启错过部分窗口只采剩余时间，全部错过则完成且为空，不补造历史、不重置起止时间。报价必须属于该窗口，盘前旧报价不能成为开盘阶段基准。
+- 新表 `earnings_stock_opening` / `earnings_stock_opening_snapshot` 通过迁移 025 新增，关联原财报任务；各自保存 OHLC、币种、错误、覆盖及请求时间，不修改原 024 校验和、不混入原检测窗口。两个窗口重叠时同代码每轮只取一次价，分别校验和保存；合计每轮最多处理 32 个窗口，公平轮换。清理原任务时级联清理开盘数据。
+- 开盘任务与原检测任务同样只由可信 EPS 变化触发。首次观察就已公布、间断过久、季度冲突及备用源仍不重放发布；升级前已有任务未保存可验证的时段证据，不追溯创建开盘窗口。重复刷新、EPS 修订或时段修订不重建／移动已有窗口。
+- 客户端详情新增「检测后 · 60 分钟 / 开盘后 · 60 分钟」切换，分别使用各阶段首个采样为基准和起点，开盘阶段显示计划开盘时间及「等待开盘 / 采集中 / 窗口结束」。原检测阶段已结束但开盘阶段待开始时，详情前台仍按 15 秒读取；关闭／后台停止。没有新字段的旧后端仍可展示原检测阶段。
+
 ### 读取行情
 
 ```http
@@ -132,12 +142,17 @@ Authorization: Bearer <existing backend key>
 ```text
 { date, symbol, timeBasis: "first_detected_actual_eps", releaseTimeExact: false,
   observationStatus,
-  tracking: { id, companyName, fiscalQuarterEnding, actualEps, detectedAt, endsAt,
+  tracking: { id, companyName, fiscalQuarterEnding, actualEps, detectedAt, startsAt, endsAt,
               status, currency, lastAttemptAt, lastSuccessAt, lastError } | null,
   snapshots: [{ timestamp, firstQuoteAt, lastQuoteAt, price, open, high, low, close,
                 provider: "yahoo", timestampBasis }],
-  coverage: { minuteCount, expectedMinuteCount, missingMinuteCount, windowEnded } }
+  coverage: { minuteCount, expectedMinuteCount, missingMinuteCount, windowEnded },
+  openingSession: { timeBasis: "regular_session_open",
+                    tracking: { ...same tracking fields },
+                    snapshots: [...same snapshot fields], coverage: {...} } | null }
 ```
+
+顶层 `tracking` / `snapshots` / `coverage` 保持原检测阶段语义，`tracking.startsAt == detectedAt`；新字段 `openingSession` 单独表示开盘阶段，`tracking.detectedAt` 仍是原财报检测时刻，`startsAt` 才是开盘及 0–60 分钟计算起点。开盘前返回 `status: "scheduled"`、空采样、应有分钟数 0；开盘后为 `collecting`，窗口结束为 `completed` 并据实返回缺失。没有可验证的盘前／盘后任务时为 null。读取两阶段均不写入或触发取价。
 
 `observationStatus` 区分 `not_observed`、`watching`、`tracking`、`already_reported`、`missed_after_gap`、`quarter_changed`。分钟桶可能从触发所在分钟开始，但 `firstQuoteAt` / `lastQuoteAt` 保留桶内真实采样时间，桶内不混入触发前报价。当前没有完整的公布前股价基线，因此不据此伪造相对公司公布时刻的涨跌或利好/利空结论。
 
@@ -147,9 +162,9 @@ Authorization: Bearer <existing backend key>
 - 展示最新存储采样价与币种、来源报价时间、检测/结束时间、采样走势、检测后 1/5/15/30/60 分钟的价格与变化，以及可拖动的 0–60 分钟股价反应时间线。所有涨跌幅相对**首个采样的 open**，并展示该基准价格和时间；不称为相对公司公布前的涨跌幅。
 - 时点价格只使用目标时点前 90 秒内已存储的真实 open/close 观测，不选取目标之后的分钟 close、不插值、不拿最新价填补缺失时点。未到达的时点与无合格观测的时点均显示空值。曲线按真实报价时间定位，缺失分钟不跨空缺连线；同一报价时间的价格修正展示最新 close，但保留最初采样基准。
 - 明确区分等待 EPS、首次观察时已公布、错过检测、未观察、正在采集、窗口结束、无有效采样等状态。窗口结束仍展示实际分钟覆盖及缺失数量，不能将 completed 视为数据完整。
-- 页面可见且应用在前台时查询，活动任务和今天/昨天的待观察记录每 15 秒刷新；关闭页面或进入后台即取消，已结束窗口不持续轮询。刷新失败保留上次加载数据并明确标为旧数据；换模式/后端地址会先清除原来源的内容，迟到结果不能覆盖新来源。
+- 页面可见且应用在前台时查询，活动任务和今天/昨天的待观察记录每 15 秒刷新；关闭页面或进入后台即取消，两个阶段均已结束时不持续轮询。刷新失败保留上次加载数据并明确标为旧数据；换模式/后端地址会先清除原来源的内容，迟到结果不能覆盖新来源。
 - 直连模式明确提示需要后端模式，不根据当前报价伪造历史采集。旧后端 404/501 显示“请先更新后端”，401/403 显示鉴权问题，429 提示稍后重试；这些错误均停止自动重试。请求携带现有 Key/设备标识，并禁用 HTTP 缓存，手动刷新只读取数据，既不重启也不延长采集。
-- 历史采样展示无需额外配置或依赖；实际使用需同步部署含 `earningsMarket` 接口及迁移 024 的后端。收藏另需客户端 schema 11，当前价需后端 `earningsQuote` 能力（见上文）。英/简中/繁中均有对应文案。
+- 历史采样展示无需额外配置或依赖；实际使用需同步部署含 `earningsMarket` 接口及迁移 024 的后端，新增开盘阶段另需迁移 025。收藏另需客户端 schema 11，当前价需后端 `earningsQuote` 能力（见上文）。英/简中/繁中均有对应文案。
 
 ## Telegram 财报 API 诊断
 
@@ -167,6 +182,8 @@ Telegram 诊断本身仅需更新后端，不需要更新 APP；不改配置模�
 
 ## 验证
 
+- `cd backend && cargo test earnings_market --lib`：另覆盖目标开盘日 DST 两次切换、周末／常规休市／跨年与半日市、盘前当日及盘后下一交易日、等待开盘不请求、独立基准／重叠请求合并、窗口边界、迟检测真实缺口、重启续采、公平调度、迁移保留与事务回滚。
+- `EarningsOpeningMarketTest` 覆盖开盘阶段解码、独立起点／基准、缺口、不偷看未来、旧后端兼容及跨阶段轮询；`EarningsMarketUiTest` 新增阶段切换和等待开盘展示（需设备执行）。
 - `cd backend && cargo test earnings_market::tests --lib`：触发去重、首见已公布/历史/备用源隔离、检测间断与财季冲突、事务回滚、60 分钟边界、重启续采、分钟 OHLC、无效报价与真实缺口、单股故障隔离、采样公平性、币种冲突及保留期。
 - `cd backend && cargo test market::yahoo::stock_tests --lib`：准确个股识别、盘前/盘后报价、分钟结束时间、未收盘/陈旧/未来报价过滤及与宏观行情共用限流。集成测试另验证真实日历更新触发任务和新接口鉴权/只读语义。
 
