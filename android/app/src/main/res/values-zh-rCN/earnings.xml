@@ -40,4 +40,8 @@
     <string name="earnings_alignment_warning">财季、EPS 口径和财务币种尚未核实。此处预测与 Nasdaq 分开展示，不直接与历史实际值比较。</string>
     <string name="earnings_company_logo">%1$s 的公司标志</string>
     <string name="earnings_logo_source">公司标志来源：Financial Modeling Prep（可能缺失或过期）</string>
+    <string name="earnings_page_open">财报公布页 · %1$s</string>
+    <string name="earnings_page_unavailable">暂无可用的财报页面</string>
+    <string name="earnings_page_note">在浏览器打开该公司的财报汇总页，并非所选日期或财季的官方公告原文。不发送后端凭据。</string>
+    <string name="earnings_page_open_failed">无法打开页面，请确认已安装可用的浏览器。</string>
 </resources>

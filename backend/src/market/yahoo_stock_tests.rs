@@ -73,6 +73,23 @@ fn stale_future_invalid_and_missing_prices_do_not_get_stamped_as_current() {
 }
 
 #[test]
+fn display_can_read_a_closed_market_price_but_sampling_still_rejects_it() {
+    let time = now();
+    let mut root = fixture(time);
+    root["meta"]["regularMarketTime"] = json!(time.timestamp() - 86400);
+    assert!(parse(root.clone(), "AAPL", time).is_err());
+    let quote = stock_quote_with_age(
+        serde_json::from_value(root).unwrap(),
+        "AAPL",
+        time,
+        7 * 86400 - 1,
+    )
+    .unwrap();
+    assert_eq!(quote.timestamp, time - chrono::Duration::days(1));
+    assert_eq!(quote.price, 101.5);
+}
+
+#[test]
 fn different_symbols_share_classes_or_non_equities_are_not_guessed() {
     let time = now();
     for (requested, actual, instrument) in [

@@ -278,12 +278,38 @@ impl StockQuoteProvider for YahooProvider {
             .await?;
         stock_quote_from_chart(result, &symbol, Utc::now())
     }
+
+    async fn live_stock_quote(&self, symbol: &str) -> Result<StockQuote, AppError> {
+        let symbol = crate::earnings_logo::normalize_symbol(symbol)
+            .ok_or_else(|| AppError::InvalidRequest("invalid stock symbol".into()))?;
+        let result = self
+            .chart_ticker(
+                &symbol,
+                &[
+                    ("interval", "1m".into()),
+                    ("range", "1d".into()),
+                    ("includePrePost", "true".into()),
+                ],
+            )
+            .await?;
+        // Closed-market last prices are explicitly marked old by the display cache.
+        stock_quote_with_age(result, &symbol, Utc::now(), 7 * 86400 - 1)
+    }
 }
 
 fn stock_quote_from_chart(
     result: YahooChartResult,
     symbol: &str,
     now: DateTime<Utc>,
+) -> Result<StockQuote, AppError> {
+    stock_quote_with_age(result, symbol, now, 90)
+}
+
+fn stock_quote_with_age(
+    result: YahooChartResult,
+    symbol: &str,
+    now: DateTime<Utc>,
+    max_age_seconds: i64,
 ) -> Result<StockQuote, AppError> {
     if !result
         .meta
@@ -333,7 +359,7 @@ fn stock_quote_from_chart(
         .into_iter()
         .filter(|(time, price, _)| {
             *time <= now
-                && now.signed_duration_since(*time).num_seconds() <= 90
+                && now.signed_duration_since(*time).num_seconds() <= max_age_seconds
                 && price.is_finite()
                 && *price > 0.0
         })

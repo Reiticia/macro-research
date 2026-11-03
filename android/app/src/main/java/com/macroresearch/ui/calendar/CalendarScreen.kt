@@ -65,7 +65,7 @@ fun CalendarScreen(
             onDate = vm::selectDate, onWeek = vm::selectWeek, onToday = vm::selectToday,
             onMonth = vm::showMonth, onContent = vm::selectContent,
             onImportance = vm::toggleImportance, onRefresh = vm::refresh, onEvent = onEvent,
-            modifier = Modifier.padding(padding), onEarnings = openEarnings)
+            modifier = Modifier.padding(padding), onEarnings = openEarnings, earningsRepository = earningsRepository)
     } else {
         CalendarMonthContent(
             state = state, source = source, logos = earningsRepository?.logos,
@@ -82,7 +82,7 @@ fun CalendarScreen(
         onDismiss = { showDay = false }, onContent = vm::selectContent,
         onImportance = vm::toggleImportance, onRefresh = vm::refresh,
         onEvent = { showDay = false; onEvent(it) },
-        onEarnings = openEarnings,
+        onEarnings = openEarnings, earningsRepository = earningsRepository,
     )
     marketEvent?.let { (date, event) ->
         earningsRepository?.let { com.macroresearch.ui.earnings.EarningsMarketDialog(date, event, it) { marketEvent = null } }

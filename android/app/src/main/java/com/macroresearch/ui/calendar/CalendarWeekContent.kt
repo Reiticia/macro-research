@@ -50,6 +50,7 @@ internal fun CalendarWeekContent(
     onEvent: (Long) -> Unit,
     modifier: Modifier = Modifier,
     onEarnings: ((com.macroresearch.data.model.EarningsEvent) -> Unit)? = null,
+    earningsRepository: com.macroresearch.data.EarningsRepository? = null,
 ) {
     val dates = weekDates(state.weekDate)
     val locale = appLocale()
@@ -111,7 +112,7 @@ internal fun CalendarWeekContent(
             CalendarDayContent(state, source, logos, warning,
                 onDismiss = {}, onContent = onContent, onImportance = onImportance,
                 onRefresh = onRefresh, onEvent = onEvent, modifier = Modifier.weight(1f), embedded = true,
-                onEarnings = onEarnings)
+                onEarnings = onEarnings, earningsRepository = earningsRepository)
         }
         Text(stringResource(R.string.calendar_timezones), Modifier.padding(bottom = 8.dp),
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

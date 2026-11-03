@@ -98,6 +98,7 @@ class MacroApplication : Application() {
                 MacroDatabase.MIGRATION_7_8,
                 MacroDatabase.MIGRATION_8_9,
                 MacroDatabase.MIGRATION_9_10,
+                MacroDatabase.MIGRATION_10_11,
             )
             .build()
         if (BuildConfig.DEBUG) {
@@ -129,6 +130,8 @@ class MacroApplication : Application() {
             direct = earningsClient::fetch,
             backend = backendClient::earnings,
             backendMarket = backendClient::earningsMarket,
+            backendQuote = backendClient::earningsQuote,
+            favoritesStore = com.macroresearch.data.local.RoomEarningsFavoritesStore(database.earningsDao()),
             gson = gson,
             logos = com.macroresearch.data.CompanyLogoLoader(backendPreferences.settings, logoClient::image, backendClient::companyLogo),
         )

@@ -42,10 +42,11 @@ internal fun CalendarDaySheet(
     onRefresh: () -> Unit,
     onEvent: (Long) -> Unit,
     onEarnings: ((EarningsEvent) -> Unit)? = null,
+    earningsRepository: com.macroresearch.data.EarningsRepository? = null,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         CalendarDayContent(state, source, logos, warning, onDismiss, onContent, onImportance, onRefresh, onEvent,
-            Modifier.fillMaxHeight(0.92f), onEarnings = onEarnings)
+            Modifier.fillMaxHeight(0.92f), onEarnings = onEarnings, earningsRepository = earningsRepository)
     }
 }
 
@@ -63,6 +64,7 @@ internal fun CalendarDayContent(
     modifier: Modifier = Modifier,
     embedded: Boolean = false,
     onEarnings: ((EarningsEvent) -> Unit)? = null,
+    earningsRepository: com.macroresearch.data.EarningsRepository? = null,
 ) {
     var search by rememberSaveable(state.selectedDate) { mutableStateOf("") }
     var session by rememberSaveable(state.selectedDate) { mutableStateOf<String?>(null) }
@@ -147,7 +149,10 @@ internal fun CalendarDayContent(
                         Text(stringResource(R.string.earnings_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     items(earnings, key = { "earnings-${it.source}:${it.tradingView?.ticker ?: it.symbol}" }) { event ->
-                        EarningsCard(event, logos, source, onMarket = onEarnings?.let { open -> { open(event) } })
+                        EarningsCard(event, logos, source, onMarket = onEarnings?.let { open -> { open(event) } },
+                            favorite = earningsRepository?.let { repo -> {
+                                com.macroresearch.ui.earnings.EarningsFavoriteButton(state.selectedDate, event, repo)
+                            } })
                     }
                     if (calendar != null) item(key = "earnings-sources") {
                         Text(stringResource(R.string.earnings_source_times,

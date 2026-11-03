@@ -38,6 +38,22 @@ pub async fn stock_market(
     ))
 }
 
+/// Current price, independent of the selected earnings date and persistent sampling window.
+pub async fn quote(
+    State(state): State<AppState>,
+    Path(symbol): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    let service = state
+        .earnings_service
+        .live_quotes
+        .as_ref()
+        .ok_or_else(|| AppError::Provider("stock_quote_unavailable".into()))?;
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(service.quote(&symbol).await?),
+    ))
+}
+
 #[derive(Deserialize)]
 pub struct EarningsQuery {
     date: Option<NaiveDate>,

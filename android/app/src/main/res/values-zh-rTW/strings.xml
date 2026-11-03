@@ -154,7 +154,7 @@
     <string name="backend_setup_hint">填寫後端位址與存取權杖，點「測試連線」確認可用後，再點「後端」完成切換。</string>
     <string name="data_source_incomplete">請先填寫後端位址與存取權杖。</string>
     <string name="data_source_switch_title">切換資料來源？</string>
-    <string name="data_source_switch_body">切換會清空本機事件快取與追蹤清單，因為兩種模式使用不同的事件識別碼。篩選設定會保留。</string>
+    <string name="data_source_switch_body">切換會清空本機總體經濟事件快取與追蹤清單，因為兩種模式使用不同的事件識別碼。篩選設定保留，財報收藏依資料來源隔離顯示。</string>
     <string name="data_source_switch_confirm">切換並清空快取</string>
     <string name="calendar_warning_rate_limited">日曆資料來源正在限流本裝置，正在顯示快取資料。約 %1$d 分鐘後自動恢復。</string>
     <string name="calendar_warning_rate_limited_unknown">日曆資料來源正在限流本裝置，正在顯示快取資料。請稍後再試。</string>

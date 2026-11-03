@@ -277,6 +277,77 @@ async fn company_logo_route_authenticates_and_returns_only_bounded_png_assets() 
 }
 
 #[tokio::test]
+async fn earnings_current_price_is_authenticated_cached_and_never_creates_sampling_rows() {
+    use market_event_analyzer::market::{StockQuote, StockQuoteProvider, StockTimestampBasis};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Quotes(AtomicUsize);
+    #[async_trait::async_trait]
+    impl StockQuoteProvider for Quotes {
+        async fn stock_quote(
+            &self,
+            symbol: &str,
+        ) -> Result<StockQuote, market_event_analyzer::error::AppError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(StockQuote {
+                symbol: symbol.into(),
+                timestamp: Utc::now(),
+                price: 123.45,
+                currency: Some("USD".into()),
+                timestamp_basis: StockTimestampBasis::ProviderQuote,
+            })
+        }
+    }
+    let mut app = app().await;
+    let quotes = Arc::new(Quotes(AtomicUsize::new(0)));
+    let http = reqwest::Client::new();
+    app.state.earnings_service = Arc::new(
+        market_event_analyzer::earnings::EarningsService::new(app.pool.clone(), http.clone(), http)
+            .with_live_quotes(quotes.clone()),
+    );
+    let router = api::router(app.state);
+    let uri = "/api/v1/earnings/quote/AAPL";
+    let denied = router
+        .clone()
+        .oneshot(request("GET", uri, None))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(quotes.0.load(Ordering::SeqCst), 0);
+    for _ in 0..2 {
+        let response = router
+            .clone()
+            .oneshot(request("GET", uri, Some("secret-token")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let bytes = axum::body::to_bytes(response.into_body(), 10_000)
+            .await
+            .unwrap();
+        let root: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(root["symbol"], "AAPL");
+        assert_eq!(root["price"], "123.45");
+        assert_eq!(root["stale"], false);
+        assert!(root.get("fetchedAt").is_some());
+    }
+    assert_eq!(quotes.0.load(Ordering::SeqCst), 1);
+    let invalid = router
+        .oneshot(request(
+            "GET",
+            "/api/v1/earnings/quote/AAPL%3Fbad",
+            Some("secret-token"),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM earnings_stock_tracking")
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+}
+
+#[tokio::test]
 async fn earnings_route_is_authenticated_and_has_a_separate_wire_contract() {
     let app = app().await;
     let router = api::router(app.state);

@@ -35,9 +35,31 @@ class EarningsMarketUiTest {
         } }
         compose.onNodeWithText("Apple Inc.").assertIsDisplayed()
         compose.onNodeWithTag("earnings-market-latest-price").assertTextEquals("102.00")
-        compose.onNodeWithText("USD").assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.earnings_market_ended)).assertIsDisplayed()
+        compose.onNodeWithText("USD").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.earnings_market_ended)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.earnings_market_coverage, 1, 60, 59)).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun currentPriceIsSeparateFromTheCompletedEarningsSamplingWindow() {
+        val quote = EarningsQuote("AAPL", "123.45", "USD", start.plusSeconds(3999).toString(),
+            start.plusSeconds(4000).toString(), "yahoo", "provider_quote", false)
+        compose.setContent { MaterialTheme {
+            EarningsMarketContent(date, event, EarningsMarketState(market()), start.plusSeconds(4000), {}, {},
+                quoteState = EarningsQuoteState(quote))
+        } }
+        compose.onNodeWithTag("earnings-current-price-value").assertTextEquals("123.45")
+        compose.onNodeWithText(context.getString(R.string.earnings_quote_note)).assertIsDisplayed()
+        compose.onNodeWithTag("earnings-market-latest-price").performScrollTo().assertTextEquals("102.00")
+    }
+
+    @Test fun failedCurrentQuoteIsExplicitlyOldAndDoesNotBecomeASample() {
+        val quote = EarningsQuote("AAPL", "123.45", "USD", start.toString(), start.toString(), "yahoo", "minute_bar_close", true)
+        compose.setContent { MaterialTheme {
+            CurrentStockPriceCard(EarningsQuoteState(quote, error = "unavailable"), start.plusSeconds(4000), java.util.Locale.US)
+        } }
+        compose.onNodeWithText(context.getString(R.string.earnings_quote_stale)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.earnings_quote_bar)).assertIsDisplayed()
+        compose.onNodeWithTag("earnings-market-timeline").assertDoesNotExist()
     }
 
     @Test fun timelineNeverFillsAMissingTimeWithTheLatestPrice() {
@@ -57,7 +79,7 @@ class EarningsMarketUiTest {
             EarningsMarketContent(date, event, EarningsMarketState(empty), start.plusSeconds(4000), {}, {})
         } }
         compose.onNodeWithTag("earnings-market-latest-price").assertTextEquals("—")
-        compose.onNodeWithText(context.getString(R.string.earnings_market_already_reported)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.earnings_market_already_reported)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("earnings-market-timeline").assertDoesNotExist()
     }
 
@@ -66,7 +88,7 @@ class EarningsMarketUiTest {
         compose.setContent { MaterialTheme {
             EarningsMarketContent(date, event, EarningsMarketState(market(), error = "unavailable"), start.plusSeconds(4000), { retries++ }, {})
         } }
-        compose.onNodeWithText(context.getString(R.string.earnings_market_stale)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.earnings_market_stale)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("earnings-market-refresh").performClick()
         compose.runOnIdle { org.junit.Assert.assertEquals(1, retries) }
     }

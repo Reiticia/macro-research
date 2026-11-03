@@ -106,7 +106,8 @@ fun EarningsScreen(repository: EarningsRepository) {
                 }
             }
             items(filtered, key = { "${it.source}:${it.tradingView?.ticker ?: it.symbol}" }) { event ->
-                EarningsCard(event, repository.logos, source, onMarket = { marketEvent = event })
+                EarningsCard(event, repository.logos, source, onMarket = { marketEvent = event },
+                    favorite = { EarningsFavoriteButton(state.date, event, repository) })
             }
             state.calendar?.let { calendar -> item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -162,6 +163,7 @@ internal fun EarningsCard(
     logos: com.macroresearch.data.CompanyLogoLoader?,
     source: com.macroresearch.data.BackendSettings,
     onMarket: (() -> Unit)? = null,
+    favorite: (@Composable () -> Unit)? = null,
 ) {
     var expanded by rememberSaveable(event.symbol, event.source) { mutableStateOf(false) }
     Surface(shape = MaterialTheme.shapes.medium, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), color = MaterialTheme.colorScheme.surface) {
@@ -170,6 +172,7 @@ internal fun EarningsCard(
                 CompanyLogo(event.symbol, event.name, logos, source)
                 Spacer(Modifier.width(12.dp))
                 Text(event.symbol, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                favorite?.invoke()
                 Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer) {
                     Text(stringResource(sessionLabel(event.session)), Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium)
                 }
@@ -189,6 +192,7 @@ internal fun EarningsCard(
             if (onMarket != null) OutlinedButton(onClick = onMarket, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(R.string.earnings_market_open))
             }
+            EarningsPageLink(event)
             event.tradingView?.let { tv ->
                 if (tv.dateConflict) WarningText(R.string.earnings_conflict)
                 TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {

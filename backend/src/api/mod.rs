@@ -27,6 +27,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/calendar", get(calendar::calendar))
         .route("/api/v1/earnings", get(earnings::calendar))
         .route("/api/v1/earnings/logo/{symbol}", get(earnings::logo))
+        .route("/api/v1/earnings/quote/{symbol}", get(earnings::quote))
         .route(
             "/api/v1/earnings/market/{date}/{symbol}",
             get(earnings::stock_market),
@@ -77,6 +78,7 @@ async fn meta() -> impl IntoResponse {
                 "earnings",
                 "earningsLogos",
                 "earningsMarket",
+                "earningsQuote",
                 "market",
                 "analysis",
                 "translation",

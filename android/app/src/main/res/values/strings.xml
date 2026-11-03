@@ -155,7 +155,7 @@
     <string name="backend_setup_hint">Fill in the backend address and access token, tap Test connection, then tap Backend to switch.</string>
     <string name="data_source_incomplete">Fill in the backend address and access token first.</string>
     <string name="data_source_switch_title">Switch data source?</string>
-    <string name="data_source_switch_body">The cached events and your follow list are cleared, because the two modes use different event identifiers. Filter settings are kept.</string>
+    <string name="data_source_switch_body">The cached macro events and macro follow list are cleared, because the two modes use different event identifiers. Filter settings are kept. Earnings favorites are shown separately for each data source.</string>
     <string name="data_source_switch_confirm">Switch and clear cache</string>
     <string name="calendar_warning_rate_limited">Calendar source is rate-limiting this device; showing cached data. It should recover in about %1$d min.</string>
     <string name="calendar_warning_rate_limited_unknown">Calendar source is rate-limiting this device; showing cached data. Try again later.</string>

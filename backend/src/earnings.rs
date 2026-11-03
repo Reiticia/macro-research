@@ -271,6 +271,7 @@ pub struct EarningsService {
     requests: Mutex<Requests>,
     health: Option<Arc<HealthRegistry>>,
     pub logos: crate::earnings_logo::CompanyLogoService,
+    pub live_quotes: Option<crate::earnings_quote::EarningsQuoteService>,
 }
 
 impl EarningsService {
@@ -284,7 +285,15 @@ impl EarningsService {
             tradingview_url: TRADINGVIEW_URL.into(),
             requests: Mutex::new(Requests::default()),
             health: None,
+            live_quotes: None,
         }
+    }
+    pub fn with_live_quotes(
+        mut self,
+        provider: Arc<dyn crate::market::StockQuoteProvider>,
+    ) -> Self {
+        self.live_quotes = Some(crate::earnings_quote::EarningsQuoteService::new(provider));
+        self
     }
     pub fn with_logos(mut self, logos: crate::earnings_logo::CompanyLogoService) -> Self {
         self.logos = logos;

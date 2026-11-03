@@ -33,4 +33,8 @@ pub struct StockQuote {
 #[async_trait]
 pub trait StockQuoteProvider: Send + Sync {
     async fn stock_quote(&self, symbol: &str) -> Result<StockQuote, AppError>;
+    /// Latest known price for display; never fed into historical release sampling.
+    async fn live_stock_quote(&self, symbol: &str) -> Result<StockQuote, AppError> {
+        self.stock_quote(symbol).await
+    }
 }

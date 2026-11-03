@@ -71,7 +71,7 @@ class EarningsUiTest {
         compose.onNodeWithText(context.getString(R.string.earnings_search)).performTextInput("Apple")
         compose.onNodeWithText(context.getString(R.string.earnings_market_open)).performScrollTo().performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("earnings-market-detail").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText(context.getString(R.string.earnings_market_backend_required)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.earnings_market_backend_required)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithContentDescription(context.getString(R.string.back)).performClick()
         compose.onNodeWithTag("earnings-market-detail").assertDoesNotExist()
         compose.onNodeWithText("Apple", substring = false).assertExists()

@@ -7,6 +7,10 @@ import com.macroresearch.data.model.EarningsCalendar
 import com.macroresearch.data.model.earningsTtl
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import com.macroresearch.data.model.EarningsQuote
+import com.macroresearch.data.model.EarningsEvent
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.security.MessageDigest
@@ -30,6 +34,8 @@ class EarningsRepository(
     private val clock: () -> Instant = Instant::now,
     val logos: CompanyLogoLoader? = null,
     private val backendMarket: (suspend (LocalDate, String) -> com.macroresearch.data.model.EarningsMarket)? = null,
+    private val backendQuote: (suspend (String) -> EarningsQuote)? = null,
+    private val favoritesStore: EarningsFavoritesStore? = null,
 ) {
     private val mutex = Mutex()
     private val attempts = mutableMapOf<String, Instant>()
@@ -38,7 +44,28 @@ class EarningsRepository(
         if (settings.mode == DataSourceMode.DIRECT) "direct" else "backend:" +
             MessageDigest.getInstance("SHA-256").digest(settings.baseUrl.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
-    /** No direct-mode substitute, no cached live quote, and no implicit collection trigger. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val favorites = settings.flatMapLatest { context ->
+        favoritesStore?.observe(sourceKey(context)) ?: flowOf(emptyList())
+    }
+
+    suspend fun setFavorite(date: LocalDate, event: EarningsEvent, enabled: Boolean) {
+        require(com.macroresearch.data.remote.companyLogoSymbol(event.symbol) == event.symbol)
+        val context = settings.value
+        favoritesStore?.set(sourceKey(context), FavoriteEarnings(date, event), enabled)
+    }
+
+    suspend fun quote(symbol: String): EarningsQuote {
+        val context = settings.value
+        check(context.mode == DataSourceMode.BACKEND) { "Current stock price requires backend mode" }
+        val fetch = backendQuote ?: throw UnsupportedOperationException("Current stock price is unavailable")
+        val result = fetch(symbol)
+        if (settings.value != context) throw CancellationException("Earnings source changed")
+        require(result.symbol == symbol) { "Invalid stock quote identity" }
+        return result
+    }
+
+    /** No direct-mode substitute and no implicit collection trigger. */
     suspend fun market(date: LocalDate, symbol: String): com.macroresearch.data.model.EarningsMarket {
         val context = settings.value
         check(context.mode == DataSourceMode.BACKEND) { "Earnings price history requires backend mode" }

@@ -479,6 +479,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             client_for("tradingview"),
         )
         .with_health(health.clone())
+        .with_live_quotes(yahoo_provider.clone())
         .with_logos(
             market_event_analyzer::earnings_logo::CompanyLogoService::new(client_for(
                 "earnings_logo",

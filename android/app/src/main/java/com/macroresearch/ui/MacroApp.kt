@@ -160,6 +160,7 @@ fun MacroApp(
                     padding = padding,
                     onBack = navController::popBackStack,
                     onEvent = { navController.navigate("event/$it") },
+                    earningsRepository = earningsRepository,
                 )
             }
             composable("event/{eventId}") { entry ->

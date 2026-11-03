@@ -40,4 +40,8 @@
     <string name="earnings_alignment_warning">Fiscal period, EPS basis and financial currency are not verified. These forecasts are separate from Nasdaq; do not directly compare them with historical actuals.</string>
     <string name="earnings_company_logo">Company logo: %1$s</string>
     <string name="earnings_logo_source">Company logos: Financial Modeling Prep (may be missing or outdated)</string>
+    <string name="earnings_page_open">Earnings page · %1$s</string>
+    <string name="earnings_page_unavailable">Earnings page unavailable</string>
+    <string name="earnings_page_note">Opens this company’s earnings overview in your browser, not an official announcement for the selected date or fiscal quarter. No backend credentials are sent.</string>
+    <string name="earnings_page_open_failed">Could not open the page. Check that a browser is available.</string>
 </resources>

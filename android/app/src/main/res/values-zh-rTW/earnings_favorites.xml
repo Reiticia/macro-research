@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="earnings_favorite">收藏財報事件</string>
+    <string name="earnings_unfavorite">取消收藏財報事件</string>
+    <string name="earnings_favorite_failed">收藏儲存失敗，請重試。</string>
+    <string name="earnings_favorites">已收藏財報</string>
+    <string name="earnings_quote_title">目前股價</string>
+    <string name="earnings_quote_time">Yahoo 報價時間：%1$s</string>
+    <string name="earnings_quote_stale">報價較舊或重新整理失敗，並非最新即時價。</string>
+    <string name="earnings_quote_bar">價格來自已收盤的一分鐘 K 線，並非逐筆報價。</string>
+    <string name="earnings_quote_backend_required">切換至後端模式後可查看目前股價。</string>
+    <string name="earnings_quote_unsupported">請更新後端以支援目前股價。</string>
+    <string name="earnings_quote_failed">暫時無法取得目前股價，頁面可見時將自動重試。</string>
+    <string name="earnings_quote_note">前景每 5 秒重新整理。此為目前價格，不是所選財報日期的歷史價格；Yahoo 資料可能延遲。</string>
+    <string name="earnings_favorite_snapshot">儲存的是收藏時的財報快照，不會自動切換財季或跟隨改期。</string>
+</resources>

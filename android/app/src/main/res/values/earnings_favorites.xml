@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="earnings_favorite">Favorite earnings event</string>
+    <string name="earnings_unfavorite">Remove earnings favorite</string>
+    <string name="earnings_favorite_failed">Could not save favorite. Please retry.</string>
+    <string name="earnings_favorites">Favorite earnings events</string>
+    <string name="earnings_quote_title">Current stock price</string>
+    <string name="earnings_quote_time">Yahoo quote time: %1$s</string>
+    <string name="earnings_quote_stale">Older quote or refresh failed; this is not a fresh live price.</string>
+    <string name="earnings_quote_bar">Price is a completed one-minute bar close, not a tick quote.</string>
+    <string name="earnings_quote_backend_required">Switch to backend mode to view the current stock price.</string>
+    <string name="earnings_quote_unsupported">Update the backend to enable current stock prices.</string>
+    <string name="earnings_quote_failed">Current price is unavailable. Retrying while this page is visible.</string>
+    <string name="earnings_quote_note">Refreshes every 5 seconds in the foreground. This is the current price, not the price on the selected earnings date; Yahoo may be delayed.</string>
+    <string name="earnings_favorite_snapshot">Saved event snapshot; it does not automatically roll over to the next quarter or follow date changes.</string>
+</resources>

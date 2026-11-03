@@ -47,8 +47,11 @@ import java.util.Locale
 internal fun EarningsMarketDialog(date: LocalDate, event: EarningsEvent, repository: EarningsRepository, onDismiss: () -> Unit) {
     val loader = remember(repository, date, event.symbol) { EarningsMarketLoader(repository, date, event.symbol) }
     val state by loader.state.collectAsStateWithLifecycle()
+    val quoteLoader = remember(repository, event.symbol) { EarningsQuoteLoader(repository, event.symbol) }
+    val quoteState by quoteLoader.state.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(loader, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { loader.monitor() } }
+    LaunchedEffect(quoteLoader, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { quoteLoader.monitor() } }
     var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -56,7 +59,8 @@ internal fun EarningsMarketDialog(date: LocalDate, event: EarningsEvent, reposit
         }
     }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        EarningsMarketContent(date, event, state, now, loader::refresh, onDismiss)
+        EarningsMarketContent(date, event, state, now, { loader.refresh(); quoteLoader.refresh() }, onDismiss,
+            quoteState = quoteState, favorite = { EarningsFavoriteButton(date, event, repository) })
     }
 }
 
@@ -69,6 +73,8 @@ internal fun EarningsMarketContent(
     now: Instant,
     onRefresh: () -> Unit,
     onBack: () -> Unit,
+    quoteState: EarningsQuoteState = EarningsQuoteState(),
+    favorite: (@Composable () -> Unit)? = null,
 ) {
     val locale = appLocale()
     val market = state.market
@@ -76,7 +82,7 @@ internal fun EarningsMarketContent(
         TopAppBar(
             title = { Text(event.symbol, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.back)) } },
-            actions = { IconButton(onClick = onRefresh, enabled = !state.loading, modifier = Modifier.testTag("earnings-market-refresh")) {
+            actions = { favorite?.invoke(); IconButton(onClick = onRefresh, enabled = !state.loading, modifier = Modifier.testTag("earnings-market-refresh")) {
                 Icon(Icons.Outlined.Refresh, stringResource(R.string.earnings_refresh))
             } },
         )
@@ -86,6 +92,8 @@ internal fun EarningsMarketContent(
             Text(event.name, style = MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.earnings_market_date, date.toString()), style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            CurrentStockPriceCard(quoteState, now, locale)
+            EarningsPageLink(event)
             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             state.error?.let { error ->
                 Card {
