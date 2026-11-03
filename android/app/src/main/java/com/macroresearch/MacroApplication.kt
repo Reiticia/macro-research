@@ -128,6 +128,7 @@ class MacroApplication : Application() {
             store = com.macroresearch.data.local.RoomEarningsStore(database.earningsDao()),
             direct = earningsClient::fetch,
             backend = backendClient::earnings,
+            backendMarket = backendClient::earningsMarket,
             gson = gson,
             logos = com.macroresearch.data.CompanyLogoLoader(backendPreferences.settings, logoClient::image, backendClient::companyLogo),
         )

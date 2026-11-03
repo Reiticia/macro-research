@@ -29,6 +29,7 @@ class EarningsRepository(
     private val gson: Gson = Gson(),
     private val clock: () -> Instant = Instant::now,
     val logos: CompanyLogoLoader? = null,
+    private val backendMarket: (suspend (LocalDate, String) -> com.macroresearch.data.model.EarningsMarket)? = null,
 ) {
     private val mutex = Mutex()
     private val attempts = mutableMapOf<String, Instant>()
@@ -36,6 +37,17 @@ class EarningsRepository(
     private fun sourceKey(settings: BackendSettings): String =
         if (settings.mode == DataSourceMode.DIRECT) "direct" else "backend:" +
             MessageDigest.getInstance("SHA-256").digest(settings.baseUrl.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+    /** No direct-mode substitute, no cached live quote, and no implicit collection trigger. */
+    suspend fun market(date: LocalDate, symbol: String): com.macroresearch.data.model.EarningsMarket {
+        val context = settings.value
+        check(context.mode == DataSourceMode.BACKEND) { "Earnings price history requires backend mode" }
+        val fetch = backendMarket ?: throw UnsupportedOperationException("Earnings market is unavailable")
+        val result = fetch(date, symbol)
+        if (settings.value != context) throw CancellationException("Earnings source changed")
+        require(result.date == date.toString() && result.symbol == symbol) { "Invalid earnings market identity" }
+        return result
+    }
 
     suspend fun cached(date: LocalDate): EarningsCalendar? {
         val context = settings.value

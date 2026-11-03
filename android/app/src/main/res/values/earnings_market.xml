@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="earnings_market_open">View stock price</string>
+    <string name="earnings_market_date">Earnings date · New York: %1$s</string>
+    <string name="earnings_market_title">Stock price tracking</string>
+    <string name="earnings_market_not_started">Not started</string>
+    <string name="earnings_market_ended">Window ended</string>
+    <string name="earnings_market_collecting">Collecting · 60 min</string>
+    <string name="earnings_market_last_sample">Latest stored sample · not a live trading quote</string>
+    <string name="earnings_market_quote_time">Quote time: %1$s</string>
+    <string name="earnings_market_detected">First detected: %1$s</string>
+    <string name="earnings_market_window">Collection ends: %1$s</string>
+    <string name="earnings_market_baseline">First sample: %1$s %2$s · %3$s</string>
+    <string name="earnings_market_observed">Observed prices after detection</string>
+    <string name="earnings_market_change_basis">Changes use the first collected price, not a pre-release baseline. Only real samples in the preceding 90 seconds are used; no interpolation. Scroll horizontally for all windows.</string>
+    <string name="earnings_market_timeline">Price reaction timeline</string>
+    <string name="earnings_market_after_detection">+%1$d min detected</string>
+    <string name="earnings_market_no_point">This time has not arrived, or no valid sample exists within the preceding 90 seconds.</string>
+    <string name="earnings_market_coverage">Minute coverage · sampled: %1$d / expected: %2$d / missing: %3$d</string>
+    <string name="earnings_market_provider_error">The last provider request failed. Missing samples remain gaps.</string>
+    <string name="earnings_market_bar_close">Includes closed one-minute bar prices. Quote times use the bar end; these are not live ticks.</string>
+    <string name="earnings_market_source">Source: Yahoo Finance · times in %1$s</string>
+    <string name="earnings_market_last_success">Last successful fetch: %1$s</string>
+    <string name="earnings_market_chart">Stock price samples during the 60-minute detection window; missing minutes break the line.</string>
+    <string name="earnings_market_backend_required">Stock collection history requires backend mode. Direct mode does not synthesize a release history.</string>
+    <string name="earnings_market_unsupported">This backend does not support earnings stock prices yet. Update the backend first.</string>
+    <string name="earnings_market_failed">Could not refresh stock samples. Check the backend connection and retry.</string>
+    <string name="earnings_market_stale">Showing the last loaded samples; this refresh failed.</string>
+    <string name="earnings_market_watching">Waiting for the primary source to report actual EPS. This view does not start collection.</string>
+    <string name="earnings_market_already_reported">EPS was already reported at first observation. No historical price window was reconstructed.</string>
+    <string name="earnings_market_missed">The release transition could not be verified. No price collection was started.</string>
+    <string name="earnings_market_unobserved">No verified release observation or stock collection is available for this date.</string>
+    <string name="earnings_market_no_samples">No valid stock sample yet. Closed markets, delayed feeds or provider failures may leave the window empty.</string>
+    <string name="earnings_market_method">Collection lasts 60 minutes from the first detected actual EPS, not a confirmed company publication time. Changes use the first collected price, not a pre-release baseline. Missing data stays missing; a finished window does not mean complete coverage. Yahoo quotes may be delayed.</string>
+    <string name="earnings_market_rate_limited">The backend is rate-limiting requests. Wait before trying again.</string>
+    <string name="earnings_market_price_range">Sample range: %1$s – %2$s</string>
+</resources>

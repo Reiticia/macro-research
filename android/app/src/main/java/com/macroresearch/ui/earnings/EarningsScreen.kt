@@ -45,6 +45,7 @@ fun EarningsScreen(repository: EarningsRepository) {
     var search by rememberSaveable { mutableStateOf("") }
     var session by rememberSaveable { mutableStateOf<String?>(null) }
     var picker by remember { mutableStateOf(false) }
+    var marketEvent by remember(state.date) { mutableStateOf<EarningsEvent?>(null) }
     val locale = appLocale()
     val today = LocalDate.now(EARNINGS_ZONE)
     val minDate = today.minusDays(120)
@@ -104,7 +105,9 @@ fun EarningsScreen(repository: EarningsRepository) {
                     Text(stringResource(R.string.earnings_empty), Modifier.fillMaxWidth().padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            items(filtered, key = { "${it.source}:${it.tradingView?.ticker ?: it.symbol}" }) { event -> EarningsCard(event, repository.logos, source) }
+            items(filtered, key = { "${it.source}:${it.tradingView?.ticker ?: it.symbol}" }) { event ->
+                EarningsCard(event, repository.logos, source, onMarket = { marketEvent = event })
+            }
             state.calendar?.let { calendar -> item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(stringResource(R.string.earnings_logo_source), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -117,6 +120,7 @@ fun EarningsScreen(repository: EarningsRepository) {
             } }
         }
     }
+    marketEvent?.let { EarningsMarketDialog(state.date, it, repository) { marketEvent = null } }
     if (picker) {
         val pickerState = rememberDatePickerState(
             initialSelectedDateMillis = state.date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
@@ -153,7 +157,12 @@ private fun WarningText(resource: Int) {
 }
 
 @Composable
-internal fun EarningsCard(event: EarningsEvent, logos: com.macroresearch.data.CompanyLogoLoader?, source: com.macroresearch.data.BackendSettings) {
+internal fun EarningsCard(
+    event: EarningsEvent,
+    logos: com.macroresearch.data.CompanyLogoLoader?,
+    source: com.macroresearch.data.BackendSettings,
+    onMarket: (() -> Unit)? = null,
+) {
     var expanded by rememberSaveable(event.symbol, event.source) { mutableStateOf(false) }
     Surface(shape = MaterialTheme.shapes.medium, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -177,6 +186,9 @@ internal fun EarningsCard(event: EarningsEvent, logos: com.macroresearch.data.Co
                 Metric(stringResource(R.string.earnings_surprise), event.surprisePercent?.let { "$it%" }, Modifier.weight(1f))
             }
             Text(stringResource(R.string.earnings_primary_source, if (event.source == "nasdaq") "Nasdaq" else "TradingView"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (onMarket != null) OutlinedButton(onClick = onMarket, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.earnings_market_open))
+            }
             event.tradingView?.let { tv ->
                 if (tv.dateConflict) WarningText(R.string.earnings_conflict)
                 TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {

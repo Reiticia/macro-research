@@ -18,4 +18,7 @@
     <string name="calendar_legend">公司圖示：財報 · 彩色圓點：經濟事件</string>
     <string name="calendar_day_pending">當天資料尚未載入完成</string>
     <string name="calendar_day_unavailable">當天部分資料無法使用或來自舊快取</string>
+    <string name="calendar_week_agenda">一週日程</string>
+    <string name="calendar_open_month">查看整月日曆</string>
+    <string name="calendar_back_to_week">返回一週日程</string>
 </resources>

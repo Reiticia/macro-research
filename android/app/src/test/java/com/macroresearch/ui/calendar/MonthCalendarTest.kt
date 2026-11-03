@@ -49,10 +49,122 @@ class MonthCalendarTest {
     private fun calendar(date: LocalDate, symbol: String = "AAPL") = EarningsCalendar(
         date.toString(), updatedAt = now.toString(), events = listOf(EarningsEvent(symbol, "Apple", "nasdaq", "after_hours")),
     )
-    private fun vm(economic: Economic, earnings: EarningsRepository?): MonthCalendarViewModel =
-        MonthCalendarViewModel(economic, earnings, clock = { now }).also { vm ->
+    private fun vm(
+        economic: Economic,
+        earnings: EarningsRepository?,
+        presentation: CalendarPresentation = CalendarPresentation.MONTH,
+    ): MonthCalendarViewModel =
+        MonthCalendarViewModel(economic, earnings, clock = { now }, initialPresentation = presentation).also { vm ->
             stores += ViewModelStore().also { it.put("month", vm) }
         }
+
+    @Test fun weekStripIsMondayFirstAndHandlesCrossMonthYearAndLeapDays() {
+        for (anchor in listOf(today, LocalDate.of(2026, 11, 30), LocalDate.of(2027, 1, 1), LocalDate.of(2024, 2, 29))) {
+            val days = weekDates(anchor)
+            assertEquals(7, days.size)
+            assertEquals(7, days.distinct().size)
+            assertEquals(DayOfWeek.MONDAY, days.first().dayOfWeek)
+            assertEquals(DayOfWeek.SUNDAY, days.last().dayOfWeek)
+            assertTrue(anchor in days)
+        }
+    }
+
+    @Test fun defaultViewLoadsOnlyTheCurrentWeekAndShowsTodayInline() = runTest {
+        val source = Economic(settings)
+        val requests = mutableListOf<LocalDate>()
+        val vm = MonthCalendarViewModel(source, earnings { date -> requests += date; calendar(date) }, clock = { now })
+        stores += ViewModelStore().also { it.put("week", vm) }
+        advanceUntilIdle()
+        assertEquals(CalendarPresentation.WEEK, vm.state.value.presentation)
+        assertEquals(today, vm.state.value.selectedDate)
+        assertEquals(weekDates(today), vm.state.value.visibleDates)
+        assertEquals(today, requests.first())
+        assertEquals(7, requests.size)
+        assertEquals(weekDates(today).toSet(), requests.toSet())
+        assertEquals(listOf(weekDates(today).first() to weekDates(today).last()), source.requests)
+    }
+
+    @Test fun monthViewIsOptInAndReturningRestoresWeeklySelectionAndFilters() = runTest {
+        val source = Economic(settings)
+        val vm = vm(source, earnings { date -> calendar(date) }, CalendarPresentation.WEEK)
+        advanceUntilIdle()
+        val chosen = today.plusDays(2)
+        vm.selectDate(chosen)
+        vm.selectContent(CalendarContent.EARNINGS)
+        vm.toggleImportance(1)
+        advanceUntilIdle()
+        vm.showMonth()
+        advanceUntilIdle()
+        assertEquals(CalendarPresentation.MONTH, vm.state.value.presentation)
+        assertEquals(42, vm.state.value.visibleDates.size)
+        assertEquals(chosen, vm.state.value.weekDate)
+        vm.selectMonth(YearMonth.of(2026, 12))
+        advanceUntilIdle()
+        vm.selectDate(LocalDate.of(2026, 12, 10))
+        vm.showWeek()
+        advanceUntilIdle()
+        assertEquals(CalendarPresentation.WEEK, vm.state.value.presentation)
+        assertEquals(chosen, vm.state.value.selectedDate)
+        assertEquals(CalendarContent.EARNINGS, vm.state.value.content)
+        assertEquals(setOf(2, 3), vm.state.value.importance)
+        assertEquals(weekDates(chosen).toSet(), vm.state.value.earnings.keys)
+    }
+
+    @Test fun nextPreviousWeekAndTodayFetchOnlyTheirSevenDayRanges() = runTest {
+        val source = Economic(settings)
+        val vm = vm(source, earnings { date -> calendar(date) }, CalendarPresentation.WEEK)
+        advanceUntilIdle()
+        vm.selectWeek(1)
+        advanceUntilIdle()
+        assertEquals(today.plusWeeks(1), vm.state.value.selectedDate)
+        assertEquals(weekDates(today.plusWeeks(1)).toSet(), vm.state.value.earnings.keys)
+        assertEquals(weekDates(today.plusWeeks(1)).first() to weekDates(today.plusWeeks(1)).last(), source.requests.last())
+        vm.selectWeek(-2)
+        advanceUntilIdle()
+        assertEquals(today.minusWeeks(1), vm.state.value.selectedDate)
+        vm.selectToday()
+        advanceUntilIdle()
+        assertEquals(today, vm.state.value.selectedDate)
+        assertEquals(weekDates(today).toSet(), vm.state.value.earnings.keys)
+        assertTrue(source.requests.all { (start, end) -> java.time.temporal.ChronoUnit.DAYS.between(start, end) == 6L })
+    }
+
+    @Test fun changingDayAcrossMonthBoundaryWithinOneWeekDoesNotFetchAMonth() = runTest {
+        val source = Economic(settings)
+        val vm = vm(source, earnings { date -> calendar(date) }, CalendarPresentation.WEEK)
+        advanceUntilIdle()
+        vm.selectDate(LocalDate.of(2026, 11, 30))
+        advanceUntilIdle()
+        val count = source.requests.size
+        vm.selectDate(LocalDate.of(2026, 12, 1))
+        advanceUntilIdle()
+        assertEquals(count, source.requests.size)
+        assertEquals(CalendarPresentation.WEEK, vm.state.value.presentation)
+        assertEquals(weekDates(LocalDate.of(2026, 11, 30)), vm.state.value.visibleDates)
+    }
+
+    @Test fun closingMonthCancelsItsRequestsAndRejectsLateMonthResults() = runTest {
+        val source = Economic(settings)
+        val finish = CompletableDeferred<Unit>()
+        val requests = mutableListOf<LocalDate>()
+        val week = weekDates(today)
+        val vm = vm(source, earnings { date ->
+            requests += date
+            if (date !in week) withContext(NonCancellable) { finish.await() }
+            calendar(date)
+        }, CalendarPresentation.WEEK)
+        advanceUntilIdle()
+        vm.showMonth()
+        runCurrent()
+        assertTrue(requests.any { it !in week })
+        vm.showWeek()
+        finish.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(CalendarPresentation.WEEK, vm.state.value.presentation)
+        assertEquals(week.toSet(), vm.state.value.earnings.keys)
+        assertEquals(1, requests.count { it !in week })
+        assertFalse(vm.state.value.earningsLoading)
+    }
 
     @Test fun sundayGridIncludesLeapDaysYearBoundariesAndRealSpilloverDates() {
         for (month in listOf(YearMonth.of(2024, 2), YearMonth.of(2026, 11), YearMonth.of(2026, 12))) {

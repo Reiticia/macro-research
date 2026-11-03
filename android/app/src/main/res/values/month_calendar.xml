@@ -18,4 +18,7 @@
     <string name="calendar_legend">Company logos: earnings · Colored dot: economic events</string>
     <string name="calendar_day_pending">Date not fully loaded</string>
     <string name="calendar_day_unavailable">Date has unavailable or cached data</string>
+    <string name="calendar_week_agenda">Weekly agenda</string>
+    <string name="calendar_open_month">View month calendar</string>
+    <string name="calendar_back_to_week">Back to weekly agenda</string>
 </resources>

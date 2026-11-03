@@ -171,6 +171,12 @@ class BackendClient(
         com.macroresearch.data.decodeEarningsCalendar(root.toString(), date, gson)
     }
 
+    suspend fun earningsMarket(date: java.time.LocalDate, symbol: String): com.macroresearch.data.model.EarningsMarket = withContext(Dispatchers.IO) {
+        val safe = companyLogoSymbol(symbol) ?: throw IllegalArgumentException("Invalid stock symbol")
+        val root = getJson("/api/v1/earnings/market/$date/$safe")
+        com.macroresearch.data.model.decodeEarningsMarket(root.toString(), date, safe, gson)
+    }
+
     suspend fun history(
         countries: Collection<String>,
         category: String?,
@@ -252,7 +258,7 @@ class BackendClient(
         val builder = requestBuilder(path, authenticated, configure)
         // A release POST syncs the server, but cannot invalidate OkHttp's separate calendar URL.
         if (path == "/api/v1/calendar" || path == "/api/v1/earnings") builder.cacheControl(okhttp3.CacheControl.FORCE_NETWORK)
-        if (path == "/api/v1/meta" || path == "/api/v1/status") {
+        if (path == "/api/v1/meta" || path == "/api/v1/status" || path.startsWith("/api/v1/earnings/market/")) {
             builder.cacheControl(okhttp3.CacheControl.Builder().noCache().noStore().build())
         }
         val request = builder.get().build()

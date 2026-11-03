@@ -40,10 +40,11 @@ internal class MonthCalendarViewModel(
     private val economic: MonthEconomicSource,
     private val earnings: EarningsRepository?,
     private val clock: () -> Instant = Instant::now,
+    initialPresentation: CalendarPresentation = CalendarPresentation.WEEK,
 ) : ViewModel() {
     private val today get() = clock().atZone(EARNINGS_ZONE).toLocalDate()
     private val mutable = MutableStateFlow(MonthCalendarState(
-        month = YearMonth.from(today), selectedDate = today,
+        month = YearMonth.from(today), selectedDate = today, presentation = initialPresentation,
         countries = economic.countries.value, earningsAvailable = earnings != null,
     ))
     val state = mutable.asStateFlow()
@@ -60,7 +61,7 @@ internal class MonthCalendarViewModel(
                         economic = emptyList(), earnings = emptyMap(), economicLoaded = false,
                         economicFailed = false,
                     )
-                    loadMonth()
+                    loadVisibleRange()
                 }
         }
         viewModelScope.launch {
@@ -68,42 +69,62 @@ internal class MonthCalendarViewModel(
         }
     }
 
+    fun showMonth() {
+        if (mutable.value.presentation == CalendarPresentation.MONTH) return
+        switchRange(mutable.value.copy(presentation = CalendarPresentation.MONTH,
+            month = YearMonth.from(mutable.value.selectedDate)))
+    }
+
+    fun showWeek() {
+        if (mutable.value.presentation == CalendarPresentation.WEEK) return
+        val date = mutable.value.weekDate
+        switchRange(mutable.value.copy(presentation = CalendarPresentation.WEEK,
+            selectedDate = date, month = YearMonth.from(date)))
+    }
+
     fun selectMonth(month: YearMonth) {
-        if (month == mutable.value.month) return
-        mutable.value = mutable.value.copy(
-            month = month,
+        if (month == mutable.value.month && mutable.value.presentation == CalendarPresentation.MONTH) return
+        switchRange(mutable.value.copy(
+            presentation = CalendarPresentation.MONTH, month = month,
             selectedDate = if (month == YearMonth.from(today)) today else month.atDay(1),
-            economic = emptyList(), earnings = emptyMap(), economicLoaded = false, economicFailed = false,
-        )
-        loadMonth()
+        ))
     }
 
     fun selectDate(date: LocalDate) {
-        if (YearMonth.from(date) != mutable.value.month) selectMonth(YearMonth.from(date))
-        mutable.value = mutable.value.copy(selectedDate = date)
-        // The serial earnings worker reads this value before every request, prioritizing this day.
+        val current = mutable.value
+        val next = current.copy(selectedDate = date, month = YearMonth.from(date),
+            weekDate = if (current.presentation == CalendarPresentation.WEEK) date else current.weekDate)
+        if (next.visibleDates != current.visibleDates) switchRange(next) else mutable.value = next
+        // The serial earnings worker prioritizes this date without reloading the same range.
     }
 
+    fun selectWeek(offset: Long) = selectDate(mutable.value.weekDate.plusWeeks(offset))
     fun selectToday() = selectDate(today)
+
+    private fun switchRange(next: MonthCalendarState) {
+        mutable.value = next.copy(economic = emptyList(), earnings = emptyMap(),
+            economicLoaded = false, economicFailed = false)
+        loadVisibleRange()
+    }
 
     fun selectContent(content: CalendarContent) {
         if (content == mutable.value.content) return
         mutable.value = mutable.value.copy(content = content)
-        loadMonth()
+        loadVisibleRange()
     }
 
     fun toggleImportance(level: Int) {
         mutable.value = mutable.value.copy(importance = toggleImportanceSelection(mutable.value.importance, level))
     }
 
-    fun refresh() = loadMonth(forceSelected = true)
+    fun refresh() = loadVisibleRange(forceSelected = true)
 
-    private fun loadMonth(forceSelected: Boolean = false) {
+    private fun loadVisibleRange(forceSelected: Boolean = false) {
         economicRequest?.cancel()
         economicObservation?.cancel()
         earningsRequest?.cancel()
         val version = ++generation
-        val dates = monthDates(mutable.value.month)
+        val dates = mutable.value.visibleDates
         mutable.value = mutable.value.copy(
             economicLoading = mutable.value.showEconomic && (!mutable.value.economicLoaded || forceSelected),
             earningsLoading = mutable.value.showEarnings,
@@ -130,7 +151,7 @@ internal class MonthCalendarViewModel(
         if (!mutable.value.showEarnings) return
         earningsRequest = viewModelScope.launch {
             val supported = dates.filter { supportsEarnings(it, today) }
-            // Read all local snapshots first, so network work never holds the entire grid blank.
+            // Read local snapshots first; the default week must never trigger a hidden month fetch.
             for (date in supported) {
                 if (mutable.value.earnings[date]?.calendar == null) {
                     val cached = try { repository.cached(date) }

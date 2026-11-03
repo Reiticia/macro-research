@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="earnings_market_open">查看對應股價</string>
+    <string name="earnings_market_date">紐約財報日：%1$s</string>
+    <string name="earnings_market_title">個股行情追蹤</string>
+    <string name="earnings_market_not_started">尚未開始</string>
+    <string name="earnings_market_ended">採集視窗已結束</string>
+    <string name="earnings_market_collecting">採集中 · 60 分鐘</string>
+    <string name="earnings_market_last_sample">最新儲存採樣價 · 非交易即時價</string>
+    <string name="earnings_market_quote_time">報價時間：%1$s</string>
+    <string name="earnings_market_detected">首次偵測時間：%1$s</string>
+    <string name="earnings_market_window">採集結束時間：%1$s</string>
+    <string name="earnings_market_baseline">首個採樣價：%1$s %2$s · %3$s</string>
+    <string name="earnings_market_observed">偵測後的實際行情</string>
+    <string name="earnings_market_change_basis">漲跌幅相對首個採樣價，並非相對財報公布前價格。僅取目標時點前 90 秒內的真實採樣，不插值；橫向滑動可查看全部時段。</string>
+    <string name="earnings_market_timeline">股價反應時間線</string>
+    <string name="earnings_market_after_detection">偵測後 %1$d 分鐘</string>
+    <string name="earnings_market_no_point">尚未到達所選時點，或其前 90 秒內沒有有效採樣。</string>
+    <string name="earnings_market_coverage">分鐘覆蓋：%1$d / 應有 %2$d · 缺失 %3$d</string>
+    <string name="earnings_market_provider_error">最近一次上游請求失敗，缺失採樣仍保留為空。</string>
+    <string name="earnings_market_bar_close">含已收盤的一分鐘 K 線價格，報價時間按分鐘結束記錄，並非即時逐筆成交。</string>
+    <string name="earnings_market_source">來源：Yahoo Finance · 時間均為 %1$s</string>
+    <string name="earnings_market_last_success">最近成功採集：%1$s</string>
+    <string name="earnings_market_chart">偵測後 60 分鐘的股價採樣走勢，缺失分鐘不連線。</string>
+    <string name="earnings_market_backend_required">個股採集記錄需要後端模式。直連模式不會偽造財報發布後的歷史行情。</string>
+    <string name="earnings_market_unsupported">目前後端尚不支援財報個股行情，請先更新後端。</string>
+    <string name="earnings_market_failed">股價採樣重新整理失敗，請檢查後端連線後重試。</string>
+    <string name="earnings_market_stale">本次重新整理失敗，目前顯示上次載入的採樣資料。</string>
+    <string name="earnings_market_watching">等待主源偵測到實際 EPS。開啟本頁不會啟動採集。</string>
+    <string name="earnings_market_already_reported">首次觀察時財報已公布，未補採或重建歷史股價視窗。</string>
+    <string name="earnings_market_missed">未能可靠確認財報由未公布轉為已公布，因此未啟動股價採集。</string>
+    <string name="earnings_market_unobserved">該日期尚無已確認的財報觀測或個股採集記錄。</string>
+    <string name="earnings_market_no_samples">尚無有效股價採樣；休市、報價延遲或上游失敗可能導致採集視窗為空。</string>
+    <string name="earnings_market_method">從首次偵測到實際 EPS 起採集 60 分鐘，該時間不是公司確認的公布時間。漲跌幅以首個採樣價為基準，並非公布前價格。缺失資料保留為空，採集結束不代表資料齊全；Yahoo 報價可能延遲。</string>
+    <string name="earnings_market_rate_limited">伺服器限制請求頻率，請稍後重試。</string>
+    <string name="earnings_market_price_range">採樣價格區間：%1$s – %2$s</string>
+</resources>

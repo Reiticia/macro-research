@@ -20,6 +20,7 @@ import com.macroresearch.R
 import com.macroresearch.data.BackendSettings
 import com.macroresearch.data.CompanyLogoLoader
 import com.macroresearch.data.model.EARNINGS_ZONE
+import com.macroresearch.data.model.EarningsEvent
 import com.macroresearch.data.model.filterEarnings
 import com.macroresearch.ui.common.*
 import com.macroresearch.ui.earnings.EarningsCard
@@ -40,10 +41,11 @@ internal fun CalendarDaySheet(
     onImportance: (Int) -> Unit,
     onRefresh: () -> Unit,
     onEvent: (Long) -> Unit,
+    onEarnings: ((EarningsEvent) -> Unit)? = null,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         CalendarDayContent(state, source, logos, warning, onDismiss, onContent, onImportance, onRefresh, onEvent,
-            Modifier.fillMaxHeight(0.92f))
+            Modifier.fillMaxHeight(0.92f), onEarnings = onEarnings)
     }
 }
 
@@ -59,6 +61,8 @@ internal fun CalendarDayContent(
     onRefresh: () -> Unit,
     onEvent: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    embedded: Boolean = false,
+    onEarnings: ((EarningsEvent) -> Unit)? = null,
 ) {
     var search by rememberSaveable(state.selectedDate) { mutableStateOf("") }
     var session by rememberSaveable(state.selectedDate) { mutableStateOf<String?>(null) }
@@ -72,16 +76,18 @@ internal fun CalendarDayContent(
             search.isBlank() || it.localizedName(locale).contains(search.trim(), true) || it.event.contains(search.trim(), true)
         }
     }
-    Column(modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier.fillMaxWidth().padding(horizontal = if (embedded) 0.dp else 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(dateLabel(state.selectedDate), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                Text(dateLabel(state.selectedDate), style = if (embedded) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
                     modifier = Modifier.testTag("calendar-selected-date"))
-                Text(stringResource(R.string.calendar_day_agenda), style = MaterialTheme.typography.labelMedium,
+                if (!embedded) Text(stringResource(R.string.calendar_day_agenda), style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = onRefresh) { Icon(Icons.Outlined.Refresh, stringResource(R.string.calendar_refresh)) }
-            IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, stringResource(R.string.calendar_close_day)) }
+            if (!embedded) {
+                IconButton(onClick = onRefresh) { Icon(Icons.Outlined.Refresh, stringResource(R.string.calendar_refresh)) }
+                IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, stringResource(R.string.calendar_close_day)) }
+            }
         }
         CalendarContentFilters(state.content, state.earningsAvailable, onContent)
         OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(),
@@ -141,7 +147,7 @@ internal fun CalendarDayContent(
                         Text(stringResource(R.string.earnings_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     items(earnings, key = { "earnings-${it.source}:${it.tradingView?.ticker ?: it.symbol}" }) { event ->
-                        EarningsCard(event, logos, source)
+                        EarningsCard(event, logos, source, onMarket = onEarnings?.let { open -> { open(event) } })
                     }
                     if (calendar != null) item(key = "earnings-sources") {
                         Text(stringResource(R.string.earnings_source_times,

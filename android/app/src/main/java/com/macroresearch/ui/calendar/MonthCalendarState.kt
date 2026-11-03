@@ -9,6 +9,7 @@ import java.time.YearMonth
 import java.time.ZoneId
 
 enum class CalendarContent { ALL, EARNINGS, ECONOMIC }
+enum class CalendarPresentation { WEEK, MONTH }
 
 data class MonthEarningsDay(
     val calendar: EarningsCalendar? = null,
@@ -19,6 +20,8 @@ data class MonthEarningsDay(
 data class MonthCalendarState(
     val month: YearMonth = YearMonth.now(EARNINGS_ZONE),
     val selectedDate: LocalDate = LocalDate.now(EARNINGS_ZONE),
+    val weekDate: LocalDate = selectedDate,
+    val presentation: CalendarPresentation = CalendarPresentation.WEEK,
     val content: CalendarContent = CalendarContent.ALL,
     val economic: List<EconomicEvent> = emptyList(),
     val earnings: Map<LocalDate, MonthEarningsDay> = emptyMap(),
@@ -30,9 +33,16 @@ data class MonthCalendarState(
     val earningsLoading: Boolean = false,
     val earningsAvailable: Boolean = true,
 ) {
+    val visibleDates get() = if (presentation == CalendarPresentation.MONTH) monthDates(month) else weekDates(weekDate)
     val showEconomic get() = content != CalendarContent.EARNINGS
     val showEarnings get() = content != CalendarContent.ECONOMIC && earningsAvailable
     val filteredEconomic get() = economic.filter { it.country in countries && it.importance in importance }
+}
+
+/** Monday-first date strip matching the original calendar; only this week is loaded by default. */
+internal fun weekDates(anchor: LocalDate): List<LocalDate> {
+    val monday = anchor.minusDays((anchor.dayOfWeek.value - 1).toLong())
+    return List(7) { monday.plusDays(it.toLong()) }
 }
 
 /** Sunday-first, six complete weeks; spillover dates remain real selectable dates. */

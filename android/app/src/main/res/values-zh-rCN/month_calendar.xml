@@ -18,4 +18,7 @@
     <string name="calendar_legend">公司图标：财报 · 彩色圆点：经济事件</string>
     <string name="calendar_day_pending">当天数据尚未加载完成</string>
     <string name="calendar_day_unavailable">当天部分数据不可用或来自旧缓存</string>
+    <string name="calendar_week_agenda">一周日程</string>
+    <string name="calendar_open_month">查看整月日历</string>
+    <string name="calendar_back_to_week">返回一周日程</string>
 </resources>

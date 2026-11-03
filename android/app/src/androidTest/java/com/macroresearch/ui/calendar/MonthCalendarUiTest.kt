@@ -26,7 +26,8 @@ class MonthCalendarUiTest {
     private val reference = LocalDate.of(2026, 11, 3)
 
     private fun state(date: LocalDate = reference): MonthCalendarState = MonthCalendarState(
-        month = YearMonth.from(date), selectedDate = date, countries = setOf("united states"), economicLoaded = true,
+        month = YearMonth.from(date), selectedDate = date, presentation = CalendarPresentation.MONTH,
+        countries = setOf("united states"), economicLoaded = true,
         economic = listOf(EconomicEvent(
             7, "tradingview", "cpi", null, "united states", "USD", "inflation", "CPI",
             eventTime = date.atTime(8, 30).atZone(ZoneId.systemDefault()).toInstant().toString(),
@@ -39,6 +40,76 @@ class MonthCalendarUiTest {
             ),
         ), loaded = true)),
     )
+
+    @Test fun defaultWeekShowsInlineListAndOpensMonthOnlyFromTopRightEntry() {
+        var openedEvent: Long? = null
+        compose.setContent {
+            var value by remember { mutableStateOf(state().copy(presentation = CalendarPresentation.WEEK)) }
+            MaterialTheme {
+                if (value.presentation == CalendarPresentation.WEEK) {
+                    CalendarWeekContent(value, BackendSettings(), null, null,
+                        onDate = { value = value.copy(selectedDate = it, weekDate = it, month = YearMonth.from(it)) },
+                        onWeek = {}, onToday = {},
+                        onMonth = { value = value.copy(presentation = CalendarPresentation.MONTH) },
+                        onContent = { value = value.copy(content = it) }, onImportance = {}, onRefresh = {},
+                        onEvent = { openedEvent = it })
+                } else {
+                    CalendarMonthContent(value, BackendSettings(), null,
+                        onMonth = { value = value.copy(month = it, selectedDate = it.atDay(1)) },
+                        onToday = {}, onPicker = {}, onRefresh = {},
+                        onContent = { value = value.copy(content = it) }, onDate = {},
+                        onBack = { value = value.copy(presentation = CalendarPresentation.WEEK,
+                            selectedDate = value.weekDate, month = YearMonth.from(value.weekDate)) })
+                }
+            }
+        }
+        compose.onNodeWithTag("calendar-week-view").assertIsDisplayed()
+        compose.onNodeWithTag("calendar-month-view").assertDoesNotExist()
+        weekDates(reference).forEach { date -> compose.onNodeWithTag("calendar-week-day-$date").assertIsDisplayed() }
+        compose.onNodeWithText("CPI").performClick()
+        compose.runOnIdle { assertEquals(7L, openedEvent) }
+        compose.onNodeWithTag("calendar-filter-EARNINGS").performClick()
+        compose.onNodeWithTag("calendar-open-month").performClick()
+        compose.onNodeWithTag("calendar-month-view").assertIsDisplayed()
+        compose.onNodeWithTag("calendar-week-view").assertDoesNotExist()
+        compose.onNodeWithTag("calendar-next-month").performClick()
+        compose.onNodeWithTag("calendar-close-month").performClick()
+        compose.onNodeWithTag("calendar-week-view").assertIsDisplayed()
+        compose.onNodeWithTag("calendar-week-day-$reference").assertIsSelected()
+        compose.onNodeWithTag("calendar-filter-EARNINGS").assertIsSelected()
+        compose.onNodeWithText("AAPL").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun weekAgendaOpensTheCorrespondingStock() {
+        var symbol: String? = null
+        val today = LocalDate.now(EARNINGS_ZONE)
+        compose.setContent {
+            MaterialTheme {
+                CalendarWeekContent(state(today).copy(presentation = CalendarPresentation.WEEK, content = CalendarContent.EARNINGS),
+                    BackendSettings(), null, null, onDate = {}, onWeek = {}, onToday = {}, onMonth = {},
+                    onContent = {}, onImportance = {}, onRefresh = {}, onEvent = {}, onEarnings = { symbol = it.symbol })
+            }
+        }
+        compose.onNodeWithText(context.getString(R.string.earnings_market_open)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals("AAPL", symbol) }
+    }
+
+    @Test fun weekDateSelectionChangesInlineDayWithoutOpeningMonthOrSheet() {
+        compose.setContent {
+            var value by remember { mutableStateOf(state().copy(presentation = CalendarPresentation.WEEK)) }
+            MaterialTheme {
+                CalendarWeekContent(value, BackendSettings(), null, null,
+                    onDate = { value = value.copy(selectedDate = it, weekDate = it) },
+                    onWeek = {}, onToday = {}, onMonth = {}, onContent = {}, onImportance = {}, onRefresh = {}, onEvent = {})
+            }
+        }
+        val date = reference.plusDays(1)
+        compose.onNodeWithTag("calendar-week-day-$date").performClick()
+        compose.onNodeWithTag("calendar-week-day-$date").assertIsSelected()
+        compose.onNodeWithTag("calendar-selected-date").assertIsDisplayed()
+        compose.onNodeWithTag("calendar-month-view").assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.calendar_close_day)).assertDoesNotExist()
+    }
 
     @Test fun monthGridFiltersMarkersAndOpensTheExactDate() {
         var opened: LocalDate? = null
@@ -69,6 +140,7 @@ class MonthCalendarUiTest {
 
     @Test fun dayAgendaKeepsEventNavigationAndEarningsSessionFiltering() {
         var openedEvent: Long? = null
+        var stock: String? = null
         val today = LocalDate.now(EARNINGS_ZONE)
         compose.setContent {
             var value by remember { mutableStateOf(state(today)) }
@@ -76,13 +148,15 @@ class MonthCalendarUiTest {
                 CalendarDayContent(value, BackendSettings(), null, null,
                     onDismiss = {}, onContent = { value = value.copy(content = it) },
                     onImportance = {}, onRefresh = {}, onEvent = { openedEvent = it },
-                    modifier = Modifier.fillMaxSize())
+                    modifier = Modifier.fillMaxSize(), onEarnings = { stock = it.symbol })
             }
         }
         compose.onNodeWithText("CPI").performClick()
         compose.runOnIdle { assertEquals(7L, openedEvent) }
         compose.onNodeWithTag("calendar-filter-EARNINGS").performClick()
         compose.onNodeWithText("AAPL").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.earnings_market_open)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals("AAPL", stock) }
         compose.onNodeWithText(context.getString(R.string.earnings_pre_market)).performScrollTo().performClick()
         compose.onNodeWithText(context.getString(R.string.earnings_empty)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("calendar-selected-date").assertIsDisplayed()

@@ -1,8 +1,10 @@
 package com.macroresearch.ui.calendar
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -49,21 +51,41 @@ fun CalendarScreen(
     val warning by repository.calendarWarning.collectAsStateWithLifecycle()
     var showDay by rememberSaveable { mutableStateOf(false) }
     var showPicker by rememberSaveable { mutableStateOf(false) }
-    CalendarMonthContent(
-        state = state, source = source, logos = earningsRepository?.logos,
-        modifier = Modifier.padding(padding),
-        onMonth = vm::selectMonth, onToday = vm::selectToday,
-        onPicker = { showPicker = true }, onRefresh = vm::refresh,
-        onContent = vm::selectContent,
-        onDate = { vm.selectDate(it); showDay = true },
-    )
+    var marketEvent by remember { mutableStateOf<Pair<LocalDate, com.macroresearch.data.model.EarningsEvent>?>(null) }
+    val openEarnings: ((com.macroresearch.data.model.EarningsEvent) -> Unit)? = earningsRepository?.let {
+        { event -> marketEvent = state.selectedDate to event }
+    }
+    BackHandler(enabled = state.presentation == CalendarPresentation.MONTH && !showDay && !showPicker) {
+        vm.showWeek()
+    }
+    if (state.presentation == CalendarPresentation.WEEK) {
+        CalendarWeekContent(state, source, earningsRepository?.logos,
+            warning = warning?.let { calendarWarningMessage(it) },
+            onDate = vm::selectDate, onWeek = vm::selectWeek, onToday = vm::selectToday,
+            onMonth = vm::showMonth, onContent = vm::selectContent,
+            onImportance = vm::toggleImportance, onRefresh = vm::refresh, onEvent = onEvent,
+            modifier = Modifier.padding(padding), onEarnings = openEarnings)
+    } else {
+        CalendarMonthContent(
+            state = state, source = source, logos = earningsRepository?.logos,
+            modifier = Modifier.padding(padding), onBack = vm::showWeek,
+            onMonth = vm::selectMonth, onToday = vm::selectToday,
+            onPicker = { showPicker = true }, onRefresh = vm::refresh,
+            onContent = vm::selectContent,
+            onDate = { vm.selectDate(it); showDay = true },
+        )
+    }
     if (showDay) CalendarDaySheet(
         state = state, source = source, logos = earningsRepository?.logos,
         warning = warning?.let { calendarWarningMessage(it) },
         onDismiss = { showDay = false }, onContent = vm::selectContent,
         onImportance = vm::toggleImportance, onRefresh = vm::refresh,
         onEvent = { showDay = false; onEvent(it) },
+        onEarnings = openEarnings,
     )
+    marketEvent?.let { (date, event) ->
+        earningsRepository?.let { com.macroresearch.ui.earnings.EarningsMarketDialog(date, event, it) { marketEvent = null } }
+    }
     if (showPicker) {
         val picker = rememberDatePickerState(
             initialSelectedDateMillis = state.selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
@@ -94,13 +116,17 @@ internal fun CalendarMonthContent(
     onContent: (CalendarContent) -> Unit,
     onDate: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
 ) {
     var todayRequest by remember { mutableIntStateOf(0) }
     Column(
-        modifier.fillMaxSize().padding(horizontal = ResearchLayout.pagePadding),
+        modifier.fillMaxSize().testTag("calendar-month-view").padding(horizontal = ResearchLayout.pagePadding),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (onBack != null) IconButton(onClick = onBack, modifier = Modifier.testTag("calendar-close-month")) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, stringResource(R.string.calendar_back_to_week))
+            }
             Icon(Icons.Outlined.CalendarMonth, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.calendar_overview), Modifier.weight(1f),
