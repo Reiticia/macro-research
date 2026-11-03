@@ -85,6 +85,7 @@ class MacroRepository(
     private val marketPreferences: MarketPreferences,
     private val translationPreferences: TranslationPreferences,
     private val pushTopicManager: PushTopicManager,
+    private val calendarPreferences: CalendarPreferences,
 ) {
     private val aiRunGate = AiRunGate()
     val selectedCountries: StateFlow<Set<String>> = countryPreferences.selectedCountries
@@ -96,6 +97,8 @@ class MacroRepository(
     val proxyAddress = networkPreferences.address
     val analysisMethod: StateFlow<AnalysisMethod> = analysisPreferences.method
     val newsSettings: StateFlow<NewsSettings> = newsPreferences.settings
+    val calendarDisplayMode = calendarPreferences.mode
+    fun setCalendarDisplayMode(mode: CalendarDisplayMode) = calendarPreferences.setMode(mode)
 
     /** The active plane. Read per call so a settings change applies immediately. */
     private val source: DataSource

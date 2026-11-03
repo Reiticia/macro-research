@@ -41,6 +41,67 @@ class MonthCalendarUiTest {
         ), loaded = true)),
     )
 
+    @Test fun settingsChoiceIsSelectableAndSavedAcrossPreferenceRecreation() {
+        val storage = context.getSharedPreferences("calendar_display", android.content.Context.MODE_PRIVATE)
+        val original = storage.getString("mode", null)
+        try {
+            val preferences = com.macroresearch.data.CalendarPreferences(context)
+            preferences.setMode(com.macroresearch.data.CalendarDisplayMode.ALL)
+            compose.setContent {
+                val selected by preferences.mode.collectAsState()
+                MaterialTheme {
+                    com.macroresearch.ui.settings.CalendarDisplaySettings(selected, preferences::setMode)
+                }
+            }
+            compose.onNodeWithTag("calendar-display-ALL").assertIsSelected()
+            for (mode in com.macroresearch.data.CalendarDisplayMode.entries) {
+                compose.onNodeWithTag("calendar-display-${mode.name}").performClick().assertIsSelected()
+                compose.runOnIdle {
+                    assertEquals(mode, com.macroresearch.data.CalendarPreferences(context).mode.value)
+                }
+            }
+        } finally {
+            storage.edit().apply {
+                if (original == null) remove("mode") else putString("mode", original)
+            }.commit()
+        }
+    }
+
+    @Test fun singleTypePreferenceHidesOtherMonthMarkersAndContentFilters() {
+        var value by mutableStateOf(state().copy(displayMode = com.macroresearch.data.CalendarDisplayMode.EARNINGS))
+        compose.setContent {
+            MaterialTheme {
+                CalendarMonthContent(value, BackendSettings(), null,
+                    onMonth = {}, onToday = {}, onPicker = {}, onRefresh = {}, onContent = {}, onDate = {})
+            }
+        }
+        compose.onNodeWithTag("earnings-logo-AAPL", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("calendar-economic-count-$reference", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("calendar-filter-ALL").assertDoesNotExist()
+        compose.runOnIdle { value = value.copy(displayMode = com.macroresearch.data.CalendarDisplayMode.ECONOMIC) }
+        compose.onNodeWithTag("earnings-logo-AAPL", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("calendar-economic-count-$reference", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("calendar-filter-EARNINGS").assertDoesNotExist()
+    }
+
+    @Test fun singleTypePreferenceAppliesToInlineDayAgenda() {
+        val today = LocalDate.now(EARNINGS_ZONE)
+        var value by mutableStateOf(state(today).copy(displayMode = com.macroresearch.data.CalendarDisplayMode.EARNINGS))
+        compose.setContent {
+            MaterialTheme {
+                CalendarWeekContent(value, BackendSettings(), null, null,
+                    onDate = {}, onWeek = {}, onToday = {}, onMonth = {}, onContent = {},
+                    onImportance = {}, onRefresh = {}, onEvent = {})
+            }
+        }
+        compose.onNodeWithText("CPI").assertDoesNotExist()
+        compose.onNodeWithTag("calendar-filter-ALL").assertDoesNotExist()
+        compose.onNodeWithText("AAPL").performScrollTo().assertIsDisplayed()
+        compose.runOnIdle { value = value.copy(displayMode = com.macroresearch.data.CalendarDisplayMode.ECONOMIC) }
+        compose.onNodeWithText("AAPL").assertDoesNotExist()
+        compose.onNodeWithText("CPI").performScrollTo().assertIsDisplayed()
+    }
+
     @Test fun defaultWeekShowsInlineListAndOpensMonthOnlyFromTopRightEntry() {
         var openedEvent: Long? = null
         compose.setContent {

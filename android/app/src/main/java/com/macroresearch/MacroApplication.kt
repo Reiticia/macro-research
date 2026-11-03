@@ -159,6 +159,7 @@ class MacroApplication : Application() {
             marketPreferences = MarketPreferences(this),
             translationPreferences = translationPreferences,
             pushTopicManager = pushTopicManager,
+            calendarPreferences = com.macroresearch.data.CalendarPreferences(this),
         )
         notificationCenter = NotificationCenter(this)
         val notes = assets.open("release-notes.json").use {

@@ -3,6 +3,7 @@ package com.macroresearch.ui.calendar
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macroresearch.data.BackendSettings
+import com.macroresearch.data.CalendarDisplayMode
 import com.macroresearch.data.EarningsRepository
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.model.EARNINGS_ZONE
@@ -41,11 +42,13 @@ internal class MonthCalendarViewModel(
     private val earnings: EarningsRepository?,
     private val clock: () -> Instant = Instant::now,
     initialPresentation: CalendarPresentation = CalendarPresentation.WEEK,
+    private val displayMode: StateFlow<CalendarDisplayMode> = MutableStateFlow(CalendarDisplayMode.ALL),
 ) : ViewModel() {
     private val today get() = clock().atZone(EARNINGS_ZONE).toLocalDate()
     private val mutable = MutableStateFlow(MonthCalendarState(
         month = YearMonth.from(today), selectedDate = today, presentation = initialPresentation,
         countries = economic.countries.value, earningsAvailable = earnings != null,
+        displayMode = displayMode.value, content = contentForDisplay(displayMode.value, earnings != null),
     ))
     val state = mutable.asStateFlow()
     private var economicRequest: Job? = null
@@ -55,9 +58,12 @@ internal class MonthCalendarViewModel(
 
     init {
         viewModelScope.launch {
-            combine(economic.settings, earnings?.settings ?: economic.settings) { a, b -> a to b }
-                .collect {
-                    mutable.value = mutable.value.copy(
+            combine(economic.settings, earnings?.settings ?: economic.settings, displayMode) { a, b, mode -> Triple(a, b, mode) }
+                .collect { (_, _, mode) ->
+                    val current = mutable.value
+                    mutable.value = current.copy(
+                        displayMode = mode,
+                        content = if (mode != current.displayMode) contentForDisplay(mode, earnings != null) else current.content,
                         economic = emptyList(), earnings = emptyMap(), economicLoaded = false,
                         economicFailed = false,
                     )
@@ -108,7 +114,9 @@ internal class MonthCalendarViewModel(
     }
 
     fun selectContent(content: CalendarContent) {
-        if (content == mutable.value.content) return
+        if (mutable.value.displayMode != CalendarDisplayMode.ALL ||
+            (!mutable.value.earningsAvailable && content != CalendarContent.ECONOMIC) ||
+            content == mutable.value.content) return
         mutable.value = mutable.value.copy(content = content)
         loadVisibleRange()
     }

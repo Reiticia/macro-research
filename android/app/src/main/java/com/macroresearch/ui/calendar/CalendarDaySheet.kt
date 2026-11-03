@@ -89,7 +89,7 @@ internal fun CalendarDayContent(
                 IconButton(onClick = onDismiss) { Icon(Icons.Outlined.Close, stringResource(R.string.calendar_close_day)) }
             }
         }
-        CalendarContentFilters(state.content, state.earningsAvailable, onContent)
+        CalendarContentFilters(state.content, state.earningsAvailable, onContent, state.displayMode)
         OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(),
             label = { Text(stringResource(R.string.calendar_search)) }, singleLine = true)
         LazyColumn(Modifier.weight(1f).testTag("calendar-day-list"), verticalArrangement = Arrangement.spacedBy(12.dp),

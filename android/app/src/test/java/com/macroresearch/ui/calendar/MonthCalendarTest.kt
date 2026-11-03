@@ -58,6 +58,78 @@ class MonthCalendarTest {
             stores += ViewModelStore().also { it.put("month", vm) }
         }
 
+    @Test fun savedDisplayModesLoadOnlyTheAllowedContent() = runTest {
+        for (mode in listOf(CalendarDisplayMode.EARNINGS, CalendarDisplayMode.ECONOMIC)) {
+            val source = Economic(settings)
+            val requests = mutableListOf<LocalDate>()
+            val vm = MonthCalendarViewModel(source, earnings { date -> requests += date; calendar(date) },
+                clock = { now }, displayMode = MutableStateFlow(mode))
+            stores += ViewModelStore().also { it.put(mode.name, vm) }
+            advanceUntilIdle()
+            assertEquals(mode, vm.state.value.displayMode)
+            assertEquals(mode == CalendarDisplayMode.ECONOMIC, vm.state.value.showEconomic)
+            assertEquals(mode == CalendarDisplayMode.EARNINGS, vm.state.value.showEarnings)
+            assertEquals(if (mode == CalendarDisplayMode.ECONOMIC) 1 else 0, source.requests.size)
+            assertEquals(if (mode == CalendarDisplayMode.EARNINGS) 7 else 0, requests.size)
+            vm.selectContent(CalendarContent.ALL)
+            assertEquals(contentForDisplay(mode, true), vm.state.value.content)
+            vm.showMonth()
+            advanceUntilIdle()
+            vm.refresh()
+            advanceUntilIdle()
+            if (mode == CalendarDisplayMode.EARNINGS) assertTrue(source.requests.isEmpty())
+            else assertTrue(requests.isEmpty())
+        }
+    }
+
+    @Test fun displayChangesOverrideTemporaryFiltersAndSurviveSourceChanges() = runTest {
+        val mode = MutableStateFlow(CalendarDisplayMode.ALL)
+        val source = Economic(settings)
+        val vm = MonthCalendarViewModel(source, earnings { calendar(it) }, clock = { now }, displayMode = mode)
+        stores += ViewModelStore().also { it.put("display", vm) }
+        advanceUntilIdle()
+        vm.selectContent(CalendarContent.ECONOMIC)
+        advanceUntilIdle()
+        assertEquals(CalendarDisplayMode.ALL, mode.value)
+        mode.value = CalendarDisplayMode.EARNINGS
+        advanceUntilIdle()
+        assertEquals(CalendarContent.EARNINGS, vm.state.value.content)
+        assertFalse(vm.state.value.showEconomic)
+        settings.value = BackendSettings(mode = DataSourceMode.BACKEND, baseUrl = "https://example.test")
+        advanceUntilIdle()
+        assertEquals(CalendarDisplayMode.EARNINGS, vm.state.value.displayMode)
+        assertFalse(vm.state.value.showEconomic)
+        mode.value = CalendarDisplayMode.ALL
+        advanceUntilIdle()
+        assertEquals(CalendarContent.ALL, vm.state.value.content)
+        assertTrue(vm.state.value.showEconomic && vm.state.value.showEarnings)
+    }
+
+    @Test fun displayChangeCancelsHiddenRequestsAndRejectsTheirLateResults() = runTest {
+        val mode = MutableStateFlow(CalendarDisplayMode.EARNINGS)
+        val source = Economic(settings)
+        val vm = MonthCalendarViewModel(source, earnings { date ->
+            withContext(NonCancellable) { delay(1_000) }
+            calendar(date)
+        }, clock = { now }, displayMode = mode)
+        stores += ViewModelStore().also { it.put("late", vm) }
+        runCurrent()
+        assertTrue(vm.state.value.earningsLoading)
+        mode.value = CalendarDisplayMode.ECONOMIC
+        runCurrent()
+        assertFalse(vm.state.value.earningsLoading)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.earnings.isEmpty())
+        assertTrue(vm.state.value.showEconomic)
+        assertFalse(vm.state.value.showEarnings)
+    }
+
+    @Test fun missingOrUnknownStoredDisplayModeDefaultsToBoth() {
+        assertEquals(CalendarDisplayMode.ALL, CalendarDisplayMode.fromStored(null))
+        assertEquals(CalendarDisplayMode.ALL, CalendarDisplayMode.fromStored("obsolete"))
+        CalendarDisplayMode.entries.forEach { assertEquals(it, CalendarDisplayMode.fromStored(it.name)) }
+    }
+
     @Test fun weekStripIsMondayFirstAndHandlesCrossMonthYearAndLeapDays() {
         for (anchor in listOf(today, LocalDate.of(2026, 11, 30), LocalDate.of(2027, 1, 1), LocalDate.of(2024, 2, 29))) {
             val days = weekDates(anchor)

@@ -461,4 +461,9 @@
     <string name="ai_manual_news_privacy">確認傳送後，標題、媒體、發布時間、連結、你的摘錄與問題將作為追問傳送至個人 AI 介面，並儲存在本機對話與請求記錄中。應用程式未獨立查證你提供的內容。</string>
     <string name="ai_news_excerpt">文章摘錄或你的說明（最多 6000 字元）</string>
     <string name="ai_news_question">希望 AI 回答的問題（選填，最多 1000 字元）</string>
+    <string name="calendar_display_content">日曆顯示內容</string>
+    <string name="calendar_display_all">都顯示</string>
+    <string name="calendar_display_earnings">僅財報</string>
+    <string name="calendar_display_economic">僅總體經濟事件</string>
+    <string name="calendar_display_note">同時套用於週檢視、月曆和單日日程，選擇後自動儲存。不影響首頁、歷史記錄與已關注事件。</string>
 </resources>

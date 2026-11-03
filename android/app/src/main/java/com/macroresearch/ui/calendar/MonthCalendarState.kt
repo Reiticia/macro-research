@@ -1,5 +1,6 @@
 package com.macroresearch.ui.calendar
 
+import com.macroresearch.data.CalendarDisplayMode
 import com.macroresearch.data.model.EARNINGS_ZONE
 import com.macroresearch.data.model.EarningsCalendar
 import com.macroresearch.data.model.EconomicEvent
@@ -10,6 +11,12 @@ import java.time.ZoneId
 
 enum class CalendarContent { ALL, EARNINGS, ECONOMIC }
 enum class CalendarPresentation { WEEK, MONTH }
+
+internal fun contentForDisplay(mode: CalendarDisplayMode, earningsAvailable: Boolean): CalendarContent = when (mode) {
+    CalendarDisplayMode.ALL -> if (earningsAvailable) CalendarContent.ALL else CalendarContent.ECONOMIC
+    CalendarDisplayMode.EARNINGS -> CalendarContent.EARNINGS
+    CalendarDisplayMode.ECONOMIC -> CalendarContent.ECONOMIC
+}
 
 data class MonthEarningsDay(
     val calendar: EarningsCalendar? = null,
@@ -23,6 +30,7 @@ data class MonthCalendarState(
     val weekDate: LocalDate = selectedDate,
     val presentation: CalendarPresentation = CalendarPresentation.WEEK,
     val content: CalendarContent = CalendarContent.ALL,
+    val displayMode: CalendarDisplayMode = CalendarDisplayMode.ALL,
     val economic: List<EconomicEvent> = emptyList(),
     val earnings: Map<LocalDate, MonthEarningsDay> = emptyMap(),
     val countries: Set<String> = emptySet(),
@@ -34,8 +42,8 @@ data class MonthCalendarState(
     val earningsAvailable: Boolean = true,
 ) {
     val visibleDates get() = if (presentation == CalendarPresentation.MONTH) monthDates(month) else weekDates(weekDate)
-    val showEconomic get() = content != CalendarContent.EARNINGS
-    val showEarnings get() = content != CalendarContent.ECONOMIC && earningsAvailable
+    val showEconomic get() = displayMode != CalendarDisplayMode.EARNINGS && content != CalendarContent.EARNINGS
+    val showEarnings get() = displayMode != CalendarDisplayMode.ECONOMIC && content != CalendarContent.ECONOMIC && earningsAvailable
     val filteredEconomic get() = economic.filter { it.country in countries && it.importance in importance }
 }
 

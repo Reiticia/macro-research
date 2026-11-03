@@ -461,4 +461,9 @@
     <string name="ai_manual_news_privacy">确认发送后，标题、媒体、发布时间、链接、你的摘录和问题会作为追问发送给个人 AI 接口，并保存在本机对话与请求记录中。应用未独立核实你提供的内容。</string>
     <string name="ai_news_excerpt">文章摘录或你的说明（最多 6000 字符）</string>
     <string name="ai_news_question">希望 AI 回答的问题（选填，最多 1000 字符）</string>
+    <string name="calendar_display_content">日历显示内容</string>
+    <string name="calendar_display_all">都显示</string>
+    <string name="calendar_display_earnings">仅财报</string>
+    <string name="calendar_display_economic">仅宏观事件</string>
+    <string name="calendar_display_note">同时作用于周视图、月历和单日列表，选择后自动保存。不影响首页、历史记录和已关注事件。</string>
 </resources>

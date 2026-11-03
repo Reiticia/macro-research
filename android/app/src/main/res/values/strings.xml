@@ -462,4 +462,9 @@
     <string name="ai_manual_news_privacy">The title, publisher, publication time, URL, your excerpts and question will be sent to your personal AI endpoint as a follow-up, saved in the local conversation and request history. The app has not independently verified your notes.</string>
     <string name="ai_news_excerpt">Excerpt or your notes (up to 6,000 characters)</string>
     <string name="ai_news_question">Question for AI (optional, up to 1,000 characters)</string>
+    <string name="calendar_display_content">Calendar content</string>
+    <string name="calendar_display_all">Show both</string>
+    <string name="calendar_display_earnings">Earnings only</string>
+    <string name="calendar_display_economic">Macro events only</string>
+    <string name="calendar_display_note">Applies to the weekly calendar, month overview and daily agenda. Your choice is saved automatically. Home, history and followed events are unchanged.</string>
 </resources>

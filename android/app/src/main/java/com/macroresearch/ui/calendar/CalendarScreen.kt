@@ -44,7 +44,8 @@ fun CalendarScreen(
     onEvent: (Long) -> Unit,
 ) {
     val vm: MonthCalendarViewModel = viewModel(factory = viewModelFactory {
-        MonthCalendarViewModel(RepositoryMonthEconomicSource(repository), earningsRepository)
+        MonthCalendarViewModel(RepositoryMonthEconomicSource(repository), earningsRepository,
+            displayMode = repository.calendarDisplayMode)
     })
     val state by vm.state.collectAsStateWithLifecycle()
     val source by repository.dataSourceSettings.collectAsStateWithLifecycle()
@@ -153,7 +154,7 @@ internal fun CalendarMonthContent(
                 Icon(Icons.Outlined.ChevronRight, stringResource(R.string.calendar_next_month))
             }
         }
-        CalendarContentFilters(state.content, state.earningsAvailable, onContent)
+        CalendarContentFilters(state.content, state.earningsAvailable, onContent, state.displayMode)
         Text(stringResource(R.string.calendar_legend), style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         CalendarMonthGrid(state, source, logos, onDate, Modifier.weight(1f), focusRequest = todayRequest)
@@ -178,7 +179,13 @@ internal fun CalendarMonthContent(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun CalendarContentFilters(selected: CalendarContent, earningsAvailable: Boolean, onSelect: (CalendarContent) -> Unit) {
+internal fun CalendarContentFilters(
+    selected: CalendarContent,
+    earningsAvailable: Boolean,
+    onSelect: (CalendarContent) -> Unit,
+    displayMode: com.macroresearch.data.CalendarDisplayMode = com.macroresearch.data.CalendarDisplayMode.ALL,
+) {
+    if (displayMode != com.macroresearch.data.CalendarDisplayMode.ALL) return
     val types = if (earningsAvailable) CalendarContent.entries else listOf(CalendarContent.ECONOMIC)
     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
         types.forEachIndexed { index, type ->
