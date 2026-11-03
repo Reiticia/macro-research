@@ -76,6 +76,9 @@ internal class EarningsMarketLoader(
 }
 
 internal fun shouldPollEarningsMarket(market: EarningsMarket, date: LocalDate, now: Instant): Boolean {
+    val opening = market.openingSession
+    // Keep observing an upcoming opening even when the original release window has ended.
+    if (opening != null && !opening.coverage.windowEnded && opening.tracking.status != "completed") return true
     if (market.tracking != null) return !market.coverage.windowEnded && market.tracking.status != "completed"
     val today = now.atZone(EARNINGS_ZONE).toLocalDate()
     return date in today.minusDays(1)..today && market.observationStatus in setOf("not_observed", "watching")

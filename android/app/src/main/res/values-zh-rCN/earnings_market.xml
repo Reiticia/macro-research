@@ -11,7 +11,7 @@
     <string name="earnings_market_detected">首次检测时间：%1$s</string>
     <string name="earnings_market_window">采集结束时间：%1$s</string>
     <string name="earnings_market_baseline">首个采样价：%1$s %2$s · %3$s</string>
-    <string name="earnings_market_observed">检测后的实际行情</string>
+    <string name="earnings_market_observed">本阶段的实际行情</string>
     <string name="earnings_market_change_basis">涨跌幅相对首个采样价，并非相对财报公布前价格。仅取目标时点前 90 秒内的真实采样，不插值；横向滑动可查看全部时段。</string>
     <string name="earnings_market_timeline">股价反应时间线</string>
     <string name="earnings_market_after_detection">检测后 %1$d 分钟</string>
@@ -21,7 +21,7 @@
     <string name="earnings_market_bar_close">含已收盘的一分钟 K 线价格，报价时间按分钟结束记录，并非实时逐笔成交。</string>
     <string name="earnings_market_source">来源：Yahoo Finance · 时间均为 %1$s</string>
     <string name="earnings_market_last_success">最近成功采集：%1$s</string>
-    <string name="earnings_market_chart">检测后 60 分钟的股价采样走势，缺失分钟不连线。</string>
+    <string name="earnings_market_chart">所选 60 分钟阶段的股价采样走势，缺失分钟不连线。</string>
     <string name="earnings_market_backend_required">个股采集记录需要后端模式。直连模式不会伪造财报发布后的历史行情。</string>
     <string name="earnings_market_unsupported">当前后端尚不支持财报个股行情，请先更新后端。</string>
     <string name="earnings_market_failed">股价采样刷新失败，请检查后端连接后重试。</string>
@@ -31,7 +31,13 @@
     <string name="earnings_market_missed">未能可靠确认财报由未公布转为已公布，因此未启动股价采集。</string>
     <string name="earnings_market_unobserved">该日期尚无已确认的财报观测或个股采集记录。</string>
     <string name="earnings_market_no_samples">尚无有效股价采样；休市、报价延迟或上游失败可能导致采集窗口为空。</string>
-    <string name="earnings_market_method">从首次检测到实际 EPS 起采集 60 分钟，该时间不是公司确认的公布时间。涨跌幅以首个采样价为基准，并非公布前价格。缺失数据保留为空，采集结束不代表数据齐全；Yahoo 报价可能延迟。</string>
+    <string name="earnings_market_method">首次检测时间不是公司确认的公布时间。每个阶段均以该阶段首个采样价为基准，并非公布前价格。缺失数据保留为空，采集结束不代表数据齐全；Yahoo 报价可能延迟。</string>
     <string name="earnings_market_rate_limited">服务器限制请求频率，请稍后重试。</string>
     <string name="earnings_market_price_range">采样价格区间：%1$s – %2$s</string>
+    <string name="earnings_market_release_phase">检测后 · 60 分钟</string>
+    <string name="earnings_market_opening_phase">开盘后 · 60 分钟</string>
+    <string name="earnings_market_scheduled">等待开盘</string>
+    <string name="earnings_market_opening_start">常规开盘时间：%1$s</string>
+    <string name="earnings_market_after_opening">开盘后 %1$d 分钟</string>
+    <string name="earnings_market_opening_note">盘前财报对应当日交易开盘，盘后财报对应下一交易日开盘；跳过周末与常规休市日，按纽约时间 09:30 自动处理夏令时／冬令时。两个阶段分别采样，使用各自的首价基准。</string>
 </resources>

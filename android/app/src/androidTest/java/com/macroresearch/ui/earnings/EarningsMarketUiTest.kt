@@ -83,6 +83,40 @@ class EarningsMarketUiTest {
         compose.onNodeWithTag("earnings-market-timeline").assertDoesNotExist()
     }
 
+    @Test fun switchingToOpeningUsesSeparatePriceAndTimeOriginAndBackRestoresReleasePrice() {
+        val open = Instant.parse("2026-11-04T14:30:00Z")
+        val base = market()
+        val opening = EarningsOpeningSession("regular_session_open",
+            base.tracking!!.copy(startsAt = open.toString(), endsAt = open.plusSeconds(3600).toString(), status = "collecting"),
+            listOf(base.snapshots.single().copy(timestamp = open.toString(), firstQuoteAt = open.plusSeconds(5).toString(),
+                lastQuoteAt = open.plusSeconds(45).toString(), price = 210.0, open = 200.0, high = 210.0, low = 200.0, close = 210.0)),
+            EarningsStockCoverage(1, 6, 5, false))
+        compose.setContent { MaterialTheme {
+            EarningsMarketContent(date, event, EarningsMarketState(base.copy(openingSession = opening)), open.plusSeconds(360), {}, {})
+        } }
+        compose.onNodeWithTag("earnings-phase-opening").performScrollTo().performClick()
+        compose.onNodeWithTag("earnings-market-latest-price").performScrollTo().assertTextEquals("210.00")
+        compose.onNodeWithTag("earnings-market-timeline").performScrollTo()
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(1f) }
+        compose.onNodeWithTag("earnings-market-timeline-price").assertTextEquals("210.00")
+        compose.onNodeWithText(context.getString(R.string.earnings_market_after_opening, 1)).assertIsDisplayed()
+        compose.onNodeWithTag("earnings-phase-release").performScrollTo().performClick()
+        compose.onNodeWithTag("earnings-market-latest-price").performScrollTo().assertTextEquals("102.00")
+    }
+
+    @Test fun scheduledOpeningIsNotShownAsCollectingAndHasNoFabricatedPrice() {
+        val open = Instant.parse("2026-11-04T14:30:00Z")
+        val base = market()
+        val opening = EarningsOpeningSession("regular_session_open", base.tracking!!.copy(startsAt = open.toString(),
+            endsAt = open.plusSeconds(3600).toString(), status = "scheduled"), emptyList(), EarningsStockCoverage(0, 0, 0, false))
+        compose.setContent { MaterialTheme {
+            EarningsMarketContent(date, event, EarningsMarketState(base.copy(openingSession = opening)), start.plusSeconds(4000), {}, {})
+        } }
+        compose.onNodeWithTag("earnings-phase-opening").performScrollTo().performClick()
+        compose.onNodeWithTag("earnings-market-latest-price").performScrollTo().assertTextEquals("—")
+        compose.onNodeWithText(context.getString(R.string.earnings_market_scheduled)).performScrollTo().assertIsDisplayed()
+    }
+
     @Test fun failureRetainsOnlyExplicitlyStaleSamplesAndHasARetry() {
         var retries = 0
         compose.setContent { MaterialTheme {

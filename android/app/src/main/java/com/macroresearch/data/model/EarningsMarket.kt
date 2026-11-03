@@ -16,7 +16,21 @@ data class EarningsMarket(
     val tracking: EarningsStockTracking?,
     val snapshots: List<EarningsStockSnapshot>,
     val coverage: EarningsStockCoverage,
+    val openingSession: EarningsOpeningSession? = null,
 )
+
+data class EarningsOpeningSession(
+    val timeBasis: String,
+    val tracking: EarningsStockTracking,
+    val snapshots: List<EarningsStockSnapshot>,
+    val coverage: EarningsStockCoverage,
+)
+
+/** Reuse chart/table logic, but with an independent opening baseline and time origin. */
+fun EarningsMarket.forOpeningSession(): EarningsMarket? = openingSession?.let {
+    copy(timeBasis = it.timeBasis, tracking = it.tracking, snapshots = it.snapshots,
+        coverage = it.coverage, openingSession = null)
+}
 
 data class EarningsStockTracking(
     val detectedAt: String,
@@ -25,7 +39,10 @@ data class EarningsStockTracking(
     val currency: String?,
     val lastSuccessAt: String?,
     val lastError: String?,
-)
+    val startsAt: String? = null,
+) {
+    val windowStart: String get() = startsAt ?: detectedAt
+}
 
 data class EarningsStockSnapshot(
     val timestamp: String,
@@ -58,7 +75,7 @@ fun EarningsMarket.firstPricePoint(): EarningsPricePoint? = snapshots.minByOrNul
     ?.let { EarningsPricePoint(Instant.parse(it.firstQuoteAt), it.open) }
 
 fun EarningsMarket.priceAt(minute: Int, now: Instant): EarningsPricePoint? {
-    val start = tracking?.detectedAt?.let(Instant::parse) ?: return null
+    val start = tracking?.windowStart?.let(Instant::parse) ?: return null
     val target = start.plusSeconds(minute.coerceIn(0, 60) * 60L)
     if (target > now) return null
     return pricePoints().lastOrNull { it.at <= target }
@@ -80,7 +97,26 @@ internal fun decodeEarningsMarket(raw: String, date: LocalDate, symbol: String, 
     root.getAsJsonObject("coverage").let { coverage ->
         listOf("minuteCount", "expectedMinuteCount", "missingMinuteCount", "windowEnded").forEach { require(coverage.has(it)) }
     }
+    root.get("openingSession")?.takeUnless { it.isJsonNull }?.asJsonObject?.let { opening ->
+        require(opening.get("timeBasis")?.asString == "regular_session_open")
+        require(opening.get("tracking")?.isJsonObject == true && opening.get("snapshots")?.isJsonArray == true)
+        require(opening.get("coverage")?.isJsonObject == true)
+        listOf("minuteCount", "expectedMinuteCount", "missingMinuteCount", "windowEnded").forEach {
+            require(opening.getAsJsonObject("coverage").has(it))
+        }
+    }
     val result = gson.fromJson(root, EarningsMarket::class.java)
+    validateWindow(result, opening = false)
+    result.openingSession?.let { opening ->
+        require(opening.timeBasis == "regular_session_open")
+        require(opening.tracking.startsAt != null)
+        require(result.tracking != null && opening.tracking.detectedAt == result.tracking.detectedAt)
+        validateWindow(requireNotNull(result.forOpeningSession()), opening = true)
+    }
+    return result
+}
+
+private fun validateWindow(result: EarningsMarket, opening: Boolean) {
     val coverage = result.coverage
     require(coverage.minuteCount in 0..61 && coverage.expectedMinuteCount in 0..61 && coverage.missingMinuteCount in 0..61)
     require(coverage.minuteCount == result.snapshots.size)
@@ -89,10 +125,13 @@ internal fun decodeEarningsMarket(raw: String, date: LocalDate, symbol: String, 
     if (tracking == null) {
         require(result.snapshots.isEmpty() && coverage.expectedMinuteCount == 0 && !coverage.windowEnded)
     } else {
-        val start = Instant.parse(tracking.detectedAt)
+        val detected = Instant.parse(tracking.detectedAt)
+        val start = Instant.parse(tracking.windowStart)
         val end = Instant.parse(tracking.endsAt)
+        require(opening || detected == start)
         require(Duration.between(start, end).seconds == 3600L)
-        require(tracking.status in setOf("collecting", "completed"))
+        require(tracking.status in if (opening) setOf("scheduled", "collecting", "completed") else setOf("collecting", "completed"))
+        if (tracking.status == "scheduled") require(result.snapshots.isEmpty() && coverage.expectedMinuteCount == 0 && !coverage.windowEnded)
         tracking.lastSuccessAt?.let(Instant::parse)
         val minutes = mutableSetOf<Instant>()
         result.snapshots.forEach { row ->
@@ -107,5 +146,4 @@ internal fun decodeEarningsMarket(raw: String, date: LocalDate, symbol: String, 
             require(row.provider == "yahoo" && row.timestampBasis in setOf("provider_quote", "minute_bar_close", "mixed"))
         }
     }
-    return result
 }

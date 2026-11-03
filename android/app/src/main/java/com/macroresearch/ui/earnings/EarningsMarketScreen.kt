@@ -77,7 +77,9 @@ internal fun EarningsMarketContent(
     favorite: (@Composable () -> Unit)? = null,
 ) {
     val locale = appLocale()
-    val market = state.market
+    var openingSelected by rememberSaveable(date, event.symbol) { mutableStateOf(false) }
+    val opening = state.market?.forOpeningSession()
+    val market = if (openingSelected && opening != null) opening else state.market
     Scaffold(topBar = {
         TopAppBar(
             title = { Text(event.symbol, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold) },
@@ -110,6 +112,16 @@ internal fun EarningsMarketContent(
                     }
                 }
             }
+            if (opening != null) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !openingSelected, onClick = { openingSelected = false },
+                        label = { Text(stringResource(R.string.earnings_market_release_phase)) }, modifier = Modifier.testTag("earnings-phase-release"))
+                    FilterChip(selected = openingSelected, onClick = { openingSelected = true },
+                        label = { Text(stringResource(R.string.earnings_market_opening_phase)) }, modifier = Modifier.testTag("earnings-phase-opening"))
+                }
+                Text(stringResource(R.string.earnings_market_opening_note), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             market?.let {
                 StockPriceCard(it, now, locale)
                 if (it.tracking != null) {
@@ -138,6 +150,7 @@ private fun StockPriceCard(market: EarningsMarket, now: Instant, locale: Locale)
                 Text(stringResource(when {
                     tracking == null -> R.string.earnings_market_not_started
                     ended -> R.string.earnings_market_ended
+                    tracking.status == "scheduled" -> R.string.earnings_market_scheduled
                     else -> R.string.earnings_market_collecting
                 }), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
             }
@@ -161,6 +174,8 @@ private fun StockPriceCard(market: EarningsMarket, now: Instant, locale: Locale)
                 }), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 Text(stringResource(R.string.earnings_market_detected, stockTime(tracking.detectedAt, locale)), style = MaterialTheme.typography.bodySmall)
+                if (market.timeBasis == "regular_session_open") Text(
+                    stringResource(R.string.earnings_market_opening_start, stockTime(tracking.windowStart, locale)), style = MaterialTheme.typography.bodySmall)
                 Text(stringResource(R.string.earnings_market_window, stockTime(tracking.endsAt, locale)), style = MaterialTheme.typography.bodySmall)
                 if (latest == null) Text(stringResource(R.string.earnings_market_no_samples), style = MaterialTheme.typography.bodySmall)
                 market.firstPricePoint()?.let { first ->
@@ -201,13 +216,14 @@ private fun StockObservedTable(market: EarningsMarket, now: Instant, locale: Loc
 
 @Composable
 private fun StockTimeline(market: EarningsMarket, now: Instant, locale: Locale) {
-    var minute by rememberSaveable(market.date, market.symbol) { mutableFloatStateOf(5f) }
+    var minute by rememberSaveable(market.date, market.symbol, market.timeBasis) { mutableFloatStateOf(5f) }
     val point = market.priceAt(minute.toInt(), now)
     Card {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(stringResource(R.string.earnings_market_timeline), fontWeight = FontWeight.Bold)
-                Text(stringResource(R.string.earnings_market_after_detection, minute.toInt()), color = MaterialTheme.colorScheme.primary,
+                Text(stringResource(if (market.timeBasis == "regular_session_open") R.string.earnings_market_after_opening
+                    else R.string.earnings_market_after_detection, minute.toInt()), color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelLarge)
             }
             Slider(value = minute, onValueChange = { minute = it }, valueRange = 0f..60f, steps = 59,
@@ -252,7 +268,7 @@ private fun StockPriceChart(points: List<EarningsPricePoint>, tracking: Earnings
     val spread = (high - low).takeIf { it > 0 } ?: (low * .001)
     val bottom = low - spread * (if (high == low) .65 else .15)
     val range = spread * 1.3
-    val start = Instant.parse(tracking.detectedAt)
+    val start = Instant.parse(tracking.windowStart)
     val color = if (points.last().price >= points.first().price) AssetUp else AssetDown
     val grid = MaterialTheme.colorScheme.outlineVariant
     val description = stringResource(R.string.earnings_market_chart)
