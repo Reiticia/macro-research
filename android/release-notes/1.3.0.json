@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.3.0",
+  "notes": {
+    "en": {
+      "client": [
+        "Add a personal news desk under Market with public RSS sources, source filters, search of loaded reports and cached headlines. Read extracted text or the original page inside the app without opening an external browser. Subscription and access restrictions still apply.",
+        "Add an AI research side panel for news analysis and follow-up questions using your personal AI provider. Send article text or a clearly identified summary only when you choose Analyze or Send; current market quotes are optional and provider fees may apply.",
+        "Show macro-event device-local and regional reference times on one line, with UTC offsets, cross-date information and event-date daylight-saving rules. Keep calendar date grouping in the device timezone; unknown or date-only times are not guessed.",
+        "Combine earnings and economic events in the calendar, with a default week list, an optional month view, company logos, filters and a saved calendar-content preference.",
+        "Add earnings-event favorites, links to company earnings pages and a separate current-stock-price display. Favorites stay tied to the selected earnings event rather than automatically moving to the next quarter.",
+        "Show separate detected-release and regular-market-opening 60-minute earnings price timelines, sampled changes and real data gaps. Stock-price features require a compatible backend; news reading and macro dual-time displays do not require a backend update."
+      ],
+      "backend": [
+        "Add Nasdaq earnings calendars, TradingView supplemental forecasts, persistent company-logo caching and administrator Telegram earnings-source diagnostics.",
+        "Detect verified changes from missing to reported Nasdaq actual EPS and collect stock prices for 60 minutes, retaining observations and real coverage gaps across restarts.",
+        "Add an independent next-regular-opening price-collection window for pre-market and after-hours earnings, with New York daylight-saving and regular exchange-holiday rules, plus a bounded on-demand current-stock-quote endpoint. Earnings collection requires database migrations 023 through 025; existing configuration values are preserved."
+      ]
+    },
+    "zh-CN": {
+      "client": [
+        "市场页新增个人财经新闻阅读台，支持公开 RSS 新闻源、来源筛选、已加载报道搜索与标题缓存。可在应用内阅读提取文本或原网页，不跳转外部浏览器；媒体订阅与访问限制仍然有效。",
+        "新闻详情新增侧边 AI 研究面板，使用个人模型接口分析市场影响和连续追问。仅在点击分析或发送时提交文章文本或明确标注的摘要，可选附带当前行情，模型服务可能计费。",
+        "宏观事件在同一行显示设备本地与地区参考时间，标明 UTC 偏移，跨日保留日期，并按事件日期处理夏令时。日历仍按设备日期分组，未知时区与日期型事件不猜测时分。",
+        "日历整合财报与经济事件，默认显示周列表，可切换月历查看公司 Logo，支持筛选及保存日历显示内容偏好。",
+        "财报事件新增收藏、公司财报页面链接与独立当前股价展示。收藏固定对应本次财报，不会自动滚动到下一财季。",
+        "财报个股详情分别展示检测后与常规开盘后的 60 分钟股价时间线、分时变化和真实数据缺口。个股行情功能需要兼容后端；新闻阅读和宏观双时区显示无需更新后端。"
+      ],
+      "backend": [
+        "新增 Nasdaq 财报日历、TradingView 补充预测、持久化公司 Logo 缓存及 Telegram 管理员财报数据源诊断。",
+        "检测经核验的 Nasdaq 实际 EPS 从缺失转为已公布后，独立采集对应股票 60 分钟行情；重启保留采样记录与真实覆盖缺口。",
+        "盘前和盘后财报新增下次常规开盘后的独立行情采集窗口，按纽约夏令时与常规交易所休市规则排期；新增有界、按需读取的当前股票报价接口。财报采集涉及数据库迁移 023 至 025，保留已有配置值。"
+      ]
+    },
+    "zh-TW": {
+      "client": [
+        "市場頁新增個人財經新聞閱讀台，支援公開 RSS 新聞來源、來源篩選、已載入報導搜尋與標題快取。可在應用程式內閱讀擷取文字或原網頁，不跳轉外部瀏覽器；媒體訂閱與存取限制仍然有效。",
+        "新聞詳情新增側邊 AI 研究面板，使用個人模型端點分析市場影響及連續追問。僅在點擊分析或傳送時提交文章文字或明確標示的摘要，可選附上目前行情，模型服務可能計費。",
+        "宏觀事件在同一行顯示裝置本地與地區參考時間，標示 UTC 偏移，跨日保留日期，並依事件日期處理夏令時間。日曆仍依裝置日期分組，未知時區與日期型事件不猜測時分。",
+        "日曆整合財報與經濟事件，預設顯示週列表，可切換月曆查看公司 Logo，支援篩選及儲存日曆顯示內容偏好。",
+        "財報事件新增收藏、公司財報頁面連結與獨立目前股價顯示。收藏固定對應本次財報，不會自動移至下一財季。",
+        "財報個股詳情分別顯示偵測後及常規開盤後的 60 分鐘股價時間軸、分時變化與真實資料缺口。個股行情功能需要相容後端；新聞閱讀與宏觀雙時區顯示無須更新後端。"
+      ],
+      "backend": [
+        "新增 Nasdaq 財報日曆、TradingView 補充預測、持久化公司 Logo 快取及 Telegram 管理員財報資料來源診斷。",
+        "偵測經核驗的 Nasdaq 實際 EPS 從缺失轉為已公布後，獨立採集對應股票 60 分鐘行情；重新啟動後保留採樣紀錄與真實覆蓋缺口。",
+        "盤前及盤後財報新增下次常規開盤後的獨立行情採集視窗，依紐約夏令時間與常規交易所休市規則排程；新增有界、按需讀取的目前股票報價端點。財報採集涉及資料庫遷移 023 至 025，保留既有設定值。"
+      ]
+    }
+  }
+}
