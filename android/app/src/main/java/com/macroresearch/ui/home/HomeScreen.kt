@@ -54,7 +54,7 @@ import com.macroresearch.ui.common.importanceLabel
 import com.macroresearch.ui.common.localizedCountdown as countdown
 import com.macroresearch.ui.common.flag
 import com.macroresearch.ui.common.localizedDate as localDate
-import com.macroresearch.ui.common.localTime
+import com.macroresearch.ui.common.EventTimes
 import com.macroresearch.ui.common.localizedName
 import com.macroresearch.ui.common.localizedValue as value
 import com.macroresearch.ui.market.formatMarketPrice
@@ -213,7 +213,7 @@ internal fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
                     style = MaterialTheme.typography.labelLarge,
                 )
                 Text(
-                    countdown(event.eventTime, now),
+                    if (event.timeExact) countdown(event.eventTime, now) else stringResource(R.string.event_time_pending),
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
@@ -227,6 +227,7 @@ internal fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
+            EventTimes(event, showDate = true)
             // Keep the source values in the compact summary, separate from detail-only impact.
             FlowRow(
                 Modifier.fillMaxWidth(),
@@ -235,8 +236,7 @@ internal fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
                 maxItemsInEachRow = if (ResearchLayout.stackMetadata) 1 else Int.MAX_VALUE,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(event.localTime(), style = MaterialTheme.typography.labelLarge)
-                    Text(" · ${importanceLabel(event.importance)}", color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelLarge)
+                    Text(importanceLabel(event.importance), color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.width(ResearchLayout.smallGap))
                     ImportanceDots(event.importance)
                 }

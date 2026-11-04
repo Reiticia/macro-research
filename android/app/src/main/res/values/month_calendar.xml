@@ -7,12 +7,12 @@
     <string name="calendar_next_month">Next month</string>
     <string name="calendar_loading_month">Loading dates progressively · Tap a date to see its agenda</string>
     <string name="calendar_partial">Some dates are unavailable or cached. Open a date for details.</string>
-    <string name="calendar_timezones">Earnings: New York dates · Economic events: device time</string>
+    <string name="calendar_timezones">Earnings: New York dates · Macro: device dates, local + regional clocks</string>
     <string name="calendar_day_description">%1$s · Earnings: %2$d · Economic: %3$d</string>
     <string name="calendar_day_agenda">Daily agenda</string>
     <string name="calendar_close_day">Close daily agenda</string>
     <string name="calendar_search">Search event, symbol or company</string>
-    <string name="calendar_economic_timezone">Economic release times · %1$s</string>
+    <string name="calendar_economic_timezone">Date grouping · %1$s · Each event also shows its regional clock</string>
     <string name="calendar_economic_failed">Economic calendar refresh failed. Cached events may be shown; an empty date is not confirmed empty.</string>
     <string name="calendar_earnings_range">Earnings are available from 120 days before to 60 days after today (New York date).</string>
     <string name="calendar_legend">Company logos: earnings · Colored dot: economic events</string>

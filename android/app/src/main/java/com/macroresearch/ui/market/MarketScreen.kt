@@ -52,7 +52,7 @@ private val marketGroups = listOf(
 )
 
 @Composable
-fun MarketScreen(repository: MacroRepository, padding: PaddingValues) {
+fun MarketScreen(repository: MacroRepository, padding: PaddingValues, onNews: () -> Unit = {}) {
     val vm: MarketViewModel = viewModel(factory = viewModelFactory { MarketViewModel(repository) })
     val state by vm.state.collectAsStateWithLifecycle()
     val quotes = state.value?.quotes.orEmpty().associateBy { it.symbol }
@@ -70,6 +70,16 @@ fun MarketScreen(repository: MacroRepository, padding: PaddingValues) {
         contentPadding = PaddingValues(ResearchLayout.pagePadding),
         verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
     ) {
+        item {
+            Card(onClick = onNews, colors = androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+            )) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(stringResource(R.string.news_entry), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.news_entry_note), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),

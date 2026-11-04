@@ -86,6 +86,7 @@ class MacroRepository(
     private val translationPreferences: TranslationPreferences,
     private val pushTopicManager: PushTopicManager,
     private val calendarPreferences: CalendarPreferences,
+    val newsReader: NewsReaderRepository,
 ) {
     private val aiRunGate = AiRunGate()
     val selectedCountries: StateFlow<Set<String>> = countryPreferences.selectedCountries
@@ -115,6 +116,29 @@ class MacroRepository(
     fun setNewsSources(urls: List<String>) = newsPreferences.setSources(urls)
     fun setBiquoteNewsEnabled(enabled: Boolean) = newsPreferences.setBiquoteEnabled(enabled)
     fun setArticlePreviewEnabled(enabled: Boolean) = newsPreferences.setArticlePreviewEnabled(enabled)
+    val newsReaderEnabled: StateFlow<Boolean> = newsPreferences.readerEnabled
+    fun setNewsReaderEnabled(enabled: Boolean) = newsPreferences.setReaderEnabled(enabled)
+
+    suspend fun analyzeNews(
+        article: com.macroresearch.data.remote.NewsArticle,
+        reading: com.macroresearch.data.remote.ArticleReading?,
+        history: List<com.macroresearch.data.remote.AiConversationMessage>,
+        question: String,
+        languageTag: String,
+        includeQuotes: Boolean,
+    ): com.macroresearch.data.remote.AiConversationMessage {
+        check(newsReaderEnabled.value) { "News reader is disabled" }
+        val settings = translationSettings.value
+        val key = translationPreferences.apiKey() ?: error("Personal AI key is required")
+        val quotes = if (includeQuotes) kotlinx.coroutines.withTimeoutOrNull(12_000) {
+            try { marketQuotes(listOf("nasdaq100", "sp500", "gold", "dxy", "us2y", "us10y", "bitcoin")) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+        } else null
+        return aiAnalysisClient.analyzeNews(com.macroresearch.data.remote.NewsAnalysisInput(
+            article, reading, languageTag, question, history, quotes, includeQuotes,
+        ), settings, key)
+    }
 
     private val _calendarWarning = MutableStateFlow<CalendarWarning?>(null)
     val calendarWarning = _calendarWarning.asStateFlow()

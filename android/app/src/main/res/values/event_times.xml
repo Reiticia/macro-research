@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="event_device_time_inline">Local %1$s</string>
+    <string name="event_region_time_inline">%1$s %2$s</string>
+    <string name="event_device_time">Device local · %1$s</string>
+    <string name="event_region_time">Region reference (%1$s) · %2$s</string>
+    <string name="event_region_unknown">Region time · timezone unknown</string>
+    <string name="event_time_pending">Time TBD</string>
+    <string name="event_time_unavailable">Time unavailable</string>
+    <string name="event_time_reference_note">Both clocks represent the same instant and use the event date’s daylight-saving rules. The regional clock uses a national macro-release reference zone (e.g. New York for the US, Frankfurt for the euro area), not the venue of every speech. Calendar dates stay grouped in device time.</string>
+    <string name="event_zone_new_york">New York</string>
+    <string name="event_zone_central_europe">Central Europe</string>
+    <string name="event_zone_beijing">Beijing</string>
+    <string name="event_zone_tokyo">Tokyo</string>
+    <string name="event_zone_london">London</string>
+    <string name="event_zone_sydney">Sydney / Canberra</string>
+    <string name="event_zone_toronto">Toronto / Ottawa</string>
+</resources>

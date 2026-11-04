@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="event_device_time_inline">本地 %1$s</string>
+    <string name="event_region_time_inline">%1$s %2$s</string>
+    <string name="event_device_time">裝置本地 · %1$s</string>
+    <string name="event_region_time">地區當地（%1$s）· %2$s</string>
+    <string name="event_region_unknown">地區當地 · 時區未知</string>
+    <string name="event_time_pending">時間待定</string>
+    <string name="event_time_unavailable">時間無法取得</string>
+    <string name="event_time_reference_note">兩個時間代表同一時刻，依事件日期自動處理夏令時間。地區時間採用該國家／地區常用的宏觀發佈參考時區（如美國紐約、歐元區法蘭克福），不代表每場演講的實際所在地。日曆仍依裝置日期分組。</string>
+    <string name="event_zone_new_york">紐約</string>
+    <string name="event_zone_central_europe">中歐</string>
+    <string name="event_zone_beijing">北京</string>
+    <string name="event_zone_tokyo">東京</string>
+    <string name="event_zone_london">倫敦</string>
+    <string name="event_zone_sydney">雪梨／坎培拉</string>
+    <string name="event_zone_toronto">多倫多／渥太華</string>
+</resources>

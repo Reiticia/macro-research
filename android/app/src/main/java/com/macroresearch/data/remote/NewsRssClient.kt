@@ -40,7 +40,12 @@ data class NewsFetchResult(
     val status: String,
 )
 
-/** Combines opt-in headline sources for personal AI only; never used by shared backend AI. */
+fun newsPublishedInstant(value: String?): Instant? = value?.let {
+    runCatching { Instant.parse(it) }.getOrNull()
+        ?: runCatching { ZonedDateTime.parse(it, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant() }.getOrNull()
+}
+
+/** Credential-free feeds shared by opt-in personal AI and the separately enabled news reader. */
 class NewsRssClient(
     client: OkHttpClient,
     private val biquote: BiquoteNewsClient = BiquoteNewsClient(client),
@@ -79,6 +84,23 @@ class NewsRssClient(
         }
     }
 
+    /** Explicit, user-initiated reading: not subject to AI event relevance/time filtering. */
+    suspend fun latestArticles(sourceUrls: List<String>): NewsFetchResult = withContext(Dispatchers.IO) {
+        coroutineScope {
+            val results = sourceUrls.mapNotNull(::validatedFeedUrl).distinct().take(MAX_SOURCES)
+                .map { url -> async { fetchFeed(url, null) } }.awaitAll()
+            val articles = results.flatMap(FeedFetch::articles).distinctBy(NewsArticle::url)
+                .sortedByDescending { article -> newsPublishedInstant(article.publishedAt) ?: Instant.MIN }
+                .take(160)
+            NewsFetchResult(articles, when {
+                results.isEmpty() || results.none(FeedFetch::succeeded) -> "search_unavailable"
+                results.any { !it.succeeded } -> "partial_results"
+                articles.isEmpty() -> "no_articles_found"
+                else -> "articles_found"
+            })
+        }
+    }
+
     internal fun selectArticles(event: EconomicEvent, articles: List<NewsArticle>, now: Instant): List<NewsArticle> {
         // The endpoint is a latest-news feed, not a historical search. Never attach today's
         // headlines to an old event, future-dated articles, or unknown publication times.
@@ -88,10 +110,7 @@ class NewsRssClient(
         val start = time.minus(Duration.ofHours(24))
         val end = minOf(now, time.plus(Duration.ofHours(24)))
         return articles.mapNotNull { article ->
-            val published = article.publishedAt?.let { date ->
-                runCatching { Instant.parse(date) }.getOrNull()
-                    ?: runCatching { ZonedDateTime.parse(date, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant() }.getOrNull()
-            } ?: return@mapNotNull null
+            val published = newsPublishedInstant(article.publishedAt) ?: return@mapNotNull null
             if (published < start || published > end) return@mapNotNull null
             relevance(event, article)?.let { Triple(it, published, article) }
         }.sortedWith(compareByDescending<Triple<Int, Instant, NewsArticle>> { it.first }.thenByDescending { it.second })
@@ -148,15 +167,16 @@ class NewsRssClient(
         return (0 until entries.length).take(MAX_FEED_ARTICLES).mapNotNull { index ->
             val entry = entries.item(index) as? Element ?: return@mapNotNull null
             val title = cleanMarkup(childText(entry, "title"))
-            val linkElement = childElement(entry, "link")
+            val linkElement = (0 until entry.childNodes.length).mapNotNull { entry.childNodes.item(it) as? Element }
+                .firstOrNull { (it.localName ?: it.tagName) == "link" && it.getAttribute("rel") in listOf("", "alternate") }
             val link = linkElement?.getAttribute("href")?.takeIf(String::isNotBlank)
                 ?: linkElement?.textContent.orEmpty().trim()
-            val validLink = link.toHttpUrlOrNull()?.takeIf { it.isHttps }?.toString()
+            val validLink = link.toHttpUrlOrNull()?.takeIf { it.isHttps && it.username.isEmpty() && it.password.isEmpty() }?.toString()
                 ?: return@mapNotNull null
             if (title.isBlank()) return@mapNotNull null
             val host = validLink.toHttpUrlOrNull()?.host.orEmpty()
             val fallbackHost = feedUrl.toHttpUrlOrNull()?.host.orEmpty()
-            val source = cleanMarkup(childText(entry, "source")).ifBlank { host.ifBlank { fallbackHost } }
+            val source = cleanMarkup(childText(entry, "source")).ifBlank { host.ifBlank { fallbackHost } }.take(120)
             val published = sequenceOf("pubDate", "published", "updated", "date")
                 .map { childText(entry, it) }
                 .firstOrNull(String::isNotBlank)
@@ -209,8 +229,7 @@ class NewsRssClient(
         ?.takeIf { it.isHttps && it.host.isNotBlank() }
         ?.toString()
 
-    private fun cleanMarkup(value: String): String =
-        value.replace(HTML_TAGS, " ").replace(HTML_ENTITIES, " ").replace(WHITESPACE, " ").trim()
+    private fun cleanMarkup(value: String): String = org.jsoup.Jsoup.parse(value).text().trim()
 
     companion object {
         private const val MAX_SOURCES = 8
@@ -221,9 +240,6 @@ class NewsRssClient(
         private const val MAX_SUMMARY_CHARS = 700
         private const val MAX_DATE_CHARS = 100
         private val WORD_BREAKS = Regex("[^\\p{L}\\p{N}]+")
-        private val WHITESPACE = Regex("\\s+")
-        private val HTML_TAGS = Regex("<[^>]*>")
-        private val HTML_ENTITIES = Regex("&(?:nbsp|amp|quot|apos|lt|gt|#\\d+|#x[0-9a-fA-F]+);")
         private val STOP_WORDS = setOf("the", "and", "for", "with", "from", "rate", "rates", "index", "mom", "yoy", "month", "year", "annual", "weekly", "monthly", "quarterly", "final", "preliminary", "change", "total", "core", "us", "united", "states")
     }
 }

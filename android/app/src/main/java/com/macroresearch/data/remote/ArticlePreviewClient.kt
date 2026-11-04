@@ -18,7 +18,15 @@ import java.net.Proxy
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
-/** Bounded static HTML preview, never a WebView or arbitrary model URL fetcher. */
+data class ArticleReading(
+    val url: String,
+    val title: String,
+    val text: String,
+    val truncated: Boolean,
+    val fetchedAt: String,
+)
+
+/** Bounded static HTML reading, never a WebView or arbitrary model URL fetcher. */
 class ArticlePreviewClient internal constructor(transport: OkHttpClient? = null) {
     // A separate credential-free client avoids inherited interceptors, cookies and proxy routes.
     private val http = transport ?: OkHttpClient.Builder()
@@ -34,7 +42,16 @@ class ArticlePreviewClient internal constructor(transport: OkHttpClient? = null)
         .connectTimeout(4, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).callTimeout(6, TimeUnit.SECONDS)
         .build()
 
-    suspend fun preview(url: String, trace: AiExecutionTrace?): Map<String, Any?> {
+    suspend fun preview(url: String, trace: AiExecutionTrace?): Map<String, Any?> = load(url, trace, false)
+
+    suspend fun read(url: String): ArticleReading? {
+        val page = load(url, null, true)
+        val text = page["text"] as? String ?: return null
+        return ArticleReading(page["url"] as String, page["title"] as String, text,
+            page["truncated"] == true, java.time.Instant.now().toString())
+    }
+
+    private suspend fun load(url: String, trace: AiExecutionTrace?, reading: Boolean): Map<String, Any?> {
         return try {
             withTimeoutOrNull(20_000) {
                 var current = safeArticleUrl(url) ?: return@withTimeoutOrNull mapOf("error" to "Article URL is not allowed")
@@ -84,7 +101,7 @@ class ArticlePreviewClient internal constructor(transport: OkHttpClient? = null)
                             current = page.redirect ?: checkNotNull(resolved)
                         } else {
                             failureDetail = AiStepDetail.PAGE_NO_TEXT
-                            val preview = extractPreview(checkNotNull(page.html))
+                            val preview = if (reading) extractReading(checkNotNull(page.html)) else extractPreview(checkNotNull(page.html))
                             step?.let { trace.finish(it, count = preview.text.length, httpStatus = code) }
                             return@withTimeoutOrNull mapOf("url" to current.toString(), "title" to preview.title,
                                 "text" to preview.text, "truncated" to preview.truncated,
@@ -140,6 +157,20 @@ class ArticlePreviewClient internal constructor(transport: OkHttpClient? = null)
             .replace(Regex("\\s+"), " ").trim()
         check(text.length >= 80) { "No readable article preview" }
         return ArticleText(title, text.take(6000), text.length > 6000)
+    }
+
+    internal fun extractReading(html: String): ArticleText {
+        val doc = Jsoup.parse(html)
+        doc.select("script,style,noscript,iframe,form,nav,header,footer,aside,svg,template").remove()
+        val content = doc.selectFirst("article") ?: doc.selectFirst("main") ?: doc.body()
+        val paragraphs = content.select("h1,h2,h3,p,li,blockquote")
+            .filter { element -> element.parents().none { it != content && it.tagName() in setOf("p", "li", "blockquote") } }
+            .map { it.text().trim() }.filter(String::isNotBlank)
+        val text = (if (paragraphs.isEmpty()) content.text() else paragraphs.joinToString("\n\n")).trim()
+        check(text.length >= 80) { "No readable article text" }
+        // Refuse obvious denial/interstitial pages instead of presenting them as a report.
+        check(!Regex("(?i)^(access denied|just a moment|robot check|verify you are human)").containsMatchIn(doc.title()))
+        return ArticleText(doc.title().take(300), text.take(24_000), text.length > 24_000)
     }
 
     companion object {

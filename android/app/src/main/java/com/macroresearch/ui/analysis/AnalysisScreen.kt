@@ -59,6 +59,7 @@ import com.macroresearch.data.model.hasEventTimeArrived
 import com.macroresearch.data.model.MarketResponse
 import com.macroresearch.data.model.MarketSnapshot
 import com.macroresearch.ui.AnalysisViewModel
+import com.macroresearch.ui.common.EventTimes
 import com.macroresearch.ui.common.assetLabel
 import com.macroresearch.ui.common.analysisSummaryLabel
 import com.macroresearch.ui.common.expectedRationaleLabel
@@ -371,6 +372,7 @@ private fun ResultCard(event: EconomicEvent, report: AnalysisReport) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.data_results), fontWeight = FontWeight.Bold)
+            EventTimes(event, showDate = true)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Metric(stringResource(R.string.actual), event.value(event.actual), true)
                 Metric(stringResource(R.string.consensus), event.value(event.consensus))

@@ -241,6 +241,21 @@ class AiAnalysisClient(private val client: OkHttpClient, private val gson: Gson)
         AiConversationMessage("assistant", answer)
     }
 
+    /** Independent news research; no economic-event gating or automatic tool/page access. */
+    suspend fun analyzeNews(
+        input: NewsAnalysisInput,
+        settings: TranslationSettings,
+        apiKey: String,
+    ): AiConversationMessage = withContext(Dispatchers.IO) {
+        val response = execute(chatEndpoint(settings.baseUrl), apiKey,
+            newsAnalysisPayload(input, settings.model, gson), null, AiRequestPhase.FOLLOW_UP)
+        val root = com.google.gson.JsonParser.parseString(response).asJsonObject
+        val answer = root.getAsJsonArray("choices")?.firstOrNull()?.asJsonObject
+            ?.getAsJsonObject("message")?.get("content")?.asString?.trim()
+            ?.takeIf(String::isNotEmpty) ?: error("AI returned an empty response")
+        AiConversationMessage("assistant", answer.take(16_000))
+    }
+
     fun encodeConversation(messages: List<AiConversationMessage>): String = gson.toJson(messages)
 
     fun decodeConversation(json: String): List<AiConversationMessage> = runCatching {

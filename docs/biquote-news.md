@@ -1,5 +1,7 @@
 # BiQuote 市场新闻
 
+> 下文描述事件 AI 新闻背景与 BiQuote 接入；另有独立的[应用内新闻阅读台与 AI 研究](news-reader.md)，目前使用公开 RSS，不复用这里的授权开关，也不默认调用 BiQuote。
+
 ## 接口核对
 
 核对日期：2026-10-29；公开文档：https://biquote.io/docs/#news 。

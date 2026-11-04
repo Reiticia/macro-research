@@ -149,7 +149,10 @@ fun MacroApp(
             composable("calendar") {
                 CalendarScreen(repository, padding, earningsRepository) { navController.navigate("event/$it") }
             }
-            composable("market") { MarketScreen(repository, padding) }
+            composable("market") { MarketScreen(repository, padding) { navController.navigate("news") } }
+            composable("news") {
+                com.macroresearch.ui.news.NewsDeskScreen(repository) { navController.popBackStack() }
+            }
             composable("history") {
                 HistoryScreen(repository, padding) { navController.navigate("event/$it") }
             }

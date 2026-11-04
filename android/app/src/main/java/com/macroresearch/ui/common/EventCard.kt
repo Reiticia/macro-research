@@ -56,10 +56,10 @@ fun EventCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Lists that span several days (history) need the date; day views already show it in the header.
-                val timestamp = if (showDate) "${event.localizedShortDate()}  ${event.localTime()}" else event.localTime()
+                // Date-only records must keep their calendar date without inventing a clock.
+                val countryText = "${flag(event.country)}  ${countryLabel(event.country)}"
                 Text(
-                    "$timestamp  ${flag(event.country)}  ${countryLabel(event.country)}",
+                    if (showDate && !event.timeExact) "${event.localizedShortDate()} · $countryText" else countryText,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -71,6 +71,7 @@ fun EventCard(
                         color = statusColor(status), style = MaterialTheme.typography.labelMedium)
                 }
             }
+            EventTimes(event, showDate = showDate)
             Text(event.localizedName(LocalConfiguration.current.locales[0]),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)

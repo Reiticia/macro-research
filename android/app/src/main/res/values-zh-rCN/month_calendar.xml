@@ -7,12 +7,12 @@
     <string name="calendar_next_month">下个月</string>
     <string name="calendar_loading_month">正在逐日加载 · 点击日期查看当天日程</string>
     <string name="calendar_partial">部分日期加载失败或使用旧缓存，点击日期查看详情。</string>
-    <string name="calendar_timezones">财报按纽约日期 · 经济事件按设备时间</string>
+    <string name="calendar_timezones">财报按纽约日期 · 宏观按设备日期，显示本地及地区时间</string>
     <string name="calendar_day_description">%1$s · %2$d 项财报 · %3$d 项经济事件</string>
     <string name="calendar_day_agenda">当日日程</string>
     <string name="calendar_close_day">关闭当日日程</string>
     <string name="calendar_search">搜索事件、股票代码或公司</string>
-    <string name="calendar_economic_timezone">经济事件公布时间 · %1$s</string>
+    <string name="calendar_economic_timezone">按 %1$s 日期分组 · 各事件同时显示地区当地时间</string>
     <string name="calendar_economic_failed">经济日历刷新失败，可能显示缓存事件；空白日期不代表当天没有事件。</string>
     <string name="calendar_earnings_range">财报支持纽约今天之前 120 天至之后 60 天，当前日期超出范围。</string>
     <string name="calendar_legend">公司图标：财报 · 彩色圆点：经济事件</string>

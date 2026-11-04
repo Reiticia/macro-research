@@ -163,6 +163,11 @@ class MacroApplication : Application() {
             translationPreferences = translationPreferences,
             pushTopicManager = pushTopicManager,
             calendarPreferences = com.macroresearch.data.CalendarPreferences(this),
+            newsReader = com.macroresearch.data.NewsReaderRepository(
+                NewsRssClient(OkHttpClient.Builder().build()),
+                com.macroresearch.data.remote.ArticlePreviewClient(),
+                com.macroresearch.data.NewsReaderCache(noBackupFilesDir.resolve("news-reader/headlines.json")),
+            ),
         )
         notificationCenter = NotificationCenter(this)
         val notes = assets.open("release-notes.json").use {

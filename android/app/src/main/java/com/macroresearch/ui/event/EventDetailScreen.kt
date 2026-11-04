@@ -64,7 +64,7 @@ import com.macroresearch.ui.common.importanceLabel
 import com.macroresearch.ui.common.localizedCountdown as countdown
 import com.macroresearch.ui.common.flag
 import com.macroresearch.ui.common.localizedChange as formatChange
-import com.macroresearch.ui.common.localTime
+import com.macroresearch.ui.common.EventTimes
 import com.macroresearch.ui.common.ReleaseImpactLabels
 import com.macroresearch.ui.common.localizedName
 import com.macroresearch.ui.common.statusLabel
@@ -267,20 +267,15 @@ private fun CountdownCard(event: EconomicEvent) {
         containerColor = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
     )) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                Text(stringResource(if (awaitingFutureRelease) R.string.release_countdown else R.string.data_status), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    if (awaitingFutureRelease) countdown(event.eventTime, now) else statusLabel(event.currentStatus(now)),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = if (event.status == "watching") Upcoming else MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(event.localTime(), fontWeight = FontWeight.Bold)
-                Text(stringResource(R.string.local_time), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(if (awaitingFutureRelease) R.string.release_countdown else R.string.data_status), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                if (awaitingFutureRelease) countdown(event.eventTime, now) else statusLabel(event.currentStatus(now)),
+                style = MaterialTheme.typography.headlineMedium,
+                color = if (event.status == "watching") Upcoming else MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+            )
+            EventTimes(event, showDate = true, explainReference = true)
         }
     }
 }
