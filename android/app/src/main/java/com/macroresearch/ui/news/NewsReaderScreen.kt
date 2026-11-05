@@ -73,6 +73,7 @@ internal fun NewsReaderScreen(
                 if (webMode && !state.backendNews) {
                     Column(Modifier.fillMaxSize().padding(padding)) {
                         TextButton(onClick = { webMode = false }) { Text(stringResource(R.string.news_text_mode)) }
+                        Box(Modifier.padding(horizontal = 16.dp)) { NewsOriginalLink(article.url) }
                         NewsWebPage(state.reading?.url ?: article.url, Modifier.weight(1f))
                     }
                 } else {
@@ -92,6 +93,7 @@ internal fun NewsReaderScreen(
                                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                                     if (!state.backendNews) TextButton(onClick = { webMode = true }) { Text(stringResource(R.string.news_web)) }
                                 }
+                                NewsOriginalLink(article.url)
                             }
                         }
                         if (state.readingLoading) item {

@@ -6,7 +6,7 @@
     <string name="news_kicker">市場觀察 · NEWS DESK</string>
     <string name="news_subtitle">讀懂新聞，再研究市場影響。</string>
     <string name="news_enable_title">開啟你的財經閱讀台</string>
-    <string name="news_enable_note">新聞遵循所選資料模式：後端模式只讀取伺服器每分鐘更新的公開新聞快取，本機不連接媒體站點；直連模式優先國內來源，可選海外來源。閱讀不需要付費新聞 API 或 AI Key。公開摘要不代表全文；僅點擊分析或傳送才呼叫個人 AI。</string>
+    <string name="news_enable_note">新聞遵循所選資料模式：後端模式只讀取伺服器每分鐘更新的公開新聞快取，本機不自動連接媒體站點，可主動在瀏覽器開啟原文；直連模式優先國內來源，可選海外來源。閱讀不需要付費新聞 API 或 AI Key。公開摘要不代表全文；僅點擊分析或傳送才呼叫個人 AI。</string>
     <string name="news_enable">啟用公開新聞</string>
     <string name="news_disable">關閉新聞直連</string>
     <string name="news_international">同時載入海外來源</string>
@@ -27,7 +27,7 @@
     <string name="news_static">頁面擷取文字</string>
     <string name="news_reading_note">擷取文字可能不完整或包含訂閱提示，不代表已取得完整原文。上方為報導發佈時間；取得時間不代表新聞剛剛發生。</string>
     <string name="news_truncated">長文已截斷至 24000 字元；AI 最多接收 18000 字元，截斷情況會明確告知模型。</string>
-    <string name="news_body_failed">未能擷取可讀內文，目前僅顯示新聞源摘要，並非全文。可嘗試應用程式內原網頁；訂閱與存取限制仍然有效。</string>
+    <string name="news_body_failed">未能擷取可讀內文，目前僅顯示摘要，並非全文。可嘗試應用程式內原網頁或在瀏覽器閱讀；原站訂閱及網路限制仍然有效。</string>
     <string name="news_no_summary">此新聞源未提供摘要。</string>
     <string name="news_web">應用程式內原網頁</string>
     <string name="news_text_mode">返回閱讀模式</string>
@@ -36,7 +36,7 @@
     <string name="news_web_notice">原站以內嵌網頁顯示，指令碼預設關閉。網頁內容、Cookie 和登入資訊不會傳送給 AI；AI 仍使用已擷取文字或 RSS 摘要。</string>
     <string name="news_web_scripts">允許本篇網頁執行指令碼</string>
     <string name="news_web_script_warning">啟用後，媒體及其第三方可以執行網頁程式碼並發出網路請求，仍無法取得應用程式憑證。請僅在信任此網站時啟用。</string>
-    <string name="news_web_failed">此網頁未能在應用程式內載入，請返回閱讀模式或重試。未開啟外部瀏覽器。</string>
+    <string name="news_web_failed">此網頁未能在應用程式內載入。可返回閱讀模式、重試或主動在瀏覽器開啟原文；不會自動跳轉。</string>
     <string name="news_ai">AI 研究</string>
     <string name="news_ai_subtitle">從新聞事實到市場情境</string>
     <string name="news_ai_privacy">點擊分析或傳送，會將標題、來源、發佈時間、擷取文字（或摘要）及近期對話傳送至個人 AI 端點。可選行情依目前資料來源設定取得。模型服務可能計費；不傳送網頁 Cookie 或登入狀態。</string>
@@ -60,8 +60,8 @@
     <string name="news_ai_evidence">分析依據：%1$s</string>
     <string name="news_provider">來源 · %1$s</string>
     <string name="news_fetched">頁面取得於 %1$s</string>
-    <string name="news_backend_note">後端新聞：伺服器每分鐘採集美國官方及財經來源，按發布時間保存 30 天的擷取內文和原始連結。本機只讀伺服器資料，不退回直連媒體。</string>
-    <string name="news_backend_reading">伺服器按發布時間保留 30 天的公開頁面擷取文字及原始連結。擷取可能不完整、缺少圖片表格或被截斷，不代表已取得全文；尚未完成或無法擷取時只顯示摘要。本機不連接媒體站點。</string>
+    <string name="news_backend_note">後端新聞：伺服器每分鐘採集美國官方及財經來源，按發布時間保存 30 天的擷取內文和原始連結。自動載入只讀伺服器資料，不退回直連媒體；也可主動點擊在瀏覽器開啟原文。</string>
+    <string name="news_backend_reading">伺服器按發布時間保留 30 天的公開頁面擷取文字及原始連結。擷取可能不完整、缺少圖片表格或被截斷，不代表已取得全文；尚未完成或無法擷取時只顯示摘要。自動閱讀不連接媒體站點；瀏覽器按鈕是你主動存取原站的獨立操作。</string>
     <string name="news_backend_unauthorized">後端驗證失敗，請檢查 Key 和裝置綁定；未嘗試直連媒體。</string>
     <string name="news_backend_unsupported">目前後端尚不支援新聞，請升級並重新啟動後端；未嘗試直連媒體。</string>
     <string name="news_backend_rate_limited">後端請求已限流，請稍後重試；已有快取仍可閱讀。</string>
@@ -75,4 +75,8 @@
     <string name="news_more_loading">正在載入更早新聞…</string>
     <string name="news_more_failed">更早新聞載入失敗，已載入內容仍可閱讀。</string>
     <string name="news_archive_limit">本頁最多顯示 5000 篇，後端仍保留完整的 30 天歸檔。</string>
+    <string name="news_browser_open">在瀏覽器閱讀原文</string>
+    <string name="news_browser_note">僅點擊後開啟原始新聞連結，不附帶應用程式憑證或裝置識別。瀏覽器 Cookie、網路及媒體訂閱限制由瀏覽器與站點處理。</string>
+    <string name="news_browser_failed">無法啟動瀏覽器，請檢查是否已安裝瀏覽器，或複製下方原始連結。</string>
+    <string name="news_browser_invalid">原始連結無效或不安全，無法開啟。</string>
 </resources>

@@ -6,7 +6,7 @@
     <string name="news_kicker">市场观察 · NEWS DESK</string>
     <string name="news_subtitle">读懂新闻，再研究市场影响。</string>
     <string name="news_enable_title">开启你的财经阅读台</string>
-    <string name="news_enable_note">新闻遵循所选数据模式：后端模式只读取服务器每分钟更新的公开新闻缓存，本机不连接媒体站点；直连模式优先国内源，可选海外来源。阅读不需要付费新闻 API 或 AI Key。公开摘要不代表全文；仅点击分析或发送才调用个人 AI。</string>
+    <string name="news_enable_note">新闻遵循所选数据模式：后端模式只读取服务器每分钟更新的公开新闻缓存，本机不自动连接媒体站点，可主动在浏览器打开原文；直连模式优先国内源，可选海外来源。阅读不需要付费新闻 API 或 AI Key。公开摘要不代表全文；仅点击分析或发送才调用个人 AI。</string>
     <string name="news_enable">启用公开新闻</string>
     <string name="news_disable">关闭新闻直连</string>
     <string name="news_international">同时加载海外来源</string>
@@ -27,7 +27,7 @@
     <string name="news_static">页面提取文本</string>
     <string name="news_reading_note">提取文本可能不完整或包含订阅提示，不代表已获取完整原文。上方为报道发布时间；获取时间不代表新闻刚刚发生。</string>
     <string name="news_truncated">长文已截断至 24000 字符；AI 最多接收 18000 字符，截断情况会明确告知模型。</string>
-    <string name="news_body_failed">未能提取可读正文，当前仅显示新闻源摘要，并非全文。可尝试应用内原网页；订阅与访问限制仍然有效。</string>
+    <string name="news_body_failed">未能提取可读正文，当前仅显示摘要，并非全文。可尝试应用内原网页或在浏览器阅读；原站订阅及网络限制仍然有效。</string>
     <string name="news_no_summary">该新闻源没有提供摘要。</string>
     <string name="news_web">应用内原网页</string>
     <string name="news_text_mode">返回阅读模式</string>
@@ -36,7 +36,7 @@
     <string name="news_web_notice">原站以内嵌网页显示，脚本默认关闭。网页内容、Cookie 和登录信息不会发送给 AI；AI 仍使用已提取文本或 RSS 摘要。</string>
     <string name="news_web_scripts">允许本篇网页运行脚本</string>
     <string name="news_web_script_warning">启用后，媒体及其第三方可以执行网页代码并发起网络请求，仍无法获取应用凭据。请仅在信任该网站时启用。</string>
-    <string name="news_web_failed">该网页未能在应用内加载，请返回阅读模式或重试。未打开外部浏览器。</string>
+    <string name="news_web_failed">该网页未能在应用内加载。可返回阅读模式、重试或主动在浏览器打开原文；不会自动跳转。</string>
     <string name="news_ai">AI 研究</string>
     <string name="news_ai_subtitle">从新闻事实到市场情景</string>
     <string name="news_ai_privacy">点击分析或发送，将标题、来源、发布时间、提取文本（或摘要）及近期对话发给个人 AI 接口。可选行情按当前数据来源设置获取。模型服务可能计费；不发送网页 Cookie 或登录状态。</string>
@@ -60,8 +60,8 @@
     <string name="news_ai_evidence">分析依据：%1$s</string>
     <string name="news_provider">来源 · %1$s</string>
     <string name="news_fetched">页面获取于 %1$s</string>
-    <string name="news_backend_note">后端新闻：服务器每分钟采集美国官方及财经来源，按发布时间保存 30 天的提取正文和原始链接。本机只读服务器数据，不回退直连媒体。</string>
-    <string name="news_backend_reading">服务器按发布时间保留 30 天的公开页面提取文本及原始链接。提取可能不完整、缺少图片表格或被截断，不代表已取得全文；尚未完成或无法提取时只显示摘要。本机不连接媒体站点。</string>
+    <string name="news_backend_note">后端新闻：服务器每分钟采集美国官方及财经来源，按发布时间保存 30 天的提取正文和原始链接。自动加载只读服务器数据，不回退直连媒体；也可主动点击在浏览器打开原文。</string>
+    <string name="news_backend_reading">服务器按发布时间保留 30 天的公开页面提取文本及原始链接。提取可能不完整、缺少图片表格或被截断，不代表已取得全文；尚未完成或无法提取时只显示摘要。自动阅读不连接媒体站点；浏览器按钮是你主动访问原站的独立操作。</string>
     <string name="news_backend_unauthorized">后端鉴权失败，请检查 Key 和设备绑定；未尝试直连媒体。</string>
     <string name="news_backend_unsupported">当前后端尚不支持新闻，请升级并重启后端；未尝试直连媒体。</string>
     <string name="news_backend_rate_limited">后端请求已限流，请稍后重试；已有缓存仍可阅读。</string>
@@ -75,4 +75,8 @@
     <string name="news_more_loading">正在加载更早新闻…</string>
     <string name="news_more_failed">更早新闻加载失败，已加载内容仍可阅读。</string>
     <string name="news_archive_limit">本页最多显示 5000 篇，后端仍保留完整的 30 天归档。</string>
+    <string name="news_browser_open">在浏览器阅读原文</string>
+    <string name="news_browser_note">仅点击后打开原始新闻链接，不附带应用凭据或设备标识。浏览器 Cookie、网络和媒体订阅限制由浏览器及站点处理。</string>
+    <string name="news_browser_failed">无法启动浏览器，请检查是否已安装浏览器，或复制下方原始链接。</string>
+    <string name="news_browser_invalid">原始链接无效或不安全，无法打开。</string>
 </resources>

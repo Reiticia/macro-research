@@ -6,7 +6,7 @@
     <string name="news_kicker">MARKET INTELLIGENCE</string>
     <string name="news_subtitle">Read the story. Question the market impact.</string>
     <string name="news_enable_title">Your personal news desk</string>
-    <string name="news_enable_note">News follows the selected data mode. Backend mode reads your server’s minute-by-minute public feed cache only; this device does not contact publishers. Direct mode uses domestic feeds first and optional international feeds. Reading needs no paid news API or AI Key. Feeds and summaries are not verified full articles. AI runs only when you choose Analyze or Send.</string>
+    <string name="news_enable_note">News follows the selected data mode. Backend mode reads your server’s minute-by-minute public feed cache only; this device does not automatically contact publishers. You may explicitly open an original link in your browser. Direct mode uses domestic feeds first and optional international feeds. Reading needs no paid news API or AI Key. Feeds and summaries are not verified full articles. AI runs only when you choose Analyze or Send.</string>
     <string name="news_enable">Enable public news</string>
     <string name="news_disable">Disconnect feeds</string>
     <string name="news_international">Include international feeds</string>
@@ -27,7 +27,7 @@
     <string name="news_static">Extracted page text</string>
     <string name="news_reading_note">Extracted text may be incomplete or include subscription notices. It is not verified as the complete article. Publication time is shown above; fetching time does not indicate when the story broke.</string>
     <string name="news_truncated">Long text shortened to 24,000 characters. AI receives at most 18,000 characters and is told if shortened.</string>
-    <string name="news_body_failed">Readable page text was unavailable. Showing the feed summary, not the full article. Try the in-app original page; subscriptions and access restrictions still apply.</string>
+    <string name="news_body_failed">Readable page text was unavailable. Showing the feed summary, not the full article. Try the in-app original page or read in your browser; subscriptions and network restrictions still apply.</string>
     <string name="news_no_summary">This feed did not provide a summary.</string>
     <string name="news_web">Original page in app</string>
     <string name="news_text_mode">Reading mode</string>
@@ -36,7 +36,7 @@
     <string name="news_web_notice">Original site in an isolated WebView. Scripts are off by default. Webpage contents, cookies and logins are not sent to AI; it still uses the extracted text or RSS summary.</string>
     <string name="news_web_scripts">Allow page scripts for this article</string>
     <string name="news_web_script_warning">Enabling scripts allows the publisher and its third parties to execute webpage code and make network requests. App credentials remain unavailable. Enable only if you trust this site.</string>
-    <string name="news_web_failed">This page could not be loaded in app. Return to reading mode or retry. No external browser was opened.</string>
+    <string name="news_web_failed">This page could not be loaded in app. Return to reading mode, retry, or explicitly open the original in your browser. No automatic browser fallback is used.</string>
     <string name="news_ai">AI research</string>
     <string name="news_ai_subtitle">From headline to conditional scenarios</string>
     <string name="news_ai_privacy">Analyze / Send shares the title, source, publication time, extracted text (or summary) and recent questions with your personal AI endpoint. Optional quotes follow the selected data-source mode. Provider fees may apply. No cookies or login state are shared.</string>
@@ -60,8 +60,8 @@
     <string name="news_ai_evidence">Evidence: %1$s</string>
     <string name="news_provider">Source · %1$s</string>
     <string name="news_fetched">Page fetched %1$s</string>
-    <string name="news_backend_note">Backend news: the server polls U.S. official and financial feeds every minute and archives extracted text and original links for 30 days from publication. This device reads only server data; it never falls back to media sites.</string>
-    <string name="news_backend_reading">The server retains extracted public-page text and the original link for 30 days from publication. Text may be incomplete, omit images/tables or be truncated; it is not verified full text. If extraction is pending or unavailable, only the feed summary is shown. This device does not contact publishers.</string>
+    <string name="news_backend_note">Backend news: the server polls U.S. official and financial feeds every minute and archives extracted text and original links for 30 days from publication. Automatic news loading uses only server data and never falls back to media sites. You can explicitly open an original link in your browser.</string>
+    <string name="news_backend_reading">The server retains extracted public-page text and the original link for 30 days from publication. Text may be incomplete, omit images/tables or be truncated; it is not verified full text. If extraction is pending or unavailable, only the feed summary is shown. Automatic reading does not contact publishers. The browser button is a separate, explicit visit to the original site.</string>
     <string name="news_backend_unauthorized">Backend authorization failed. Check your Key and device binding; no direct fallback was attempted.</string>
     <string name="news_backend_unsupported">This backend does not support news yet. Upgrade and restart the backend; no direct fallback was attempted.</string>
     <string name="news_backend_rate_limited">The backend has limited requests. Try again later; saved headlines remain available.</string>
@@ -75,4 +75,8 @@
     <string name="news_more_loading">Loading older news…</string>
     <string name="news_more_failed">Could not load older news. Loaded articles remain available.</string>
     <string name="news_archive_limit">This screen shows up to 5,000 reports. The backend still retains the full 30-day archive.</string>
+    <string name="news_browser_open">Read original in browser</string>
+    <string name="news_browser_note">Opens the original news link only when tapped, without app credentials or device headers. Browser cookies, network access and publisher subscriptions follow your browser settings.</string>
+    <string name="news_browser_failed">Could not open a browser. Check that a browser is installed, or copy the original link below.</string>
+    <string name="news_browser_invalid">The original link is missing or unsafe and cannot be opened.</string>
 </resources>
