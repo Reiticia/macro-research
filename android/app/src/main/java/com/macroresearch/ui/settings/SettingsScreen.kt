@@ -86,6 +86,7 @@ fun SettingsScreen(
     val translation by repository.translationSettings.collectAsStateWithLifecycle()
     val calendarDisplayMode by repository.calendarDisplayMode.collectAsStateWithLifecycle()
     val earningsSort by repository.earningsSort.collectAsStateWithLifecycle()
+    val eventTimeDisplay by repository.eventTimeDisplay.collectAsStateWithLifecycle()
     var selectedSetting by rememberSaveable { mutableStateOf<String?>(null) }
     androidx.activity.compose.BackHandler(enabled = selectedSetting != null) { selectedSetting = null }
     val settingTitle = when (selectedSetting) {
@@ -95,6 +96,7 @@ fun SettingsScreen(
         "display" -> R.string.display_size
         "calendar" -> R.string.calendar_display_content
         "earnings-sort" -> R.string.earnings_sort
+        "event-time" -> R.string.event_time_display
         "network" -> R.string.data_network
         "api" -> R.string.translation_api
         "method" -> R.string.ai_analysis_method
@@ -143,6 +145,7 @@ fun SettingsScreen(
                 item { SettingsMenuRow(stringResource(R.string.ai_analysis_method), stringResource(when (repository.analysisMethod.collectAsStateWithLifecycle().value) { com.macroresearch.data.AnalysisMethod.NUMBERS_ONLY -> R.string.ai_method_numbers_only; com.macroresearch.data.AnalysisMethod.EX_ANTE_THEN_COMPARE -> R.string.ai_method_two_stage; com.macroresearch.data.AnalysisMethod.SINGLE_PASS -> R.string.ai_method_single_pass }), Icons.Outlined.Tune) { selectedSetting = "method" } }
                 item { SettingsMenuRow(stringResource(R.string.ai_news_context), stringResource(if (repository.newsSettings.collectAsStateWithLifecycle().value.enabled) R.string.settings_enabled else R.string.settings_disabled), Icons.Outlined.Language) { selectedSetting = "news" } }
                 item { SettingsSectionTitle(stringResource(R.string.settings_interface_group)) }
+                item { SettingsMenuRow(stringResource(R.string.event_time_display), eventTimeDisplayLabel(eventTimeDisplay), Icons.Outlined.Tune) { selectedSetting = "event-time" } }
                 item { SettingsMenuRow(stringResource(R.string.calendar_display_content), calendarDisplayLabel(calendarDisplayMode), Icons.Outlined.Tune) { selectedSetting = "calendar" } }
                 item { SettingsMenuRow(stringResource(R.string.earnings_sort), "${earningsSortFieldLabel(earningsSort.field)} · ${earningsSortDirectionLabel(earningsSort.direction)}", Icons.Outlined.Tune) { selectedSetting = "earnings-sort" } }
                 item { SettingsMenuRow(stringResource(R.string.display_size), stringResource(when (com.macroresearch.ui.theme.LocalDisplaySettings.current.mode) { com.macroresearch.data.DisplayMode.AUTO -> R.string.display_auto; com.macroresearch.data.DisplayMode.COMPACT -> R.string.display_compact; com.macroresearch.data.DisplayMode.SYSTEM -> R.string.display_system }), Icons.Outlined.Tune) { selectedSetting = "display" } }
@@ -159,6 +162,7 @@ fun SettingsScreen(
                     "display" -> DisplaySettingsCard()
                     "calendar" -> CalendarDisplaySettings(calendarDisplayMode, repository::setCalendarDisplayMode)
                     "earnings-sort" -> EarningsSortSettings(earningsSort, repository::setEarningsSort)
+                    "event-time" -> EventTimeDisplaySettings(eventTimeDisplay, repository::setEventTimeDisplay)
                     "network" -> DataNetworkSettings(repository)
                     "api" -> TranslationApiSettings(repository)
                     "method" -> AnalysisMethodSettings(repository)

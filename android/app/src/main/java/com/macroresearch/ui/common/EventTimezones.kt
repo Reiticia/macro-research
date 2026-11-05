@@ -1,6 +1,7 @@
 package com.macroresearch.ui.common
 
 import com.macroresearch.data.model.EconomicEvent
+import com.macroresearch.data.EventTimeDisplay
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -100,6 +101,19 @@ fun EconomicEvent.displayTimes(deviceZone: ZoneId = ZoneId.systemDefault()): Mac
 /** In a single-line pair, repeat the regional date only when it differs from the local date. */
 fun MacroEventTimes.inlineRegionClockText(locale: Locale = Locale.getDefault()): String? = regionTime?.let {
     eventClockText(it, it.toLocalDate() != deviceTime?.toLocalDate(), locale)
+}
+
+/** Region-only history needs its own date even when the device date happens to match. */
+fun MacroEventTimes.regionClockText(
+    display: EventTimeDisplay, showDate: Boolean, locale: Locale = Locale.getDefault(),
+): String? = if (display == EventTimeDisplay.REGION) regionTime?.let {
+    eventClockText(it, showDate || it.toLocalDate() != deviceTime?.toLocalDate(), locale)
+} else inlineRegionClockText(locale)
+
+fun eventTimeDisplayText(display: EventTimeDisplay, device: String, region: String): String = when (display) {
+    EventTimeDisplay.DEVICE -> device
+    EventTimeDisplay.REGION -> region
+    EventTimeDisplay.BOTH -> "$device  |  $region"
 }
 
 fun eventClockText(time: ZonedDateTime, showDate: Boolean, locale: Locale = Locale.getDefault()): String {

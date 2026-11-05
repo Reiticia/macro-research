@@ -12,7 +12,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import com.macroresearch.ui.common.LocalEventTimeDisplay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -56,15 +58,18 @@ class MainActivity : AppCompatActivity() {
         val app = application as MacroApplication
         setContent {
             MacroTheme {
-                MacroApp(
-                    repository = app.repository,
-                    earningsRepository = app.earningsRepository,
-                    notificationEventId = notificationEventId,
-                    onNotificationHandled = { notificationEventId = null },
-                    updates = app.updates,
-                    onShowWhatsNew = { manualNotes = true },
-                    onInstallUpdate = { installUpdate() },
-                )
+                val eventTimeDisplay by app.repository.eventTimeDisplay.collectAsStateWithLifecycle()
+                CompositionLocalProvider(LocalEventTimeDisplay provides eventTimeDisplay) {
+                    MacroApp(
+                        repository = app.repository,
+                        earningsRepository = app.earningsRepository,
+                        notificationEventId = notificationEventId,
+                        onNotificationHandled = { notificationEventId = null },
+                        updates = app.updates,
+                        onShowWhatsNew = { manualNotes = true },
+                        onInstallUpdate = { installUpdate() },
+                    )
+                }
                 val pending by app.whatsNew.pending.collectAsStateWithLifecycle()
                 val updateState by app.updates.state.collectAsStateWithLifecycle()
                 LaunchedEffect(pending, updateState.initialized) {

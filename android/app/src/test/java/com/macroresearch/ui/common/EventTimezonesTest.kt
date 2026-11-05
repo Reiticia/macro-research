@@ -1,6 +1,7 @@
 package com.macroresearch.ui.common
 
 import com.macroresearch.data.model.EconomicEvent
+import com.macroresearch.data.EventTimeDisplay
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
@@ -126,6 +127,39 @@ class EventTimezonesTest {
     @Test fun inlinePairDoesNotInventUnknownOrDateOnlyRegionalTimes() {
         assertNull(event(country = "World").displayTimes(shanghai).inlineRegionClockText(Locale.ENGLISH))
         assertNull(event().copy(timeExact = false).displayTimes(shanghai).inlineRegionClockText(Locale.ENGLISH))
+    }
+
+    @Test fun displayPreferenceDefaultsToBothAndRestoresEachChoice() {
+        assertEquals(EventTimeDisplay.BOTH, EventTimeDisplay.fromStored(null))
+        assertEquals(EventTimeDisplay.BOTH, EventTimeDisplay.fromStored("invalid"))
+        EventTimeDisplay.entries.forEach { assertEquals(it, EventTimeDisplay.fromStored(it.name)) }
+        assertEquals("device", eventTimeDisplayText(EventTimeDisplay.DEVICE, "device", "region"))
+        assertEquals("region", eventTimeDisplayText(EventTimeDisplay.REGION, "device", "region"))
+        assertEquals("device  |  region", eventTimeDisplayText(EventTimeDisplay.BOTH, "device", "region"))
+    }
+
+    @Test fun regionOnlyHistoryKeepsTheDateEvenWhenBothZonesShareTheDay() {
+        val times = event().displayTimes(shanghai)
+        assertEquals("2026-11-04 08:30 (UTC-05:00)", times.regionClockText(EventTimeDisplay.REGION, true, Locale.ENGLISH))
+        assertEquals("08:30 (UTC-05:00)", times.regionClockText(EventTimeDisplay.REGION, false, Locale.ENGLISH))
+        assertEquals("08:30 (UTC-05:00)", times.regionClockText(EventTimeDisplay.BOTH, true, Locale.ENGLISH))
+    }
+
+    @Test fun regionOnlyStillIncludesTheRegionalDateWhenItDiffersFromCalendarGrouping() {
+        val times = event("2026-01-01T01:00:00Z").displayTimes(shanghai)
+        assertEquals("2025-12-31 20:00 (UTC-05:00)", times.regionClockText(EventTimeDisplay.REGION, false, Locale.ENGLISH))
+        assertEquals(LocalDate.of(2026, 1, 1), times.deviceTime!!.toLocalDate())
+        assertEquals("2025-12-31 20:00 (UTC-05:00)", times.regionClockText(EventTimeDisplay.BOTH, false, Locale.ENGLISH))
+    }
+
+    @Test fun displayModesDoNotInventMissingTimesOrChangeInstants() {
+        for (mode in EventTimeDisplay.entries) {
+            assertNull(event(country = "World").displayTimes(shanghai).regionClockText(mode, true))
+            assertNull(event().copy(timeExact = false).displayTimes(shanghai).regionClockText(mode, true))
+            assertNull(event("invalid").displayTimes(shanghai).regionClockText(mode, true))
+        }
+        val times = event().displayTimes(shanghai)
+        assertEquals(times.deviceTime!!.toInstant(), times.regionTime!!.toInstant())
     }
 
     @Test fun defaultDeviceZoneIsReadAtCallTimeRatherThanHardCodedToChina() {

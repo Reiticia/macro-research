@@ -7,7 +7,7 @@
     <string name="event_region_unknown">Region time · timezone unknown</string>
     <string name="event_time_pending">Time TBD</string>
     <string name="event_time_unavailable">Time unavailable</string>
-    <string name="event_time_reference_note">Both clocks represent the same instant and use the event date’s daylight-saving rules. The regional clock uses a national macro-release reference zone (e.g. New York for the US, Frankfurt for the euro area), not the venue of every speech. Calendar dates stay grouped in device time.</string>
+    <string name="event_time_reference_note">Clocks use the event date’s daylight-saving rules. The regional clock uses a national macro-release reference zone (e.g. New York for the US, Frankfurt for the euro area), not the venue of every speech. Calendar dates stay grouped in device time.</string>
     <string name="event_zone_new_york">New York</string>
     <string name="event_zone_central_europe">Central Europe</string>
     <string name="event_zone_beijing">Beijing</string>
@@ -15,4 +15,9 @@
     <string name="event_zone_london">London</string>
     <string name="event_zone_sydney">Sydney / Canberra</string>
     <string name="event_zone_toronto">Toronto / Ottawa</string>
+    <string name="event_time_display">Event time display</string>
+    <string name="event_time_display_device">Device local time</string>
+    <string name="event_time_display_region">Event-region time</string>
+    <string name="event_time_display_both">Device local and event-region time</string>
+    <string name="event_time_display_note">Applies to macro events on Home, Calendar, History, Followed and detail screens. Local uses your device zone; region uses the event country’s reference zone, with daylight-saving rules. Calendar date groups and earnings market dates do not change.</string>
 </resources>

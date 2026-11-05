@@ -102,6 +102,8 @@ class MacroRepository(
     val newsSettings: StateFlow<NewsSettings> = newsPreferences.settings
     val earningsSort = calendarPreferences.earningsSort
     fun setEarningsSort(sort: EarningsSort) = calendarPreferences.setEarningsSort(sort)
+    val eventTimeDisplay = calendarPreferences.eventTimeDisplay
+    fun setEventTimeDisplay(mode: EventTimeDisplay) = calendarPreferences.setEventTimeDisplay(mode)
     val calendarDisplayMode = calendarPreferences.mode
     fun setCalendarDisplayMode(mode: CalendarDisplayMode) = calendarPreferences.setMode(mode)
 

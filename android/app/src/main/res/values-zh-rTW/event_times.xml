@@ -7,7 +7,7 @@
     <string name="event_region_unknown">地區當地 · 時區未知</string>
     <string name="event_time_pending">時間待定</string>
     <string name="event_time_unavailable">時間無法取得</string>
-    <string name="event_time_reference_note">兩個時間代表同一時刻，依事件日期自動處理夏令時間。地區時間採用該國家／地區常用的宏觀發佈參考時區（如美國紐約、歐元區法蘭克福），不代表每場演講的實際所在地。日曆仍依裝置日期分組。</string>
+    <string name="event_time_reference_note">時間依事件日期自動處理夏令時間。地區時間採用該國家／地區常用的宏觀發佈參考時區（如美國紐約、歐元區法蘭克福），不代表每場演講的實際所在地。日曆仍依裝置日期分組。</string>
     <string name="event_zone_new_york">紐約</string>
     <string name="event_zone_central_europe">中歐</string>
     <string name="event_zone_beijing">北京</string>
@@ -15,4 +15,9 @@
     <string name="event_zone_london">倫敦</string>
     <string name="event_zone_sydney">雪梨／坎培拉</string>
     <string name="event_zone_toronto">多倫多／渥太華</string>
+    <string name="event_time_display">事件時間顯示</string>
+    <string name="event_time_display_device">本地時間</string>
+    <string name="event_time_display_region">當地時間</string>
+    <string name="event_time_display_both">本地時間與當地時間</string>
+    <string name="event_time_display_note">適用於首頁、日曆、歷史、關注和詳情中的宏觀事件。本地指裝置時區，當地指事件所屬地區的參考時區，自動處理日光節約時間。日曆日期分組及財報的美東日期口徑不變。</string>
 </resources>
