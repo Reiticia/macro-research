@@ -189,6 +189,9 @@ async fn app() -> TestApp {
         market,
         analyses,
         calendar_service,
+        news_service: Arc::new(market_event_analyzer::news::NewsService::new(
+            market_event_analyzer::news::http_client(None).unwrap(),
+        )),
         earnings_service: Arc::new(market_event_analyzer::earnings::EarningsService::new(
             pool.clone(),
             reqwest::Client::new(),
@@ -207,6 +210,223 @@ async fn app() -> TestApp {
         backfill,
     };
     TestApp { state, pool }
+}
+
+#[tokio::test]
+async fn news_api_authenticates_and_reads_only_the_scheduled_cache() {
+    use market_event_analyzer::news::{NewsService, NewsSource, http_client};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let mut app = app().await;
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = calls.clone();
+    let raw = include_str!("fixtures/news/rss.xml").replace(
+        "Wed, 04 Nov 2026 08:45:00 GMT",
+        &(Utc::now() - chrono::Duration::minutes(1)).to_rfc2822(),
+    );
+    let upstream = axum::Router::new().route(
+        "/rss",
+        axum::routing::get(move |headers: axum::http::HeaderMap| {
+            let raw = raw.clone();
+            let counter = counter.clone();
+            async move {
+                assert!(!headers.contains_key("authorization"));
+                assert!(!headers.contains_key("x-installation-id"));
+                counter.fetch_add(1, Ordering::SeqCst);
+                raw
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/rss", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+    let service = Arc::new(NewsService::with_sources(
+        http_client(None).unwrap(),
+        vec![NewsSource {
+            id: "bbc".into(),
+            name: "BBC Business".into(),
+            url,
+        }],
+    ));
+    app.state.news_service = service.clone();
+    let router = api::router(app.state);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request("GET", "/api/v1/news", None))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request("GET", "/api/v1/news", Some("secret-token")))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    service.refresh().await;
+    for _ in 0..2 {
+        let response = router
+            .clone()
+            .oneshot(request("GET", "/api/v1/news", Some("secret-token")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["sources"][0]["status"], "fresh");
+        assert_eq!(value["articles"][0]["title"], "Markets & inflation outlook");
+        assert_eq!(value["articles"][0]["feedId"], "bbc");
+        assert!(value["articles"][0]["publishedAt"].is_string());
+        assert!(value["articles"][0].get("body").is_none());
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    task.abort();
+}
+
+#[tokio::test]
+async fn archived_news_routes_preserve_original_links_and_never_fetch_on_read() {
+    use market_event_analyzer::{
+        news::{NewsArticle, NewsService, NewsSource, http_client},
+        news_archive::{NewsArchive, article_id},
+        news_page::{PageReader, PageText},
+    };
+    let mut app = app().await;
+    let now = Utc::now();
+    let source = NewsSource {
+        id: "fed".into(),
+        name: "Federal Reserve".into(),
+        url: "http://127.0.0.1:9/never-fetch".into(),
+    };
+    let archive = NewsArchive::new(app.pool.clone());
+    let url = "https://www.federalreserve.gov/newsevents/original.htm";
+    let id = article_id(url);
+    archive.record_source(&source, true, now).await.unwrap();
+    archive
+        .ingest(
+            &[NewsArticle {
+                archive_id: id.clone(),
+                title: "Policy release".into(),
+                url: url.into(),
+                source: source.name.clone(),
+                feed_id: source.id.clone(),
+                published_at: now - chrono::Duration::days(5),
+                summary: Some("Public summary".into()),
+            }],
+            now,
+        )
+        .await
+        .unwrap();
+    archive
+        .save_body(
+            &id,
+            &PageText {
+                url: "https://www.federalreserve.gov/newsevents/resolved.htm".into(),
+                text: "Archived public text. ".repeat(20),
+                truncated: false,
+            },
+            now,
+        )
+        .await
+        .unwrap();
+    app.state.news_service = Arc::new(
+        NewsService::with_sources(http_client(None).unwrap(), vec![source])
+            .with_archive(app.pool.clone(), PageReader::new(None).unwrap()),
+    );
+    let router = api::router(app.state);
+    let path = format!("/api/v1/news/articles/{id}");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request("GET", &path, None))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    for _ in 0..2 {
+        let response = router
+            .clone()
+            .oneshot(request("GET", &path, Some("secret-token")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["url"], url);
+        assert_eq!(body["archiveId"], id);
+        assert_eq!(body["bodyStatus"], "available");
+        assert!(
+            body["text"]
+                .as_str()
+                .unwrap()
+                .contains("Archived public text")
+        );
+        assert!(body["fetchedAt"].is_string());
+    }
+    let response = router
+        .clone()
+        .oneshot(request("GET", "/api/v1/news", Some("secret-token")))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["articles"][0]["url"], url);
+    assert_eq!(body["articles"][0]["archiveId"], id);
+    assert_eq!(body["stale"], true);
+    for path in [
+        "/api/v1/news?offset=bad",
+        "/api/v1/news?offset=-1",
+        "/api/v1/news/articles/invalid",
+    ] {
+        let response = router
+            .clone()
+            .oneshot(request("GET", path, Some("secret-token")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["error"]["code"],
+            "invalid_request"
+        );
+    }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT SUM(body_attempts) FROM news_articles")
+            .fetch_one(&app.pool)
+            .await
+            .unwrap(),
+        0
+    );
+    sqlx::query("UPDATE news_articles SET published_at=? WHERE id=?")
+        .bind(now.timestamp() - 31 * 86400)
+        .bind(&id)
+        .execute(&app.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        router
+            .oneshot(request("GET", &path, Some("secret-token")))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
 }
 
 #[tokio::test]

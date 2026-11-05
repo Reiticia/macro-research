@@ -16,6 +16,9 @@ pub mod llm_usage;
 pub mod market;
 pub mod market_selection;
 pub mod model;
+pub mod news;
+pub mod news_archive;
+pub mod news_page;
 pub mod openai_compat;
 pub mod quota;
 pub mod repository;
@@ -44,6 +47,7 @@ pub struct AppState {
     pub analyses: AnalysisRepository,
     pub calendar_service: Arc<CalendarService>,
     pub earnings_service: Arc<earnings::EarningsService>,
+    pub news_service: Arc<news::NewsService>,
     pub market_service: Arc<MarketService>,
     pub analysis_service: Arc<AnalysisService>,
     pub health: Arc<HealthRegistry>,

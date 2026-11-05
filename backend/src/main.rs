@@ -490,6 +490,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(market_event_analyzer::earnings::sync_loop(
         earnings_service.clone(),
     ));
+    let news_proxy = config
+        .network
+        .proxies("news")
+        .then_some(config.network.proxy_url.trim());
+    let news_service = Arc::new(
+        market_event_analyzer::news::NewsService::new(market_event_analyzer::news::http_client(
+            news_proxy,
+        )?)
+        .with_archive(
+            pool.clone(),
+            market_event_analyzer::news_page::PageReader::new(news_proxy)?,
+        ),
+    );
+    tokio::spawn(market_event_analyzer::news::sync_loop(news_service.clone()));
+    tokio::spawn(market_event_analyzer::news::body_loop(news_service.clone()));
     let (event_bus, _) = broadcast::channel(256);
     let state = AppState {
         config: Arc::new(config.clone()),
@@ -498,6 +513,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         analyses: analyses.clone(),
         calendar_service: calendar_service.clone(),
         earnings_service,
+        news_service,
         market_service: market_service.clone(),
         analysis_service,
         health: health.clone(),

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Fixture finance</title>
+<item><title><![CDATA[Markets &amp; inflation outlook]]></title><link>https://news.example.test/markets#story</link><pubDate>Wed, 04 Nov 2026 08:45:00 GMT</pubDate><description><![CDATA[<p>Central banks <b>review</b> rates.</p>]]></description></item>
+<item><title>Older story</title><link>https://news.example.test/old</link><pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate></item>
+<item><title>Future story</title><link>https://news.example.test/future</link><pubDate>2030-01-01T00:00:00Z</pubDate></item>
+<item><title>Unsafe link</title><link>http://news.example.test/plain</link><pubDate>2026-11-04T08:00:00Z</pubDate></item>
+<item><title>Missing time</title><link>https://news.example.test/missing</link></item>
+</channel></rss>

@@ -8,7 +8,7 @@ mod websocket;
 
 use axum::{
     Json, Router,
-    extract::{Extension, State},
+    extract::{Extension, Path, Query, State},
     http::header,
     middleware,
     response::IntoResponse,
@@ -22,6 +22,8 @@ use crate::{AppState, auth, auth::TokenId};
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/api/v1/status", get(status))
+        .route("/api/v1/news", get(news))
+        .route("/api/v1/news/articles/{id}", get(news_article))
         .route("/api/v1/usage", get(usage::usage))
         .route("/api/v1/events/upcoming", get(calendar::upcoming))
         .route("/api/v1/calendar", get(calendar::calendar))
@@ -56,6 +58,43 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+#[derive(serde::Deserialize, Default)]
+struct NewsPage {
+    #[serde(default)]
+    offset: i64,
+}
+async fn news(
+    State(state): State<AppState>,
+    query: Result<Query<NewsPage>, axum::extract::rejection::QueryRejection>,
+) -> axum::response::Response {
+    let page = match query {
+        Ok(Query(page)) => page,
+        Err(_) => {
+            return crate::error::AppError::InvalidRequest("Invalid news pagination".into())
+                .into_response();
+        }
+    };
+    match state.news_service.page(page.offset).await {
+        Err(error @ crate::error::AppError::InvalidRequest(_)) => error.into_response(),
+        Ok(feed) => ([(header::CACHE_CONTROL, "no-store")], Json(feed)).into_response(),
+        Err(_) => (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CACHE_CONTROL, "no-store"), (header::RETRY_AFTER, "60")],
+            Json(json!({"error":{"code":"news_unavailable","message":"News cache is not ready or all sources are unavailable"}})),
+        ).into_response(),
+    }
+}
+
+async fn news_article(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, crate::error::AppError> {
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(state.news_service.archived_article(&id).await?),
+    ))
+}
+
 async fn health() -> &'static str {
     "ok"
 }
@@ -75,6 +114,8 @@ async fn meta() -> impl IntoResponse {
                 "earningsLogos",
                 "earningsQuote",
                 "market",
+                "news",
+                "newsArchive",
                 "analysis",
                 "translation",
                 "translationCorrection",

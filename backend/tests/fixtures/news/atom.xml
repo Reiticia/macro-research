@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Fixture business</title>
+<entry><title>Jobs and growth</title><link rel="self" href="https://feeds.example.test/self"/><link rel="alternate" href="https://news.example.test/jobs"/><published>2026-11-04T09:00:00+00:00</published><summary>Employment update.</summary></entry>
+</feed>

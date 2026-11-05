@@ -179,6 +179,8 @@ request_timeout_seconds = 20
 | GET | `/api/v1/events/{id}/market` | `{snapshots, reactions}` |
 | GET | `/api/v1/events/by-provider?provider&provider_id` | 按上游身份查事件（按源定位日历记录） |
 | GET | `/api/v1/market/quotes?symbols=` | 批量当前行情与不可用列表 |
+| GET | `/api/v1/news?offset=0` | 每分钟采集美国官方/财经源并持久化 30 天；每页 100 条，返回 nextOffset、archiveId 与逐源状态；只读、不触发抓取，未就绪/全过期为 503；详见 [新闻阅读台](news-reader.md#后端持续采集推荐用于美国宏观新闻) |
+| GET | `/api/v1/news/articles/{archiveId}` | 只读 30 天内已归档的公开提取正文与原始链接，含提取时间、截断和 pending/available/unavailable；不接受任意 URL、不因读取触发下载；迁移 026 |
 | GET | `/api/v1/usage?days=7&recent=20` | 模型调用审计：按类别汇总的 token 消耗与最近记录 |
 | POST | `/api/v1/translations/corrections` | 提交译名勘正（进入管理员审核） |
 | GET | `/api/v1/translations/corrections?eventName=` | 最近一条勘正状态 |

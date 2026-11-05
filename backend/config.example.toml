@@ -29,6 +29,8 @@ cache_dir = "data/earnings-logos"
 proxy_url = ""
 proxied = ["tradingview", "nasdaq", "earnings_logo", "forexfactory", "cnbc", "yahoo", "telegram", "typesafe"]
 # TypeSafe/Jev 或模型中转站需要代理时，可加入 "typesafe" / "translation"。
+# 后端每分钟聚合美国宏观/财经新闻，独立归档公开正文/原始链接 30 天（SQLite 自动迁移 026）。
+# 仅新闻采集/正文需代理时，在已有列表中加入 "news"；不改变其他项。
 request_timeout_seconds = 20
 
 [calendar]
