@@ -466,4 +466,13 @@
     <string name="calendar_display_earnings">仅财报</string>
     <string name="calendar_display_economic">仅宏观事件</string>
     <string name="calendar_display_note">同时作用于周视图、月历和单日列表，选择后自动保存。不影响首页、历史记录和已关注事件。</string>
+    <string name="earnings_sort">财报排序</string>
+    <string name="earnings_sort_field">排序依据</string>
+    <string name="earnings_sort_direction">排列方向</string>
+    <string name="earnings_sort_market_cap">按市值</string>
+    <string name="earnings_sort_symbol">按股票代码</string>
+    <string name="earnings_sort_release_time">按发布时间</string>
+    <string name="earnings_sort_ascending">升序</string>
+    <string name="earnings_sort_descending">降序</string>
+    <string name="earnings_sort_note">按美东日期内排序，适用于财报列表、月历预览与收藏。发布时间仅区分盘前／盘后，无精确时刻；市值缺失或时间未知始终置后，同值按股票代码升序排列。</string>
 </resources>

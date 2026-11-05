@@ -42,6 +42,7 @@ fun EarningsScreen(repository: EarningsRepository) {
     val vm: EarningsViewModel = viewModel(factory = viewModelFactory { EarningsViewModel(repository) })
     val state by vm.state.collectAsStateWithLifecycle()
     val source by repository.settings.collectAsStateWithLifecycle()
+    val sort by repository.sort.collectAsStateWithLifecycle()
     var search by rememberSaveable { mutableStateOf("") }
     var session by rememberSaveable { mutableStateOf<String?>(null) }
     var picker by remember { mutableStateOf(false) }
@@ -50,7 +51,9 @@ fun EarningsScreen(repository: EarningsRepository) {
     val today = LocalDate.now(EARNINGS_ZONE)
     val minDate = today.minusDays(120)
     val maxDate = today.plusDays(60)
-    val filtered = remember(state.calendar, search, session) { filterEarnings(state.calendar?.events.orEmpty(), search, session) }
+    val filtered = remember(state.calendar, search, session, sort) {
+        sortEarnings(filterEarnings(state.calendar?.events.orEmpty(), search, session), sort)
+    }
 
     Column(Modifier.fillMaxSize().padding(horizontal = ResearchLayout.pagePadding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

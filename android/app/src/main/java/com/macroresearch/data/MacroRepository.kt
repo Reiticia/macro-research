@@ -13,6 +13,7 @@ import com.macroresearch.data.model.AiAnalysis
 import com.macroresearch.data.model.AiUsage
 import com.macroresearch.data.model.AnalysisReport
 import com.macroresearch.data.model.EconomicEvent
+import com.macroresearch.data.model.EarningsSort
 import com.macroresearch.data.model.EventDetailResponse
 import com.macroresearch.data.model.EventObservation
 import com.macroresearch.data.model.hasEventTimeArrived
@@ -98,6 +99,8 @@ class MacroRepository(
     val proxyAddress = networkPreferences.address
     val analysisMethod: StateFlow<AnalysisMethod> = analysisPreferences.method
     val newsSettings: StateFlow<NewsSettings> = newsPreferences.settings
+    val earningsSort = calendarPreferences.earningsSort
+    fun setEarningsSort(sort: EarningsSort) = calendarPreferences.setEarningsSort(sort)
     val calendarDisplayMode = calendarPreferences.mode
     fun setCalendarDisplayMode(mode: CalendarDisplayMode) = calendarPreferences.setMode(mode)
 

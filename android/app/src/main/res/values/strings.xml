@@ -467,4 +467,13 @@
     <string name="calendar_display_earnings">Earnings only</string>
     <string name="calendar_display_economic">Macro events only</string>
     <string name="calendar_display_note">Applies to the weekly calendar, month overview and daily agenda. Your choice is saved automatically. Home, history and followed events are unchanged.</string>
+    <string name="earnings_sort">Earnings sort order</string>
+    <string name="earnings_sort_field">Sort by</string>
+    <string name="earnings_sort_direction">Order</string>
+    <string name="earnings_sort_market_cap">Market capitalization</string>
+    <string name="earnings_sort_symbol">Stock symbol</string>
+    <string name="earnings_sort_release_time">Release time</string>
+    <string name="earnings_sort_ascending">Ascending</string>
+    <string name="earnings_sort_descending">Descending</string>
+    <string name="earnings_sort_note">Applies within each market date to earnings lists, month previews and favorites. Release time uses pre-market / after-hours only; no exact time is available. Missing market caps and unknown times stay last in either direction. Ties use stock symbol A–Z.</string>
 </resources>

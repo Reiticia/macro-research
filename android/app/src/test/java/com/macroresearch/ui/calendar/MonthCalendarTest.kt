@@ -58,6 +58,28 @@ class MonthCalendarTest {
             stores += ViewModelStore().also { it.put("month", vm) }
         }
 
+    @Test fun sortChangesUpdateStateWithoutReloadingEitherProvider() = runTest {
+        val source = Economic(settings)
+        val sort = MutableStateFlow(EarningsSort())
+        val requests = mutableListOf<LocalDate>()
+        val vm = MonthCalendarViewModel(source, earnings { date -> requests += date; calendar(date) },
+            clock = { now }, earningsSort = sort)
+        stores += ViewModelStore().also { it.put("sort", vm) }
+        advanceUntilIdle()
+        val initialEarningsRequests = requests.toList()
+        val initialEconomicRequests = source.requests.toList()
+        val snapshot = vm.state.value.earnings
+        sort.value = EarningsSort(EarningsSortField.MARKET_CAP, EarningsSortDirection.DESCENDING)
+        advanceUntilIdle()
+        assertEquals(sort.value, vm.state.value.earningsSort)
+        assertEquals(snapshot, vm.state.value.earnings)
+        assertEquals(initialEarningsRequests, requests)
+        assertEquals(initialEconomicRequests, source.requests)
+        settings.value = BackendSettings(mode = DataSourceMode.BACKEND, baseUrl = "https://example.test")
+        advanceUntilIdle()
+        assertEquals(sort.value, vm.state.value.earningsSort)
+    }
+
     @Test fun savedDisplayModesLoadOnlyTheAllowedContent() = runTest {
         for (mode in listOf(CalendarDisplayMode.EARNINGS, CalendarDisplayMode.ECONOMIC)) {
             val source = Economic(settings)

@@ -3,6 +3,7 @@ package com.macroresearch.ui.calendar
 import com.macroresearch.data.CalendarDisplayMode
 import com.macroresearch.data.model.EARNINGS_ZONE
 import com.macroresearch.data.model.EarningsCalendar
+import com.macroresearch.data.model.EarningsSort
 import com.macroresearch.data.model.EconomicEvent
 import java.time.Instant
 import java.time.LocalDate
@@ -31,6 +32,7 @@ data class MonthCalendarState(
     val presentation: CalendarPresentation = CalendarPresentation.WEEK,
     val content: CalendarContent = CalendarContent.ALL,
     val displayMode: CalendarDisplayMode = CalendarDisplayMode.ALL,
+    val earningsSort: EarningsSort = EarningsSort(),
     val economic: List<EconomicEvent> = emptyList(),
     val earnings: Map<LocalDate, MonthEarningsDay> = emptyMap(),
     val countries: Set<String> = emptySet(),

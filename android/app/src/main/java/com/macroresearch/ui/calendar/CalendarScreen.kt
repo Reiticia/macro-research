@@ -45,7 +45,7 @@ fun CalendarScreen(
 ) {
     val vm: MonthCalendarViewModel = viewModel(factory = viewModelFactory {
         MonthCalendarViewModel(RepositoryMonthEconomicSource(repository), earningsRepository,
-            displayMode = repository.calendarDisplayMode)
+            displayMode = repository.calendarDisplayMode, earningsSort = repository.earningsSort)
     })
     val state by vm.state.collectAsStateWithLifecycle()
     val source by repository.dataSourceSettings.collectAsStateWithLifecycle()

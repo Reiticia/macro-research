@@ -1,6 +1,7 @@
 package com.macroresearch.ui.calendar
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.*
@@ -65,6 +66,62 @@ class MonthCalendarUiTest {
                 if (original == null) remove("mode") else putString("mode", original)
             }.commit()
         }
+    }
+
+    @Test fun earningsSortChoicesAreIndependentAndPersisted() {
+        val storage = context.getSharedPreferences("calendar_display", android.content.Context.MODE_PRIVATE)
+        val keys = listOf("earnings_sort_field", "earnings_sort_direction")
+        val original = keys.associateWith { storage.getString(it, null) }
+        try {
+            val preferences = com.macroresearch.data.CalendarPreferences(context)
+            preferences.setEarningsSort(EarningsSort())
+            compose.setContent {
+                val selected by preferences.earningsSort.collectAsState()
+                MaterialTheme {
+                    Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                        com.macroresearch.ui.settings.EarningsSortSettings(selected, preferences::setEarningsSort)
+                    }
+                }
+            }
+            compose.onNodeWithTag("earnings-sort-SYMBOL").assertIsSelected()
+            compose.onNodeWithTag("earnings-sort-ASCENDING").assertIsSelected()
+            for (direction in EarningsSortDirection.entries) {
+                compose.onNodeWithTag("earnings-sort-${direction.name}").performScrollTo().performClick().assertIsSelected()
+                for (field in EarningsSortField.entries) {
+                    compose.onNodeWithTag("earnings-sort-${field.name}").performScrollTo().performClick().assertIsSelected()
+                    compose.runOnIdle {
+                        assertEquals(EarningsSort(field, direction),
+                            com.macroresearch.data.CalendarPreferences(context).earningsSort.value)
+                    }
+                }
+            }
+        } finally {
+            storage.edit().apply {
+                original.forEach { (key, value) -> if (value == null) remove(key) else putString(key, value) }
+            }.commit()
+        }
+    }
+
+    @Test fun monthPreviewReordersBeforeChoosingVisibleLogos() {
+        val events = listOf("AAA", "BBB", "CCC", "DDD", "ZZZ").mapIndexed { index, symbol ->
+            EarningsEvent(symbol, symbol, "nasdaq", marketCap = (index + 1).toString())
+        }
+        val initial = state().copy(earnings = mapOf(reference to MonthEarningsDay(EarningsCalendar(
+            reference.toString(), updatedAt = Instant.now().toString(), events = events), loaded = true)))
+        var value by mutableStateOf(initial)
+        compose.setContent {
+            MaterialTheme {
+                CalendarMonthContent(value, BackendSettings(), null,
+                    onMonth = {}, onToday = {}, onPicker = {}, onRefresh = {}, onContent = {}, onDate = {})
+            }
+        }
+        compose.onNodeWithTag("earnings-logo-AAA", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("earnings-logo-ZZZ", useUnmergedTree = true).assertDoesNotExist()
+        compose.runOnIdle {
+            value = value.copy(earningsSort = EarningsSort(EarningsSortField.MARKET_CAP, EarningsSortDirection.DESCENDING))
+        }
+        compose.onNodeWithTag("earnings-logo-ZZZ", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("earnings-logo-AAA", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test fun singleTypePreferenceHidesOtherMonthMarkersAndContentFilters() {

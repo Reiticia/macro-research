@@ -8,6 +8,7 @@ import com.macroresearch.data.EarningsRepository
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.model.EARNINGS_ZONE
 import com.macroresearch.data.model.EconomicEvent
+import com.macroresearch.data.model.EarningsSort
 import com.macroresearch.data.remote.BackendException
 import com.macroresearch.data.remote.BackendUnauthorizedException
 import com.macroresearch.ui.common.toggleImportanceSelection
@@ -43,12 +44,15 @@ internal class MonthCalendarViewModel(
     private val clock: () -> Instant = Instant::now,
     initialPresentation: CalendarPresentation = CalendarPresentation.WEEK,
     private val displayMode: StateFlow<CalendarDisplayMode> = MutableStateFlow(CalendarDisplayMode.ALL),
+    private val earningsSort: StateFlow<EarningsSort> =
+        earnings?.sort ?: MutableStateFlow(EarningsSort()),
 ) : ViewModel() {
     private val today get() = clock().atZone(EARNINGS_ZONE).toLocalDate()
     private val mutable = MutableStateFlow(MonthCalendarState(
         month = YearMonth.from(today), selectedDate = today, presentation = initialPresentation,
         countries = economic.countries.value, earningsAvailable = earnings != null,
         displayMode = displayMode.value, content = contentForDisplay(displayMode.value, earnings != null),
+        earningsSort = earningsSort.value,
     ))
     val state = mutable.asStateFlow()
     private var economicRequest: Job? = null
@@ -57,6 +61,10 @@ internal class MonthCalendarViewModel(
     private var generation = 0
 
     init {
+        // Reorder locally without invalidating caches or restarting range requests.
+        viewModelScope.launch {
+            earningsSort.collect { sort -> mutable.value = mutable.value.copy(earningsSort = sort) }
+        }
         viewModelScope.launch {
             combine(economic.settings, earnings?.settings ?: economic.settings, displayMode) { a, b, mode -> Triple(a, b, mode) }
                 .collect { (_, _, mode) ->

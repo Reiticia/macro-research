@@ -122,6 +122,7 @@ class MacroApplication : Application() {
             proxy = networkPreferences::proxy,
             backoff = PreferencesBackoffStore(this),
         )
+        val calendarPreferences = com.macroresearch.data.CalendarPreferences(this)
         val earningsClient = com.macroresearch.data.remote.EarningsClient(http, proxy = networkPreferences::proxy)
         val logoClient = com.macroresearch.data.remote.CompanyLogoClient(http, proxy = networkPreferences::proxy)
         earningsRepository = com.macroresearch.data.EarningsRepository(
@@ -131,6 +132,7 @@ class MacroApplication : Application() {
             backend = backendClient::earnings,
             backendQuote = backendClient::earningsQuote,
             favoritesStore = com.macroresearch.data.local.RoomEarningsFavoritesStore(database.earningsDao()),
+            sort = calendarPreferences.earningsSort,
             gson = gson,
             logos = com.macroresearch.data.CompanyLogoLoader(backendPreferences.settings, logoClient::image, backendClient::companyLogo),
         )
@@ -161,7 +163,7 @@ class MacroApplication : Application() {
             marketPreferences = MarketPreferences(this),
             translationPreferences = translationPreferences,
             pushTopicManager = pushTopicManager,
-            calendarPreferences = com.macroresearch.data.CalendarPreferences(this),
+            calendarPreferences = calendarPreferences,
             newsReader = com.macroresearch.data.NewsReaderRepository(
                 NewsRssClient(com.macroresearch.data.newsReaderHttpClient()),
                 com.macroresearch.data.remote.ArticlePreviewClient(),

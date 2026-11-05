@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import com.macroresearch.data.model.EarningsQuote
 import com.macroresearch.data.model.EarningsEvent
+import com.macroresearch.data.model.EarningsSort
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.security.MessageDigest
@@ -35,6 +37,8 @@ class EarningsRepository(
     val logos: CompanyLogoLoader? = null,
     private val backendQuote: (suspend (String) -> EarningsQuote)? = null,
     private val favoritesStore: EarningsFavoritesStore? = null,
+    val sort: StateFlow<EarningsSort> =
+        MutableStateFlow(EarningsSort()),
 ) {
     private val mutex = Mutex()
     private val attempts = mutableMapOf<String, Instant>()

@@ -14,6 +14,7 @@ import com.macroresearch.R
 import com.macroresearch.data.EarningsRepository
 import com.macroresearch.data.FavoriteEarnings
 import com.macroresearch.data.MacroRepository
+import com.macroresearch.data.model.earningsComparator
 import com.macroresearch.ui.common.EventCard
 import com.macroresearch.ui.common.dateLabel
 import com.macroresearch.ui.earnings.EarningsCard
@@ -34,6 +35,13 @@ fun FollowedEventsScreen(
     val events by repository.observeFollowedEvents().collectAsStateWithLifecycle(emptyList())
     val favorites by (earningsRepository?.favorites ?: flowOf(emptyList())).collectAsStateWithLifecycle(emptyList())
     val source by repository.dataSourceSettings.collectAsStateWithLifecycle()
+    val sort by repository.earningsSort.collectAsStateWithLifecycle()
+    val sortedFavorites = remember(favorites, sort) {
+        val comparator = earningsComparator(sort)
+        // Preserve date groups; apply the same daily order as the calendar.
+        favorites.sortedWith(compareByDescending<FavoriteEarnings> { it.date }
+            .thenComparator { left, right -> comparator.compare(left.event, right.event) })
+    }
     var selected by remember { mutableStateOf<FavoriteEarnings?>(null) }
 
     Column(Modifier.fillMaxSize().padding(bottom = padding.calculateBottomPadding())) {
@@ -59,7 +67,7 @@ fun FollowedEventsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                items(favorites, key = { "earnings:${it.date}:${it.event.symbol}" }) { favorite ->
+                items(sortedFavorites, key = { "earnings:${it.date}:${it.event.symbol}" }) { favorite ->
                     Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap)) {
                         Text(dateLabel(favorite.date), style = MaterialTheme.typography.labelLarge)
                         EarningsCard(favorite.event, earningsRepository?.logos, source,

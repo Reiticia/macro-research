@@ -31,6 +31,7 @@ import com.macroresearch.data.BackendSettings
 import com.macroresearch.data.CompanyLogoLoader
 import com.macroresearch.data.model.EARNINGS_ZONE
 import com.macroresearch.data.model.EarningsEvent
+import com.macroresearch.data.model.sortEarnings
 import com.macroresearch.ui.common.appLocale
 import com.macroresearch.ui.earnings.CompanyLogo
 import java.time.DayOfWeek
@@ -77,7 +78,11 @@ internal fun CalendarMonthGrid(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
                     Row(Modifier.fillMaxWidth().height(rowHeight)) {
                         week.forEach { date ->
-                            val earnings = if (state.showEarnings) state.earnings[date]?.calendar?.events.orEmpty() else emptyList()
+                            val earnings = remember(state.showEarnings, state.earnings[date], state.earningsSort) {
+                                if (state.showEarnings) sortEarnings(
+                                    state.earnings[date]?.calendar?.events.orEmpty(), state.earningsSort,
+                                ) else emptyList()
+                            }
                             val events = if (state.showEconomic) economic[date].orEmpty() else emptyList()
                             val unsupported = state.showEarnings && !supportsEarnings(date, today)
                             val pending = (state.showEarnings && supportsEarnings(date, today) && state.earnings[date]?.loaded != true) ||

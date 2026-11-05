@@ -85,6 +85,7 @@ fun SettingsScreen(
     val dataSource by repository.dataSourceSettings.collectAsStateWithLifecycle()
     val translation by repository.translationSettings.collectAsStateWithLifecycle()
     val calendarDisplayMode by repository.calendarDisplayMode.collectAsStateWithLifecycle()
+    val earningsSort by repository.earningsSort.collectAsStateWithLifecycle()
     var selectedSetting by rememberSaveable { mutableStateOf<String?>(null) }
     androidx.activity.compose.BackHandler(enabled = selectedSetting != null) { selectedSetting = null }
     val settingTitle = when (selectedSetting) {
@@ -93,6 +94,7 @@ fun SettingsScreen(
         "markets" -> R.string.market_tracking
         "display" -> R.string.display_size
         "calendar" -> R.string.calendar_display_content
+        "earnings-sort" -> R.string.earnings_sort
         "network" -> R.string.data_network
         "api" -> R.string.translation_api
         "method" -> R.string.ai_analysis_method
@@ -142,6 +144,7 @@ fun SettingsScreen(
                 item { SettingsMenuRow(stringResource(R.string.ai_news_context), stringResource(if (repository.newsSettings.collectAsStateWithLifecycle().value.enabled) R.string.settings_enabled else R.string.settings_disabled), Icons.Outlined.Language) { selectedSetting = "news" } }
                 item { SettingsSectionTitle(stringResource(R.string.settings_interface_group)) }
                 item { SettingsMenuRow(stringResource(R.string.calendar_display_content), calendarDisplayLabel(calendarDisplayMode), Icons.Outlined.Tune) { selectedSetting = "calendar" } }
+                item { SettingsMenuRow(stringResource(R.string.earnings_sort), "${earningsSortFieldLabel(earningsSort.field)} · ${earningsSortDirectionLabel(earningsSort.direction)}", Icons.Outlined.Tune) { selectedSetting = "earnings-sort" } }
                 item { SettingsMenuRow(stringResource(R.string.display_size), stringResource(when (com.macroresearch.ui.theme.LocalDisplaySettings.current.mode) { com.macroresearch.data.DisplayMode.AUTO -> R.string.display_auto; com.macroresearch.data.DisplayMode.COMPACT -> R.string.display_compact; com.macroresearch.data.DisplayMode.SYSTEM -> R.string.display_system }), Icons.Outlined.Tune) { selectedSetting = "display" } }
                 item { SettingsMenuRow(stringResource(R.string.language), AppLanguage.fromLocale(appLocale()).nativeName, Icons.Outlined.Language) { selectedSetting = "language" } }
                 if (dataSource.mode == DataSourceMode.DIRECT) item { SettingsMenuRow(stringResource(R.string.data_network), stringResource(R.string.data_proxy_note)) { selectedSetting = "network" } }
@@ -155,6 +158,7 @@ fun SettingsScreen(
                     "markets" -> MarketSettingsGroup(markets) { key, checked -> repository.setMarketEnabled(key, checked) }
                     "display" -> DisplaySettingsCard()
                     "calendar" -> CalendarDisplaySettings(calendarDisplayMode, repository::setCalendarDisplayMode)
+                    "earnings-sort" -> EarningsSortSettings(earningsSort, repository::setEarningsSort)
                     "network" -> DataNetworkSettings(repository)
                     "api" -> TranslationApiSettings(repository)
                     "method" -> AnalysisMethodSettings(repository)

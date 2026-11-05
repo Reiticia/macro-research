@@ -22,6 +22,7 @@ import com.macroresearch.data.CompanyLogoLoader
 import com.macroresearch.data.model.EARNINGS_ZONE
 import com.macroresearch.data.model.EarningsEvent
 import com.macroresearch.data.model.filterEarnings
+import com.macroresearch.data.model.sortEarnings
 import com.macroresearch.ui.common.*
 import com.macroresearch.ui.earnings.EarningsCard
 import com.macroresearch.ui.earnings.sessionLabel
@@ -72,7 +73,9 @@ internal fun CalendarDayContent(
     val day = state.earnings[state.selectedDate]
     val calendar = day?.calendar
     val supported = supportsEarnings(state.selectedDate, LocalDate.now(EARNINGS_ZONE))
-    val earnings = filterEarnings(calendar?.events.orEmpty(), search, session)
+    val earnings = sortEarnings(
+        filterEarnings(calendar?.events.orEmpty(), search, session), state.earningsSort,
+    )
     val economic = remember(state.economic, state.countries, state.importance, state.selectedDate, search, locale) {
         economicByDate(state.filteredEconomic, ZoneId.systemDefault())[state.selectedDate].orEmpty().filter {
             search.isBlank() || it.localizedName(locale).contains(search.trim(), true) || it.event.contains(search.trim(), true)
