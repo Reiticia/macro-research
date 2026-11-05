@@ -278,14 +278,26 @@ async fn fallback_can_fill_a_missing_primary_without_demoting_it() {
 async fn ambiguous_or_inexact_occurrences_are_not_promoted() {
     let repository = repository().await;
     repository
-        .save_events(&[event("biquote", "old1"), event("biquote", "old2")])
+        .save_events(&[event("biquote", "old1")])
         .await
         .unwrap();
+    // Simulate duplicates retained from an older version; new batches now deduplicate names.
+    sqlx::query("INSERT INTO economic_event(provider,provider_id,country,currency,category,event,event_time,importance,time_exact,status)
+        SELECT provider,'old2',country,currency,category,event,event_time,importance,time_exact,status FROM economic_event")
+        .execute(repository.pool()).await.unwrap();
     let ids = repository
         .save_events(&[event("trading_view", "new")])
         .await
         .unwrap();
-    assert_eq!(ids, vec![3]);
+    assert!(ids.is_empty());
+    assert_eq!(
+        repository
+            .events_in_range(start(), start() + Duration::days(1))
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
     let mut inexact = event("trading_view", "tentative");
     inexact.time_exact = false;
     assert_ne!(repository.save_events(&[inexact]).await.unwrap(), ids);

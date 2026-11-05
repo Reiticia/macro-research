@@ -430,6 +430,203 @@ async fn archived_news_routes_preserve_original_links_and_never_fetch_on_read() 
 }
 
 #[tokio::test]
+async fn renamed_public_provider_ids_keep_authenticated_by_provider_lookup_working() {
+    let app = app().await;
+    let mut old = fixture_event(0);
+    old.provider = "biquote".into();
+    old.provider_id = "old-occurrence".into();
+    old.event = "Old English Label".into();
+    old.event_zh_cn = Some("消费者信心指数".into());
+    let id = app.state.events.save_events(&[old.clone()]).await.unwrap()[0];
+    let mut new = old.clone();
+    new.provider = "trading_view".into();
+    new.provider_id = "new-occurrence".into();
+    new.event = "New English Label".into();
+    assert_eq!(
+        app.state.events.save_events(&[new]).await.unwrap(),
+        vec![id]
+    );
+    let router = api::router(app.state);
+    for (provider, provider_id) in [
+        ("biquote", "old-occurrence"),
+        ("trading_view", "new-occurrence"),
+    ] {
+        let path =
+            format!("/api/v1/events/by-provider?provider={provider}&provider_id={provider_id}");
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request("GET", &path, None))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let response = router
+            .clone()
+            .oneshot(request("GET", &path, Some("secret-token")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 65536)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["id"], id);
+        assert_eq!(value["provider"], "trading_view");
+        assert_eq!(value["providerId"], "new-occurrence");
+    }
+}
+
+#[tokio::test]
+async fn watcher_uses_cached_chinese_identity_without_models_and_preserves_the_watched_id() {
+    let mut app = app().await;
+    let mut old = fixture_event(0);
+    old.event_time = Utc::now() - Duration::minutes(2);
+    old.provider_id = "watched-old".into();
+    old.event = "Original English Label".into();
+    old.event_zh_cn = Some("消费者信心指数".into());
+    let id = app.state.events.save_events(&[old.clone()]).await.unwrap()[0];
+    app.state
+        .events
+        .set_status(id, EventStatus::Watching)
+        .await
+        .unwrap();
+    app.state
+        .events
+        .save_event_name_translations(&[(
+            "Different English Label".into(),
+            "消费者信心指数".into(),
+            "消費者信心指數".into(),
+        )])
+        .await
+        .unwrap();
+    let mut remote = old;
+    remote.provider = "biquote".into();
+    remote.provider_id = "remote-new".into();
+    remote.event = "Different English Label".into();
+    remote.event_zh_cn = None;
+    remote.actual = Some(Decimal::new(75, 0));
+    remote.status = EventStatus::Released;
+    app.state.calendar_service = Arc::new(CalendarService::new(
+        Arc::new(StubCalendar(vec![remote])),
+        Arc::new(StubCalendar(Vec::new())),
+        app.state.events.clone(),
+    ));
+    let mut receiver = app.state.event_bus.subscribe();
+    let task = tokio::spawn(market_event_analyzer::scheduler::event_watch_loop(
+        app.state.clone(),
+        app.state.config.calendar.clone(),
+        app.state.config.scheduler.clone(),
+    ));
+    let published = tokio::time::timeout(std::time::Duration::from_secs(3), receiver.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    task.abort();
+    assert!(
+        matches!(published,market_event_analyzer::model::AppEvent::EconomicEventReleased { event_id,.. } if event_id==id)
+    );
+    let stored = app.state.events.get(id).await.unwrap();
+    assert_eq!(stored.actual, Some(Decimal::new(75, 0)));
+    assert_eq!(stored.provider, "trading_view");
+    assert_eq!(app.state.events.observations(id).await.unwrap().len(), 1);
+    assert_eq!(
+        app.state
+            .events
+            .find_provider_event("biquote", "remote-new")
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        id
+    );
+}
+
+#[tokio::test]
+async fn watcher_never_releases_a_legacy_same_name_row_without_its_own_persisted_actual() {
+    let mut app = app().await;
+    let mut old = fixture_event(0);
+    old.event_time = Utc::now() - Duration::minutes(2);
+    old.provider_id = "legacy-one".into();
+    let id = app.state.events.save_events(&[old.clone()]).await.unwrap()[0];
+    app.state
+        .events
+        .set_status(id, EventStatus::Watching)
+        .await
+        .unwrap();
+    let legacy:i64=sqlx::query_scalar("INSERT INTO economic_event(provider,provider_id,country,currency,category,event,event_time,importance,status,time_exact)
+        SELECT provider,'legacy-two',country,currency,category,event,event_time,importance,status,time_exact FROM economic_event WHERE id=? RETURNING id")
+        .bind(id).fetch_one(&app.pool).await.unwrap();
+    let mut remote = old;
+    remote.actual = Some(Decimal::new(3, 1));
+    remote.status = EventStatus::Released;
+    app.state.calendar_service = Arc::new(CalendarService::new(
+        Arc::new(StubCalendar(vec![remote])),
+        Arc::new(StubCalendar(Vec::new())),
+        app.state.events.clone(),
+    ));
+    let mut receiver = app.state.event_bus.subscribe();
+    let task = tokio::spawn(market_event_analyzer::scheduler::event_watch_loop(
+        app.state.clone(),
+        app.state.config.calendar.clone(),
+        app.state.config.scheduler.clone(),
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(3), receiver.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let extra = tokio::time::timeout(std::time::Duration::from_millis(200), receiver.recv()).await;
+    task.abort();
+    assert!(extra.is_err());
+    assert_eq!(
+        app.state.events.get(id).await.unwrap().status,
+        EventStatus::Released
+    );
+    let untouched = app.state.events.get(legacy).await.unwrap();
+    assert_eq!(untouched.status, EventStatus::Watching);
+    assert!(untouched.actual.is_none());
+}
+
+#[tokio::test]
+async fn watcher_does_not_publish_when_duplicate_upstream_actual_values_disagree() {
+    let mut app = app().await;
+    let mut old = fixture_event(0);
+    old.event_time = Utc::now() - Duration::minutes(2);
+    old.provider_id = "conflict-one".into();
+    let id = app.state.events.save_events(&[old.clone()]).await.unwrap()[0];
+    app.state
+        .events
+        .set_status(id, EventStatus::Watching)
+        .await
+        .unwrap();
+    let mut first = old.clone();
+    first.actual = Some(Decimal::new(3, 1));
+    first.status = EventStatus::Released;
+    let mut second = first.clone();
+    second.provider_id = "conflict-two".into();
+    second.actual = Some(Decimal::new(4, 1));
+    app.state.calendar_service = Arc::new(CalendarService::new(
+        Arc::new(StubCalendar(vec![first, second])),
+        Arc::new(StubCalendar(Vec::new())),
+        app.state.events.clone(),
+    ));
+    let mut receiver = app.state.event_bus.subscribe();
+    let task = tokio::spawn(market_event_analyzer::scheduler::event_watch_loop(
+        app.state.clone(),
+        app.state.config.calendar.clone(),
+        app.state.config.scheduler.clone(),
+    ));
+    let published =
+        tokio::time::timeout(std::time::Duration::from_millis(200), receiver.recv()).await;
+    task.abort();
+    assert!(published.is_err());
+    let stored = app.state.events.get(id).await.unwrap();
+    assert!(stored.actual.is_none());
+    assert_eq!(stored.status, EventStatus::Watching);
+}
+
+#[tokio::test]
 async fn company_logo_route_authenticates_and_returns_only_bounded_png_assets() {
     let cache_dir = logo_cache::CacheDir::new();
     let mut app = app().await;

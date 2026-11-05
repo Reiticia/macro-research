@@ -83,6 +83,61 @@ pub fn provider_priority(provider: &str) -> u8 {
     }
 }
 
+/// User-defined English identity: lowercase ASCII letters/digits only. Never match empty keys.
+pub fn normalized_event_name(value: &str) -> String {
+    value
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        .collect()
+}
+
+/// Exact country + exact instant, then normalized English OR a nonblank, identical Chinese name.
+/// Chinese text is compared verbatim (including punctuation and whitespace); no guessed aliases.
+pub fn same_named_occurrence(
+    left: &crate::model::EconomicEvent,
+    right: &crate::model::EconomicEvent,
+) -> bool {
+    if !left.time_exact
+        || !right.time_exact
+        || left.country != right.country
+        || left.event_time != right.event_time
+    {
+        return false;
+    }
+    let english = normalized_event_name(&left.event);
+    if !english.is_empty() && english == normalized_event_name(&right.event) {
+        return true;
+    }
+    [left.event_zh_cn.as_deref(), left.event_zh_tw.as_deref()]
+        .into_iter()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .any(|name| {
+            [right.event_zh_cn.as_deref(), right.event_zh_tw.as_deref()]
+                .into_iter()
+                .flatten()
+                .any(|other| !other.trim().is_empty() && name == other)
+        })
+}
+
+/// Distinct nonmissing Actuals in one same-priority duplicate batch are not a revision order.
+/// Keep the last stored reliable value (or missing), rather than arbitrarily choosing a row.
+pub fn conflicting_duplicate_actual(
+    event: &crate::model::EconomicEvent,
+    batch: &[crate::model::EconomicEvent],
+) -> bool {
+    let priority = provider_priority(&event.provider);
+    priority > 0
+        && event.actual.is_some()
+        && batch.iter().any(|other| {
+            other.actual.is_some()
+                && other.actual != event.actual
+                && provider_priority(&other.provider) == priority
+                && same_named_occurrence(event, other)
+        })
+}
+
 /// Canonical key identifying "the same occurrence" across calendar feeds.
 ///
 /// The weekly fallback uses different titles for the same indicator, so a closed and

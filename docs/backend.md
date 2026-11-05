@@ -177,7 +177,7 @@ request_timeout_seconds = 20
 | POST | `/api/v1/events/{id}/refresh` | 绕过同步间隔按事件当日重取公布值 |
 | GET | `/api/v1/events/{id}/analysis` | 规则报告 |
 | GET | `/api/v1/events/{id}/market` | `{snapshots, reactions}` |
-| GET | `/api/v1/events/by-provider?provider&provider_id` | 按上游身份查事件（按源定位日历记录） |
+| GET | `/api/v1/events/by-provider?provider&provider_id` | 按上游身份查事件；已确认归并的旧 ID 通过持久化别名仍可定位同一事件，返回当前规范来源 |
 | GET | `/api/v1/market/quotes?symbols=` | 批量当前行情与不可用列表 |
 | GET | `/api/v1/news?offset=0` | 每分钟采集美国官方/财经源并持久化 30 天；每页 100 条，返回 nextOffset、archiveId 与逐源状态；只读、不触发抓取，未就绪/全过期为 503；详见 [新闻阅读台](news-reader.md#后端持续采集推荐用于美国宏观新闻) |
 | GET | `/api/v1/news/articles/{archiveId}` | 只读 30 天内已归档的公开提取正文与原始链接，含提取时间、截断和 pending/available/unavailable；不接受任意 URL、不因读取触发下载；迁移 026 |
@@ -301,7 +301,7 @@ curl -I --connect-timeout 10 --max-time 20 https://api.typesafe.ai/v1/systemone
 - BiQuote 使用 `[calendar].biquote_url`；TradingView 使用 `tradingview_url`（兼容旧配置名 `primary_url`），Forex Factory 仍使用 `fallback_url`。旧配置无需修改即可保留 TradingView 主源并启用 BiQuote 备用源。详细字段和边界见 [BiQuote 日历接入](biquote-calendar.md)。
 - 回退周历与主源对同一指标使用不同标题，因此维护一份**封闭且逐条核对过的同义表**；
   合并时把主源的公布值补写到**恰好唯一匹配**（国家 + 精确时刻 + 规范化标题）的回退行上，
-  有歧义就不写。唯一匹配的公共源事件原位升级，保留 ID、观察流水和关联数据；低优先级源只可填补缺失值，不能覆盖已有主源值，也不删除未匹配行。认证历史导入不参与跨源合并。
+  有歧义就不写。公开事件另按**同国家＋同一精确时刻**去重：英文转小写后仅保留 `a-z0-9` 的非空键相同，或非空中文名字符完全一致，即复用唯一记录，包括同源 ID 更换和同批重复。保留原 ID、观察流水、关联数据与旧/新上游 ID 别名，低优先级源不能覆盖已有主源 Actual。既有多候选歧义时跳过新身份，不继续新增重复，也不自动删除旧行；认证历史导入独立。新增迁移 027，不需改配置；完整边界见 [事件去重](event-deduplication.md)。
 - CNBC 请求固定携带 `Accept: application/json`、网页 `Referer` 与应用 User-Agent，避免被
   Akamai 将无来源的接口请求判为爬虫而返回 403。
 - 服务端行情符号固定为客户端可展示的集合（`config.toml` 的 `[market] symbols`）。每个标的的

@@ -1,15 +1,19 @@
 use chrono::{DateTime, Duration, Utc};
 use sqlx::{Row, SqlitePool};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
-    calendar::parse::{occurrence_key, provider_priority},
+    calendar::parse::{
+        conflicting_duplicate_actual, normalized_event_name, occurrence_key, provider_priority,
+        release_status, same_named_occurrence,
+    },
     error::AppError,
     event_description::EventDescription,
     market_selection::MarketSelection,
     model::{EconomicEvent, EventObservation, EventStatus, MarketSymbol},
 };
 
+use super::event_identity::{find_identity, remember_identity};
 use super::{datetime_from_row, decimal_from_row, event_from_row};
 
 #[derive(Clone)]
@@ -27,6 +31,8 @@ impl EventRepository {
         &self.pool
     }
 
+    /// Returns IDs for accepted rows (duplicates may repeat an ID). Ambiguous new identities
+    /// are skipped without a placeholder; unrelated rows in the batch still persist.
     pub async fn save_events(&self, events: &[EconomicEvent]) -> Result<Vec<i64>, AppError> {
         self.save_events_inner(events, true).await
     }
@@ -45,94 +51,183 @@ impl EventRepository {
         events: &[EconomicEvent],
         record_observations: bool,
     ) -> Result<Vec<i64>, AppError> {
-        let mut transaction = self.pool.begin().await?;
+        // Serialize identity lookup + upsert, including concurrent startup/periodic syncs.
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let mut ids = Vec::with_capacity(events.len());
+        let mut prepared = events.to_vec();
+        for event in &mut prepared {
+            // Read cached translations only; duplicate detection must never call a model.
+            if event.event_zh_cn.is_none() || event.event_zh_tw.is_none() {
+                if let Some(row) = sqlx::query(
+                    "SELECT zh_cn,zh_tw FROM event_name_translation WHERE source_text=?",
+                )
+                .bind(&event.event)
+                .fetch_optional(&mut *transaction)
+                .await?
+                {
+                    if event.event_zh_cn.is_none() {
+                        event.event_zh_cn = Some(row.try_get("zh_cn")?);
+                    }
+                    if event.event_zh_tw.is_none() {
+                        event.event_zh_tw = Some(row.try_get("zh_tw")?);
+                    }
+                }
+            }
+        }
 
-        let mut occurrences = HashMap::new();
-        for event in events {
-            *occurrences
+        // Only use the existing verified cross-source aliases when the batch has one
+        // distinct normalized name for that occurrence. Exact user-name duplicates in a
+        // single batch are handled sequentially against this transaction's own writes.
+        let mut occurrences: HashMap<_, HashSet<String>> = HashMap::new();
+        for event in &prepared {
+            occurrences
                 .entry(occurrence_key(
                     &event.country,
                     event.event_time,
                     &event.event,
                 ))
-                .or_insert(0) += 1;
+                .or_default()
+                .insert(normalized_event_name(&event.event));
         }
-        for incoming in events {
+        for incoming in &prepared {
             let mut event = incoming.clone();
-            // Promote one unambiguous public-calendar occurrence in place, preserving follows,
-            // observations and analysis foreign keys. Never conflate authenticated archives or
-            // two indicators sharing a release time.
-            let key = occurrence_key(&event.country, event.event_time, &event.event);
-            if event.time_exact && provider_priority(&event.provider) > 0 && occurrences[&key] == 1
-            {
-                let same_source: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM economic_event WHERE provider = ? AND provider_id = ?)"
+            let observed = event.clone();
+            let conflicting = conflicting_duplicate_actual(&event, &prepared);
+            if conflicting {
+                tracing::warn!(provider=%event.provider,"conflicting duplicate Actual values; retaining stored values");
+                event.actual = None;
+                event.previous = None;
+                event.consensus = None;
+                event.forecast = None;
+                event.status = release_status(None, event.event_time, Utc::now());
+            }
+            let mut existing =
+                find_identity(&mut transaction, &event.provider, &event.provider_id).await?;
+            if existing.is_none() && event.time_exact && provider_priority(&event.provider) > 0 {
+                let key = occurrence_key(&event.country, event.event_time, &event.event);
+                let allow_alias = !key.2.is_empty()
+                    && occurrences.get(&key).is_some_and(|names| names.len() == 1);
+                let rows = sqlx::query(
+                    "SELECT * FROM economic_event WHERE country=? AND event_time IN (?,?)",
                 )
-                .bind(&event.provider)
-                .bind(&event.provider_id)
-                .fetch_one(&mut *transaction)
+                .bind(&event.country)
+                .bind(event.event_time.to_rfc3339())
+                .bind(
+                    event
+                        .event_time
+                        .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+                )
+                .fetch_all(&mut *transaction)
                 .await?;
-                if !same_source {
-                    let rows = sqlx::query(
-                        "SELECT * FROM economic_event WHERE country = ? AND event_time = ?",
-                    )
-                    .bind(&event.country)
-                    .bind(event.event_time.to_rfc3339())
-                    .fetch_all(&mut *transaction)
-                    .await?;
-                    let candidates: Vec<_> = rows
-                        .into_iter()
-                        .map(event_from_row)
-                        .collect::<Result<Vec<_>, _>>()?
-                        .into_iter()
-                        .filter(|old| {
-                            old.time_exact
-                                && provider_priority(&old.provider) > 0
-                                && occurrence_key(&old.country, old.event_time, &old.event) == key
-                        })
-                        .collect();
-                    if let [old] = candidates.as_slice() {
-                        if provider_priority(&old.provider) > provider_priority(&event.provider) {
-                            if old.actual.is_some() || event.actual.is_none() {
-                                ids.push(old.id);
-                                continue;
-                            }
-                            // A fallback may fill a missing release, but cannot demote its identity.
-                            event = EconomicEvent {
-                                actual: event.actual,
-                                previous: event.previous,
-                                consensus: event.consensus,
-                                forecast: event.forecast,
-                                unit: event.unit,
-                                ..old.clone()
-                            };
-                        } else if old.provider != event.provider {
-                            if old.status == EventStatus::Historical
-                                && event.status != EventStatus::Historical
-                            {
-                                ids.push(old.id);
-                                continue;
-                            }
-                            sqlx::query(
-                                "UPDATE economic_event SET provider = ?, provider_id = ? WHERE id = ?",
-                            )
-                            .bind(&event.provider)
-                            .bind(&event.provider_id)
-                            .bind(old.id)
-                            .execute(&mut *transaction)
-                            .await?;
-                        }
+                let candidates: Vec<_> = rows
+                    .into_iter()
+                    .map(event_from_row)
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .filter(|old| {
+                        old.time_exact
+                            && provider_priority(&old.provider) > 0
+                            && (same_named_occurrence(old, &event)
+                                || allow_alias
+                                    && old.provider != event.provider
+                                    && occurrence_key(&old.country, old.event_time, &old.event)
+                                        == key)
+                    })
+                    .collect();
+                match candidates.as_slice() {
+                    [old] => existing = Some(old.clone()),
+                    [] => {}
+                    _ => {
+                        // Legacy duplicates require an explicit repair; neither choose an
+                        // arbitrary owner nor insert a third row while unrelated events sync.
+                        tracing::warn!(provider=%event.provider,matches=candidates.len(),
+                            "ambiguous calendar identity; skipping new upstream ID");
+                        continue;
+                    }
+                }
+            }
+            if let Some(old) = existing {
+                if conflicting {
+                    event.actual = old.actual;
+                    event.previous = old.previous;
+                    event.consensus = old.consensus;
+                    event.forecast = old.forecast;
+                    event.unit = old.unit.clone();
+                    event.status = if old.status == EventStatus::Historical {
+                        observed.status
+                    } else {
+                        old.status
+                    };
+                }
+                remember_identity(&mut transaction, &old, old.id).await?;
+                let same_identity =
+                    old.provider == event.provider && old.provider_id == event.provider_id;
+                let lower_source =
+                    provider_priority(&event.provider) < provider_priority(&old.provider);
+                if lower_source {
+                    if !same_named_occurrence(&old, &event)
+                        && !(old.time_exact
+                            && event.time_exact
+                            && !occurrence_key(&old.country, old.event_time, &old.event)
+                                .2
+                                .is_empty()
+                            && occurrence_key(&old.country, old.event_time, &old.event)
+                                == occurrence_key(&event.country, event.event_time, &event.event))
+                    {
+                        ids.push(old.id);
+                        continue;
+                    }
+                    remember_identity(&mut transaction, &observed, old.id).await?;
+                    if old.actual.is_some()
+                        || event.actual.is_none()
+                        || old.status == EventStatus::Historical
+                            && observed.status != EventStatus::Historical
+                    {
+                        ids.push(old.id);
+                        continue;
+                    }
+                    // A fallback can fill missing numbers, never replace the primary owner.
+                    event = EconomicEvent {
+                        actual: event.actual,
+                        previous: event.previous,
+                        consensus: event.consensus,
+                        forecast: event.forecast,
+                        unit: event.unit,
+                        ..old.clone()
+                    };
+                } else {
+                    if !same_identity
+                        && old.status == EventStatus::Historical
+                        && observed.status != EventStatus::Historical
+                    {
+                        remember_identity(&mut transaction, &observed, old.id).await?;
+                        ids.push(old.id);
+                        continue;
+                    }
+                    if !same_identity {
+                        sqlx::query(
+                            "UPDATE economic_event SET provider=?,provider_id=? WHERE id=?",
+                        )
+                        .bind(&event.provider)
+                        .bind(&event.provider_id)
+                        .bind(old.id)
+                        .execute(&mut *transaction)
+                        .await?;
+                    }
+                    if !same_identity
+                        || same_named_occurrence(&old, &event)
+                        || old.event == event.event
+                    {
                         event.event_zh_cn = old.event_zh_cn.clone().or(event.event_zh_cn);
                         event.event_zh_tw = old.event_zh_tw.clone().or(event.event_zh_tw);
-                        if event.actual.is_none() && old.actual.is_some() {
-                            event.actual = old.actual;
-                            event.previous = old.previous;
-                            event.consensus = old.consensus;
-                            event.forecast = old.forecast;
-                            event.unit = old.unit.clone();
-                            event.status = old.status;
-                        }
+                    }
+                    if !same_identity && event.actual.is_none() && old.actual.is_some() {
+                        event.actual = old.actual;
+                        event.previous = old.previous;
+                        event.consensus = old.consensus;
+                        event.forecast = old.forecast;
+                        event.unit = old.unit.clone();
+                        event.status = old.status;
                     }
                 }
             }
@@ -230,6 +325,9 @@ impl EventRepository {
                     (id, false)
                 }
             };
+
+            remember_identity(&mut transaction, &observed, id).await?;
+            remember_identity(&mut transaction, &event, id).await?;
 
             if record_observations && persisted {
                 let latest = sqlx::query(
@@ -405,12 +503,8 @@ impl EventRepository {
         provider: &str,
         provider_id: &str,
     ) -> Result<Option<EconomicEvent>, AppError> {
-        let row = sqlx::query("SELECT * FROM economic_event WHERE provider=? AND provider_id=?")
-            .bind(provider)
-            .bind(provider_id)
-            .fetch_optional(&self.pool)
-            .await?;
-        row.map(event_from_row).transpose()
+        let mut connection = self.pool.acquire().await?;
+        find_identity(&mut connection, provider, provider_id).await
     }
 
     pub async fn market_selection(

@@ -1,5 +1,6 @@
 mod analysis;
 mod event;
+mod event_identity;
 mod market;
 
 pub use analysis::AnalysisRepository;
