@@ -247,6 +247,22 @@ class BackendClient(
         }
     }
 
+    suspend fun news(): com.macroresearch.data.ReaderHeadlines = newsPage(0)
+    suspend fun newsPage(offset: Int): com.macroresearch.data.ReaderHeadlines = withContext(Dispatchers.IO) {
+        require(offset in 0..100_000)
+        val root = getJson("/api/v1/news") { if (offset > 0) it.addQueryParameter("offset",offset.toString()) }
+        try { decodeReaderNews(root.asJsonObject, gson).also { require(it.nextOffset == null || it.nextOffset > offset) } }
+        catch (error: Exception) { throw BackendUnavailableException("Backend returned invalid news metadata", error) }
+    }
+
+    suspend fun newsArticle(article: NewsArticle): ArticleReading? = withContext(Dispatchers.IO) {
+        val id = article.archiveId ?: return@withContext null
+        require(id.matches(Regex("[0-9a-f]{64}")))
+        val root = getJson("/api/v1/news/articles/$id").asJsonObject
+        try { decodeArchivedReading(root,article) }
+        catch (error: Exception) { throw BackendUnavailableException("Backend returned invalid archived article", error) }
+    }
+
     private fun events(root: com.google.gson.JsonElement): List<EconomicEvent> =
         gson.fromJson(root, object : TypeToken<List<EconomicEvent>>() {}.type)
 
@@ -258,7 +274,7 @@ class BackendClient(
         val builder = requestBuilder(path, authenticated, configure)
         // A release POST syncs the server, but cannot invalidate OkHttp's separate calendar URL.
         if (path == "/api/v1/calendar" || path == "/api/v1/earnings") builder.cacheControl(okhttp3.CacheControl.FORCE_NETWORK)
-        if (path == "/api/v1/meta" || path == "/api/v1/status" ||
+        if (path == "/api/v1/meta" || path == "/api/v1/status" || path.startsWith("/api/v1/news") ||
             path.startsWith("/api/v1/earnings/market/") || path.startsWith("/api/v1/earnings/quote/")) {
             builder.cacheControl(okhttp3.CacheControl.Builder().noCache().noStore().build())
         }
@@ -302,7 +318,15 @@ class BackendClient(
 
     private suspend fun execute(request: Request): com.google.gson.JsonElement = try {
         client.newCall(request).awaitResponse { response ->
-            val text = response.body?.string().orEmpty()
+            val text = if (request.url.encodedPath.startsWith("/api/v1/news")) {
+                val body = response.body
+                if (body == null) "" else {
+                    val input = body.source()
+                    input.request(1024 * 1024L + 1)
+                    if (input.buffer.size > 1024 * 1024L) throw BackendUnavailableException("Backend news response too large")
+                    input.buffer.readUtf8()
+                }
+            } else response.body?.string().orEmpty()
             if (response.isSuccessful) {
                 if (text.isBlank()) JsonObject()
                 else runCatching { JsonParser.parseString(text) }

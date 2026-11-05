@@ -6,9 +6,11 @@
     <string name="news_kicker">MARKET INTELLIGENCE</string>
     <string name="news_subtitle">Read the story. Question the market impact.</string>
     <string name="news_enable_title">Your personal news desk</string>
-    <string name="news_enable_note">This optional reader connects directly to FT Chinese, MarketWatch, BBC Business, DW and the Federal Reserve, even in backend mode. Public feeds require no paid API. Article access may require a subscription. It does not use the calendar proxy, backend credentials or AI. Opening an article fetches its public page. AI runs only when you choose Analyze or Send.</string>
+    <string name="news_enable_note">News follows the selected data mode. Backend mode reads your server’s minute-by-minute public feed cache only; this device does not contact publishers. Direct mode uses domestic feeds first and optional international feeds. Reading needs no paid news API or AI Key. Feeds and summaries are not verified full articles. AI runs only when you choose Analyze or Send.</string>
     <string name="news_enable">Enable public news</string>
     <string name="news_disable">Disconnect feeds</string>
+    <string name="news_international">Include international feeds</string>
+    <string name="news_direct_note">Direct domestic finance feed first; no proxy required. International feeds may be slow or unavailable and are tried as a fallback if the domestic feed fails.</string>
     <string name="news_refresh">Refresh news</string>
     <string name="news_search">Search loaded headlines</string>
     <string name="news_all">All sources</string>
@@ -58,4 +60,19 @@
     <string name="news_ai_evidence">Evidence: %1$s</string>
     <string name="news_provider">Source · %1$s</string>
     <string name="news_fetched">Page fetched %1$s</string>
+    <string name="news_backend_note">Backend news: the server polls U.S. official and financial feeds every minute and archives extracted text and original links for 30 days from publication. This device reads only server data; it never falls back to media sites.</string>
+    <string name="news_backend_reading">The server retains extracted public-page text and the original link for 30 days from publication. Text may be incomplete, omit images/tables or be truncated; it is not verified full text. If extraction is pending or unavailable, only the feed summary is shown. This device does not contact publishers.</string>
+    <string name="news_backend_unauthorized">Backend authorization failed. Check your Key and device binding; no direct fallback was attempted.</string>
+    <string name="news_backend_unsupported">This backend does not support news yet. Upgrade and restart the backend; no direct fallback was attempted.</string>
+    <string name="news_backend_rate_limited">The backend has limited requests. Try again later; saved headlines remain available.</string>
+    <string name="news_source_fresh">Available</string>
+    <string name="news_source_stale">Cached</string>
+    <string name="news_source_unavailable">Unavailable</string>
+    <string name="news_backend_loading">Loading saved article text from your backend…</string>
+    <string name="news_backend_retry">Reload saved text from backend</string>
+    <string name="news_backend_truncated">The server shortened extracted text to 64,000 characters. AI receives at most 18,000 characters and is told if shortened.</string>
+    <string name="news_more">Load older news · last 30 days</string>
+    <string name="news_more_loading">Loading older news…</string>
+    <string name="news_more_failed">Could not load older news. Loaded articles remain available.</string>
+    <string name="news_archive_limit">This screen shows up to 5,000 reports. The backend still retains the full 30-day archive.</string>
 </resources>

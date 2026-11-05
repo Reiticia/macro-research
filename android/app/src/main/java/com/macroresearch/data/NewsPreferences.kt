@@ -22,6 +22,13 @@ class NewsPreferences(context: Context) {
     // Separate explicit permission: browsing must never enable AI background news or previews.
     private val _readerEnabled = MutableStateFlow(preferences.getBoolean("news_reader_enabled", false))
     val readerEnabled: StateFlow<Boolean> = _readerEnabled.asStateFlow()
+    private val _readerInternationalEnabled = MutableStateFlow(preferences.getBoolean("news_reader_international", false))
+    val readerInternationalEnabled: StateFlow<Boolean> = _readerInternationalEnabled.asStateFlow()
+
+    fun setReaderInternationalEnabled(enabled: Boolean) {
+        preferences.edit().putBoolean("news_reader_international", enabled).apply()
+        _readerInternationalEnabled.value = enabled
+    }
 
     fun setReaderEnabled(enabled: Boolean) {
         preferences.edit().putBoolean("news_reader_enabled", enabled).apply()

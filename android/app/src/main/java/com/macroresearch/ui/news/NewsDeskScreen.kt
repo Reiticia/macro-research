@@ -21,6 +21,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
+import com.macroresearch.data.DataSourceMode
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.macroresearch.R
 import com.macroresearch.data.MacroRepository
@@ -39,6 +44,19 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
     val vm: NewsViewModel = viewModel(factory = viewModelFactory { NewsViewModel(repository) })
     val state by vm.state.collectAsStateWithLifecycle()
     val enabled by repository.newsReaderEnabled.collectAsStateWithLifecycle()
+    val internationalEnabled by repository.newsReaderInternationalEnabled.collectAsStateWithLifecycle()
+    val dataSettings by repository.newsReader.settings.collectAsStateWithLifecycle()
+    val backendNews = dataSettings.mode == DataSourceMode.BACKEND
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(vm, lifecycle, enabled, backendNews) {
+        if (enabled && backendNews) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                delay(60_000)
+                if (vm.state.value.headlines.articles.size <= 100 && vm.state.value.headlines.status !in setOf("backend_unauthorized", "backend_unsupported", "backend_rate_limited"))
+                    vm.refresh()
+            }
+        }
+    }
     val settings by repository.translationSettings.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
     var source by rememberSaveable { mutableStateOf<String?>(null) }
@@ -51,6 +69,7 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
         return
     }
     val sources = state.headlines.articles.map { it.source }.distinct()
+    LaunchedEffect(sources) { if (source != null && source !in sources) source = null }
     val articles = state.headlines.articles.filter {
         (source == null || it.source == source) && (query.isBlank() ||
             it.title.contains(query.trim(), true) || it.summary.orEmpty().contains(query.trim(), true))
@@ -88,6 +107,15 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
                     }
                 } else {
                     item {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (!backendNews) FilterChip(selected = internationalEnabled,
+                                onClick = { repository.setNewsReaderInternationalEnabled(!internationalEnabled) },
+                                label = { Text(stringResource(R.string.news_international)) })
+                            Text(stringResource(if (backendNews) R.string.news_backend_note else R.string.news_direct_note), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    item {
                         OutlinedTextField(query, { if (it.length <= 200) query = it }, singleLine = true,
                             label = { Text(stringResource(R.string.news_search)) }, modifier = Modifier.fillMaxWidth())
                     }
@@ -107,14 +135,41 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
                                     ?: state.headlines.fetchedAt?.let { stringResource(R.string.news_updated, newsTime(it, LocalConfiguration.current.locales[0])) }.orEmpty(),
                                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            if (state.headlines.status in setOf("search_unavailable", "partial_results")) {
-                                Text(stringResource(if (state.headlines.status == "search_unavailable") R.string.news_failed else R.string.news_partial),
+                            if (state.headlines.stale && state.headlines.status != "cached")
+                                Text(stringResource(R.string.news_cached), style = MaterialTheme.typography.bodySmall)
+                            state.headlines.sources.forEach { item ->
+                                val status = if (state.headlines.status !in setOf("articles_found", "partial_results", "no_articles_found") &&
+                                    item.status == "fresh") "stale" else item.status
+                                Text(item.name + " · " + stringResource(when (status) {
+                                    "fresh" -> R.string.news_source_fresh
+                                    "stale" -> R.string.news_source_stale
+                                    else -> R.string.news_source_unavailable
+                                }), style = MaterialTheme.typography.labelSmall)
+                            }
+                            if (state.headlines.status in setOf("search_unavailable", "partial_results",
+                                "backend_unauthorized", "backend_unsupported", "backend_rate_limited")) {
+                                Text(stringResource(when (state.headlines.status) {
+                                    "partial_results" -> R.string.news_partial
+                                    "backend_unauthorized" -> R.string.news_backend_unauthorized
+                                    "backend_unsupported" -> R.string.news_backend_unsupported
+                                    "backend_rate_limited" -> R.string.news_backend_rate_limited
+                                    else -> R.string.news_failed
+                                }),
                                     color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
                     if (articles.isEmpty() && !state.loading) item { Text(stringResource(R.string.news_empty), Modifier.padding(vertical = 24.dp)) }
                     items(articles, key = { it.url }) { item -> NewsHeadline(item) { vm.open(item) } }
+                    if (backendNews && state.headlines.nextOffset != null && state.headlines.articles.size < 5000) item {
+                        Column {
+                            if (state.moreFailed) Text(stringResource(R.string.news_more_failed), color = MaterialTheme.colorScheme.error)
+                            TextButton(onClick = vm::loadMore, enabled = !state.loadingMore && !state.loading) {
+                                Text(stringResource(if (state.loadingMore) R.string.news_more_loading else R.string.news_more))
+                            }
+                        }
+                    }
+                    if (backendNews && state.headlines.articles.size >= 5000) item { Text(stringResource(R.string.news_archive_limit)) }
                     item { TextButton(onClick = { repository.setNewsReaderEnabled(false) }) { Text(stringResource(R.string.news_disable)) } }
                 }
             }

@@ -163,9 +163,13 @@ class MacroApplication : Application() {
             pushTopicManager = pushTopicManager,
             calendarPreferences = com.macroresearch.data.CalendarPreferences(this),
             newsReader = com.macroresearch.data.NewsReaderRepository(
-                NewsRssClient(OkHttpClient.Builder().build()),
+                NewsRssClient(com.macroresearch.data.newsReaderHttpClient()),
                 com.macroresearch.data.remote.ArticlePreviewClient(),
                 com.macroresearch.data.NewsReaderCache(noBackupFilesDir.resolve("news-reader/headlines.json")),
+                settings = backendPreferences.settings,
+                backend = backendClient::news,
+                backendRead = backendClient::newsArticle,
+                backendPage = backendClient::newsPage,
             ),
         )
         notificationCenter = NotificationCenter(this)

@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.testTag
 import com.macroresearch.R
 import com.macroresearch.data.ReaderNewsSources
 import kotlinx.coroutines.launch
@@ -69,13 +70,13 @@ internal fun NewsReaderScreen(
                         icon = { Icon(Icons.Outlined.AutoAwesome, null) }, text = { Text(stringResource(R.string.news_ai)) })
                 },
             ) { padding ->
-                if (webMode) {
+                if (webMode && !state.backendNews) {
                     Column(Modifier.fillMaxSize().padding(padding)) {
                         TextButton(onClick = { webMode = false }) { Text(stringResource(R.string.news_text_mode)) }
                         NewsWebPage(state.reading?.url ?: article.url, Modifier.weight(1f))
                     }
                 } else {
-                    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(24.dp, 12.dp, 24.dp, 100.dp),
+                    LazyColumn(Modifier.fillMaxSize().padding(padding).testTag("news-reader-list"), contentPadding = PaddingValues(24.dp, 12.dp, 24.dp, 100.dp),
                         verticalArrangement = Arrangement.spacedBy(20.dp)) {
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -89,14 +90,14 @@ internal fun NewsReaderScreen(
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                     Text(stringResource(if (state.reading == null) R.string.news_summary else R.string.news_static),
                                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                    TextButton(onClick = { webMode = true }) { Text(stringResource(R.string.news_web)) }
+                                    if (!state.backendNews) TextButton(onClick = { webMode = true }) { Text(stringResource(R.string.news_web)) }
                                 }
                             }
                         }
                         if (state.readingLoading) item {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 LinearProgressIndicator(Modifier.fillMaxWidth())
-                                Text(stringResource(R.string.news_loading_body), style = MaterialTheme.typography.bodySmall)
+                                Text(stringResource(if (state.backendNews) R.string.news_backend_loading else R.string.news_loading_body), style = MaterialTheme.typography.bodySmall)
                             }
                         }
                         item {
@@ -107,14 +108,17 @@ internal fun NewsReaderScreen(
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 HorizontalDivider()
-                                Text(stringResource(if (state.reading == null && !state.readingLoading) R.string.news_body_failed else R.string.news_reading_note),
+                                Text(stringResource(if (state.backendNews) R.string.news_backend_reading
+                                    else if (state.reading == null && !state.readingLoading) R.string.news_body_failed else R.string.news_reading_note),
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (state.reading?.truncated == true) Text(stringResource(R.string.news_truncated), style = MaterialTheme.typography.bodySmall)
+                                if (state.reading?.truncated == true) Text(stringResource(if (state.backendNews) R.string.news_backend_truncated else R.string.news_truncated), style = MaterialTheme.typography.bodySmall)
                                 state.reading?.fetchedAt?.let {
                                     Text(stringResource(R.string.news_fetched, newsTime(it, LocalConfiguration.current.locales[0])), style = MaterialTheme.typography.labelSmall)
                                 }
                                 SelectionContainer { Text(state.reading?.url ?: article.url, style = MaterialTheme.typography.bodySmall) }
-                                if (state.reading == null && !state.readingLoading) TextButton(onClick = onRetry) { Text(stringResource(R.string.news_retry_body)) }
+                                if (state.reading == null && !state.readingLoading) TextButton(onClick = onRetry) {
+                                    Text(stringResource(if (state.backendNews) R.string.news_backend_retry else R.string.news_retry_body))
+                                }
                             }
                         }
                     }

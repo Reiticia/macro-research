@@ -15,6 +15,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.StringReader
+import java.io.ByteArrayInputStream
 import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import org.w3c.dom.Element
@@ -33,6 +34,7 @@ data class NewsArticle(
     val source: String,
     val publishedAt: String?,
     val summary: String?,
+    val archiveId: String? = null,
 )
 
 data class NewsFetchResult(
@@ -134,7 +136,7 @@ class NewsRssClient(
                 source.request(MAX_FEED_BYTES + 1L)
                 val bytes = source.buffer.readByteArray()
                 if (bytes.size > MAX_FEED_BYTES) return@awaitResponse FeedFetch(emptyList(), false)
-                FeedFetch(parseFeed(bytes.toString(Charsets.UTF_8), url), true)
+                FeedFetch(parseFeed(bytes, url), true)
             }.also { result -> step?.let { trace.finish(it, if (result.succeeded) AiStepStatus.SUCCEEDED else AiStepStatus.FAILED, count = result.articles.size, httpStatus = code) } }
         } catch (cancelled: CancellationException) {
             step?.let { trace.finish(it, AiStepStatus.CANCELLED, httpStatus = code) }
@@ -145,7 +147,14 @@ class NewsRssClient(
         }
     }
 
-    internal fun parseFeed(xml: String, feedUrl: String): List<NewsArticle> {
+    internal fun parseFeed(xml: String, feedUrl: String): List<NewsArticle> =
+        parseFeed(InputSource(StringReader(xml)), feedUrl)
+
+    // Let the XML parser honor the declaration (e.g. GBK), rather than corrupting Chinese text.
+    internal fun parseFeed(xml: ByteArray, feedUrl: String): List<NewsArticle> =
+        parseFeed(InputSource(ByteArrayInputStream(xml)), feedUrl)
+
+    private fun parseFeed(input: InputSource, feedUrl: String): List<NewsArticle> {
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = true
             isXIncludeAware = false
@@ -160,7 +169,10 @@ class NewsRssClient(
         val builder = factory.newDocumentBuilder().apply {
             setEntityResolver { _, _ -> InputSource(StringReader("")) }
         }
-        val document = builder.parse(InputSource(StringReader(xml)))
+        val document = builder.parse(input)
+        val root = document.documentElement.localName ?: document.documentElement.tagName
+        require(root in setOf("rss", "RDF", "feed")) { "Not a news feed" }
+        if (root == "rss") require(document.getElementsByTagName("channel").length > 0)
         val entries = document.getElementsByTagName("item").let { rssItems ->
             if (rssItems.length > 0) rssItems else document.getElementsByTagNameNS("*", "entry")
         }

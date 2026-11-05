@@ -118,6 +118,8 @@ class MacroRepository(
     fun setArticlePreviewEnabled(enabled: Boolean) = newsPreferences.setArticlePreviewEnabled(enabled)
     val newsReaderEnabled: StateFlow<Boolean> = newsPreferences.readerEnabled
     fun setNewsReaderEnabled(enabled: Boolean) = newsPreferences.setReaderEnabled(enabled)
+    val newsReaderInternationalEnabled = newsPreferences.readerInternationalEnabled
+    fun setNewsReaderInternationalEnabled(enabled: Boolean) = newsPreferences.setReaderInternationalEnabled(enabled)
 
     suspend fun analyzeNews(
         article: com.macroresearch.data.remote.NewsArticle,

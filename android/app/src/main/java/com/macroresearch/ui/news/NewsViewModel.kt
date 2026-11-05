@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.macroresearch.data.MacroRepository
 import com.macroresearch.data.ReaderHeadlines
+import com.macroresearch.data.DataSourceMode
+import com.macroresearch.data.remote.BackendException
+import com.macroresearch.data.remote.BackendUnauthorizedException
 import com.macroresearch.data.remote.AiConversationMessage
 import com.macroresearch.data.remote.ArticleReading
 import com.macroresearch.data.remote.NewsArticle
@@ -12,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -24,12 +28,17 @@ internal data class NewsDeskState(
     val messages: List<AiConversationMessage> = emptyList(),
     val aiLoading: Boolean = false,
     val aiError: Boolean = false,
+    val backendNews: Boolean = false,
+    val loadingMore: Boolean = false,
+    val moreFailed: Boolean = false,
 )
 
 internal class NewsViewModel(private val repository: MacroRepository) : ViewModel() {
     private val _state = MutableStateFlow(NewsDeskState())
     val state = _state.asStateFlow()
     private var refreshJob: Job? = null
+    private var moreJob: Job? = null
+    private var generation = 0
     private var articleJob: Job? = null
     private var aiJob: Job? = null
     private val readings = linkedMapOf<String, ArticleReading>()
@@ -37,29 +46,64 @@ internal class NewsViewModel(private val repository: MacroRepository) : ViewMode
 
     init {
         viewModelScope.launch {
-            val cached = repository.newsReader.cached()
-            _state.update { it.copy(headlines = cached) }
-            repository.newsReaderEnabled.collectLatest { enabled ->
-                if (enabled) refresh() else {
-                    refreshJob?.cancel()
-                    closeArticle()
-                    _state.update { it.copy(loading = false) }
-                }
+            combine(repository.newsReaderEnabled, repository.newsReaderInternationalEnabled,
+                repository.newsReader.settings) { enabled, international, settings ->
+                Triple(enabled, international, settings)
+            }.collectLatest { (enabled, _, settings) ->
+                generation++
+                moreJob?.cancel()
+                moreJob?.join()
+                refreshJob?.cancel()
+                refreshJob?.join()
+                closeArticle()
+                readings.clear()
+                conversations.clear()
+                _state.value = NewsDeskState(backendNews = settings.mode == DataSourceMode.BACKEND)
+                val cached = repository.newsReader.cached()
+                _state.update { it.copy(headlines = cached) }
+                if (enabled) refresh()
             }
         }
     }
 
     fun refresh() {
         if (!repository.newsReaderEnabled.value || refreshJob?.isActive == true) return
+        generation++
+        moreJob?.cancel()
         refreshJob = viewModelScope.launch {
-            _state.update { it.copy(loading = true) }
+            _state.update { it.copy(loading = true, loadingMore = false, moreFailed = false) }
             try {
-                val result = repository.newsReader.refresh()
+                val result = repository.newsReader.refresh(repository.newsReaderInternationalEnabled.value)
                 _state.update { it.copy(headlines = result, loading = false) }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) {
-                _state.update { it.copy(loading = false, headlines = it.headlines.copy(status = "search_unavailable")) }
+            catch (error: Exception) {
+                val status = when {
+                    error is BackendUnauthorizedException -> "backend_unauthorized"
+                    error is BackendException && error.statusCode in listOf(404,501) -> "backend_unsupported"
+                    error is BackendException && error.statusCode == 429 -> "backend_rate_limited"
+                    else -> "search_unavailable"
+                }
+                _state.update { it.copy(loading = false, headlines = it.headlines.copy(status = status, stale = true)) }
             }
+        }
+    }
+
+    fun loadMore() {
+        val current = _state.value
+        val offset = current.headlines.nextOffset ?: return
+        if (!current.backendNews || current.loading || current.loadingMore || current.headlines.articles.size >= 5000 ||
+            !repository.newsReaderEnabled.value) return
+        val revision = generation
+        moreJob = viewModelScope.launch {
+            _state.update { it.copy(loadingMore = true, moreFailed = false) }
+            try {
+                val page = repository.newsReader.more(offset)
+                if (revision != generation) return@launch
+                _state.update { state -> state.copy(loadingMore = false, headlines = state.headlines.copy(
+                    articles = (state.headlines.articles + page.articles).distinctBy { it.url }.take(5000),
+                    nextOffset = page.nextOffset)) }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { if (revision == generation) _state.update { it.copy(loadingMore = false, moreFailed = true) } }
         }
     }
 
@@ -74,6 +118,7 @@ internal class NewsViewModel(private val repository: MacroRepository) : ViewMode
         articleJob = viewModelScope.launch {
             try {
                 val reading = repository.newsReader.read(article)
+                if (_state.value.article?.url != article.url) return@launch
                 if (reading != null) {
                     readings[article.url] = reading
                     if (readings.size > 5) readings.remove(readings.keys.first())

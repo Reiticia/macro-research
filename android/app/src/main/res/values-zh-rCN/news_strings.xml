@@ -6,9 +6,11 @@
     <string name="news_kicker">市场观察 · NEWS DESK</string>
     <string name="news_subtitle">读懂新闻，再研究市场影响。</string>
     <string name="news_enable_title">开启你的财经阅读台</string>
-    <string name="news_enable_note">本阅读功能独立于日历数据模式；即使使用后端模式，也会直连 FT中文网、MarketWatch、BBC、DW 和美联储。公开 RSS 无需付费 API，部分原文仍可能需要订阅。不使用日历代理、后端凭据或 AI。打开文章会获取其公开页面；仅点击分析或发送才调用个人 AI。</string>
+    <string name="news_enable_note">新闻遵循所选数据模式：后端模式只读取服务器每分钟更新的公开新闻缓存，本机不连接媒体站点；直连模式优先国内源，可选海外来源。阅读不需要付费新闻 API 或 AI Key。公开摘要不代表全文；仅点击分析或发送才调用个人 AI。</string>
     <string name="news_enable">启用公开新闻</string>
     <string name="news_disable">关闭新闻直连</string>
+    <string name="news_international">同时加载海外来源</string>
+    <string name="news_direct_note">默认直连国内财经源，无需代理。海外源可能较慢或无法访问，国内源失败时会尝试海外源兜底。</string>
     <string name="news_refresh">刷新新闻</string>
     <string name="news_search">搜索已加载的新闻</string>
     <string name="news_all">全部来源</string>
@@ -58,4 +60,19 @@
     <string name="news_ai_evidence">分析依据：%1$s</string>
     <string name="news_provider">来源 · %1$s</string>
     <string name="news_fetched">页面获取于 %1$s</string>
+    <string name="news_backend_note">后端新闻：服务器每分钟采集美国官方及财经来源，按发布时间保存 30 天的提取正文和原始链接。本机只读服务器数据，不回退直连媒体。</string>
+    <string name="news_backend_reading">服务器按发布时间保留 30 天的公开页面提取文本及原始链接。提取可能不完整、缺少图片表格或被截断，不代表已取得全文；尚未完成或无法提取时只显示摘要。本机不连接媒体站点。</string>
+    <string name="news_backend_unauthorized">后端鉴权失败，请检查 Key 和设备绑定；未尝试直连媒体。</string>
+    <string name="news_backend_unsupported">当前后端尚不支持新闻，请升级并重启后端；未尝试直连媒体。</string>
+    <string name="news_backend_rate_limited">后端请求已限流，请稍后重试；已有缓存仍可阅读。</string>
+    <string name="news_source_fresh">可用</string>
+    <string name="news_source_stale">旧缓存</string>
+    <string name="news_source_unavailable">不可用</string>
+    <string name="news_backend_loading">正在读取后端已保存的正文…</string>
+    <string name="news_backend_retry">重新读取后端正文</string>
+    <string name="news_backend_truncated">服务器已将提取文本截断至 64000 字符；AI 最多接收 18000 字符，截断情况会明确告知模型。</string>
+    <string name="news_more">加载更早新闻 · 最近 30 天</string>
+    <string name="news_more_loading">正在加载更早新闻…</string>
+    <string name="news_more_failed">更早新闻加载失败，已加载内容仍可阅读。</string>
+    <string name="news_archive_limit">本页最多显示 5000 篇，后端仍保留完整的 30 天归档。</string>
 </resources>

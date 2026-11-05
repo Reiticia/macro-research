@@ -6,9 +6,11 @@
     <string name="news_kicker">市場觀察 · NEWS DESK</string>
     <string name="news_subtitle">讀懂新聞，再研究市場影響。</string>
     <string name="news_enable_title">開啟你的財經閱讀台</string>
-    <string name="news_enable_note">本閱讀功能獨立於日曆資料模式；即使使用後端模式，也會直連 FT中文網、MarketWatch、BBC、DW 和美聯儲。公開 RSS 無需付費 API，部分原文仍可能需要訂閱。不使用日曆代理、後端憑證或 AI。開啟文章會取得其公開頁面；僅點擊分析或傳送才呼叫個人 AI。</string>
+    <string name="news_enable_note">新聞遵循所選資料模式：後端模式只讀取伺服器每分鐘更新的公開新聞快取，本機不連接媒體站點；直連模式優先國內來源，可選海外來源。閱讀不需要付費新聞 API 或 AI Key。公開摘要不代表全文；僅點擊分析或傳送才呼叫個人 AI。</string>
     <string name="news_enable">啟用公開新聞</string>
     <string name="news_disable">關閉新聞直連</string>
+    <string name="news_international">同時載入海外來源</string>
+    <string name="news_direct_note">預設直連國內財經來源，無需代理。海外來源可能較慢或無法存取，國內來源失敗時會嘗試海外來源備援。</string>
     <string name="news_refresh">重新整理新聞</string>
     <string name="news_search">搜尋已載入的新聞</string>
     <string name="news_all">全部來源</string>
@@ -58,4 +60,19 @@
     <string name="news_ai_evidence">分析依據：%1$s</string>
     <string name="news_provider">來源 · %1$s</string>
     <string name="news_fetched">頁面取得於 %1$s</string>
+    <string name="news_backend_note">後端新聞：伺服器每分鐘採集美國官方及財經來源，按發布時間保存 30 天的擷取內文和原始連結。本機只讀伺服器資料，不退回直連媒體。</string>
+    <string name="news_backend_reading">伺服器按發布時間保留 30 天的公開頁面擷取文字及原始連結。擷取可能不完整、缺少圖片表格或被截斷，不代表已取得全文；尚未完成或無法擷取時只顯示摘要。本機不連接媒體站點。</string>
+    <string name="news_backend_unauthorized">後端驗證失敗，請檢查 Key 和裝置綁定；未嘗試直連媒體。</string>
+    <string name="news_backend_unsupported">目前後端尚不支援新聞，請升級並重新啟動後端；未嘗試直連媒體。</string>
+    <string name="news_backend_rate_limited">後端請求已限流，請稍後重試；已有快取仍可閱讀。</string>
+    <string name="news_source_fresh">可用</string>
+    <string name="news_source_stale">舊快取</string>
+    <string name="news_source_unavailable">無法使用</string>
+    <string name="news_backend_loading">正在讀取後端已保存的內文…</string>
+    <string name="news_backend_retry">重新讀取後端內文</string>
+    <string name="news_backend_truncated">伺服器已將擷取文字截斷至 64000 字元；AI 最多接收 18000 字元，截斷情況會明確告知模型。</string>
+    <string name="news_more">載入更早新聞 · 最近 30 天</string>
+    <string name="news_more_loading">正在載入更早新聞…</string>
+    <string name="news_more_failed">更早新聞載入失敗，已載入內容仍可閱讀。</string>
+    <string name="news_archive_limit">本頁最多顯示 5000 篇，後端仍保留完整的 30 天歸檔。</string>
 </resources>
