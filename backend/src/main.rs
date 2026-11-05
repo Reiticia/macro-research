@@ -490,16 +490,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::spawn(market_event_analyzer::earnings::sync_loop(
         earnings_service.clone(),
     ));
-    tokio::spawn(market_event_analyzer::earnings::release_watch_loop(
-        earnings_service.clone(),
-    ));
-    let earnings_collector = Arc::new(
-        market_event_analyzer::earnings_market::EarningsMarketCollector::new(
-            pool.clone(),
-            yahoo_provider,
-        ),
-    );
-    tokio::spawn(earnings_collector.collect_loop(config.scheduler.market_poll_seconds));
     let (event_bus, _) = broadcast::channel(256);
     let state = AppState {
         config: Arc::new(config.clone()),

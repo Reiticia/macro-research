@@ -28,17 +28,7 @@ pub async fn logo(
     ))
 }
 
-/// Read-only persistent company-price timeline; this endpoint never starts a new collection.
-pub async fn stock_market(
-    State(state): State<AppState>,
-    Path((date, symbol)): Path<(NaiveDate, String)>,
-) -> Result<Json<crate::earnings_market::EarningsStockResponse>, AppError> {
-    Ok(Json(
-        state.earnings_service.stock_market(date, &symbol).await?,
-    ))
-}
-
-/// Current price, independent of the selected earnings date and persistent sampling window.
+/// Current price, independent of the selected earnings date. No persistent price collection.
 pub async fn quote(
     State(state): State<AppState>,
     Path(symbol): Path<String>,

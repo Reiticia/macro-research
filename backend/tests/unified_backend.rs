@@ -401,117 +401,41 @@ async fn earnings_route_is_authenticated_and_has_a_separate_wire_contract() {
 }
 
 #[tokio::test]
-async fn earnings_stock_timeline_is_authenticated_read_only_and_time_basis_is_explicit() {
+async fn retired_earnings_timelines_are_not_advertised_or_served() {
     let app = app().await;
     let router = api::router(app.state);
-    let date = Utc::now()
-        .with_timezone(&chrono_tz::America::New_York)
-        .date_naive();
-    let uri = format!("/api/v1/earnings/market/{date}/AAPL");
-    assert_eq!(
-        router
+    let response = router
+        .clone()
+        .oneshot(request("GET", "/api/v1/meta", None))
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 16384)
+        .await
+        .unwrap();
+    let meta: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let capabilities = meta["capabilities"].as_array().unwrap();
+    assert!(!capabilities.contains(&serde_json::json!("earningsMarket")));
+    for capability in ["earnings", "earningsLogos", "earningsQuote", "market"] {
+        assert!(capabilities.contains(&serde_json::json!(capability)));
+    }
+    for token in [None, Some("secret-token")] {
+        let response = router
             .clone()
-            .oneshot(request("GET", &uri, None))
+            .oneshot(request(
+                "GET",
+                "/api/v1/earnings/market/2026-11-03/AAPL",
+                token,
+            ))
             .await
-            .unwrap()
-            .status(),
-        StatusCode::UNAUTHORIZED
-    );
-    let empty = router
-        .clone()
-        .oneshot(request("GET", &uri, Some("secret-token")))
-        .await
-        .unwrap();
-    assert_eq!(empty.status(), StatusCode::OK);
-    let empty: serde_json::Value = serde_json::from_slice(
-        &axum::body::to_bytes(empty.into_body(), 16384)
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+    for table in ["earnings_stock_tracking", "earnings_stock_opening"] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&app.pool)
             .await
-            .unwrap(),
-    )
-    .unwrap();
-    assert!(empty["tracking"].is_null());
-    assert_eq!(empty["observationStatus"], "not_observed");
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM earnings_stock_tracking")
-        .fetch_one(&app.pool)
-        .await
-        .unwrap();
-    assert_eq!(count, 0); // GET must never manufacture a collection.
-    assert!(empty["openingSession"].is_null());
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM earnings_stock_opening")
-        .fetch_one(&app.pool)
-        .await
-        .unwrap();
-    assert_eq!(count, 0);
-    let detected = Utc::now().timestamp() - 30;
-    sqlx::query("INSERT INTO earnings_stock_tracking(date,symbol,company_name,actual_eps,detected_at,ends_at) VALUES(?,'AAPL','Apple','1.2',?,?)")
-        .bind(date.to_string()).bind(detected).bind(detected+3600).execute(&app.pool).await.unwrap();
-    let reply = router
-        .clone()
-        .oneshot(request("GET", &uri, Some("secret-token")))
-        .await
-        .unwrap();
-    assert_eq!(reply.status(), StatusCode::OK);
-    let body: serde_json::Value = serde_json::from_slice(
-        &axum::body::to_bytes(reply.into_body(), 16384)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(body["releaseTimeExact"], false);
-    assert_eq!(body["timeBasis"], "first_detected_actual_eps");
-    assert_eq!(body["tracking"]["status"], "collecting");
-    assert_eq!(body["coverage"]["minuteCount"], 0);
-    assert_eq!(body["tracking"]["startsAt"], body["tracking"]["detectedAt"]);
-    assert!(body["openingSession"].is_null());
-    let open = detected + 86400;
-    sqlx::query("INSERT INTO earnings_stock_opening(id,starts_at,ends_at) SELECT id,?,? FROM earnings_stock_tracking WHERE date=? AND symbol='AAPL'")
-        .bind(open).bind(open + 3600).bind(date.to_string()).execute(&app.pool).await.unwrap();
-    let reply = router
-        .clone()
-        .oneshot(request("GET", &uri, Some("secret-token")))
-        .await
-        .unwrap();
-    assert_eq!(reply.status(), StatusCode::OK);
-    assert_eq!(reply.headers()["cache-control"], "no-store");
-    let scheduled: serde_json::Value = serde_json::from_slice(
-        &axum::body::to_bytes(reply.into_body(), 16384)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    let opening = &scheduled["openingSession"];
-    assert_eq!(opening["timeBasis"], "regular_session_open");
-    assert_eq!(opening["tracking"]["status"], "scheduled");
-    assert_eq!(
-        opening["tracking"]["detectedAt"],
-        body["tracking"]["detectedAt"]
-    );
-    assert_ne!(
-        opening["tracking"]["startsAt"],
-        body["tracking"]["startsAt"]
-    );
-    assert_eq!(opening["coverage"]["expectedMinuteCount"], 0);
-    assert_eq!(opening["snapshots"], serde_json::json!([]));
-    let attempted: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM earnings_stock_opening WHERE last_attempt_at IS NOT NULL",
-    )
-    .fetch_one(&app.pool)
-    .await
-    .unwrap();
-    assert_eq!(attempted, 0); // Reading a scheduled phase must not start sampling.
-    for path in [
-        format!("/api/v1/earnings/market/{date}/AAPL%3Fkey%3Dx"),
-        "/api/v1/earnings/market/2000-01-01/AAPL".into(),
-    ] {
-        assert_eq!(
-            router
-                .clone()
-                .oneshot(request("GET", &path, Some("secret-token")))
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::BAD_REQUEST
-        );
+            .unwrap();
+        assert_eq!(count, 0);
     }
 }
 

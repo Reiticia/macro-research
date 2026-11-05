@@ -98,36 +98,72 @@ fn service(server: &Server, pool: &sqlx::SqlitePool) -> EarningsService {
 }
 
 #[tokio::test]
-async fn validated_primary_eps_transition_atomically_creates_the_stock_tracking_job() {
+async fn calendar_eps_updates_do_not_create_price_jobs_or_modify_retired_history() {
     let (server, pool, _) = setup().await;
     let date = Utc::now().with_timezone(&New_York).date_naive();
+    let last_seen = Utc::now().timestamp() - 65;
+    // Simulate an installation upgraded while release/opening jobs and observations existed.
     sqlx::query("INSERT INTO earnings_release_watch(date,symbol,fiscal_quarter_ending,last_seen_at,observation_status) VALUES(?,'AAPL','Sep/2026',?,'watching')")
-        .bind(date.to_string()).bind(Utc::now().timestamp()-65).execute(&pool).await.unwrap();
+        .bind(date.to_string()).bind(last_seen).execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO earnings_stock_tracking(id,date,symbol,company_name,actual_eps,detected_at,ends_at) VALUES(1,'2020-01-01','OLD','Old company','1',1000,4600)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO earnings_stock_opening(id,starts_at,ends_at) VALUES(1,10000,13600)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (table, timestamp) in [
+        ("earnings_stock_snapshot", 1000),
+        ("earnings_stock_opening_snapshot", 10000),
+    ] {
+        sqlx::query(&format!("INSERT INTO {table}(tracking_id,timestamp,first_quote_at,last_quote_at,open,high,low,close,timestamp_basis) VALUES(1,?, ?,?,100,101,99,100,'provider_quote')"))
+            .bind(timestamp).bind(timestamp).bind(timestamp + 30).execute(&pool).await.unwrap();
+    }
     server.fixture.nasdaq.lock().await.1 = json!({"status":{"rCode":200},"data":{"asOf":date.format("%a, %b %-d, %Y").to_string(),"rows":[{"symbol":"AAPL","name":"Apple","time":"time-after-hours","fiscalQuarterEnding":"Sep/2026","eps":"$0"}]}});
     let earnings = service(&server, &pool);
-    earnings.calendar(date, false).await.unwrap();
-    let response = earnings.stock_market(date, "AAPL").await.unwrap();
-    assert!(!response.release_time_exact);
-    let tracking = response.tracking.unwrap();
-    assert_eq!(tracking.actual_eps, "0");
-    assert_eq!(
-        tracking.ends_at - tracking.detected_at,
-        Duration::minutes(60)
-    );
-    assert_eq!(response.observation_status, "tracking");
-    assert!(response.snapshots.is_empty());
+    let result = earnings.calendar(date, false).await.unwrap();
+    assert_eq!(result.events[0].actual_eps.as_deref(), Some("0"));
     assert_eq!(server.fixture.nasdaq_calls.load(Ordering::SeqCst), 1);
     assert_eq!(server.fixture.tv_calls.load(Ordering::SeqCst), 0);
-    earnings.calendar(date, false).await.unwrap();
     assert_eq!(
-        earnings
-            .stock_market(date, "AAPL")
+        earnings.cached(date).await.unwrap().unwrap().events[0]
+            .actual_eps
+            .as_deref(),
+        Some("0")
+    );
+
+    let new_jobs: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM earnings_stock_tracking WHERE symbol='AAPL'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(new_jobs, 0);
+    let observed: (i64, String, Option<String>) = sqlx::query_as("SELECT last_seen_at, observation_status, actual_eps FROM earnings_release_watch WHERE symbol='AAPL'")
+        .fetch_one(&pool).await.unwrap();
+    assert_eq!(observed, (last_seen, "watching".into(), None));
+
+    // Even records older than the old retention window remain untouched, including both snapshots.
+    for table in [
+        "earnings_stock_tracking",
+        "earnings_stock_opening",
+        "earnings_stock_snapshot",
+        "earnings_stock_opening_snapshot",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1, "{table}");
+    }
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap(); // Published migrations remain valid.
+    assert_eq!(
+        service(&server, &pool)
+            .calendar(date, false)
             .await
             .unwrap()
-            .tracking
-            .unwrap()
-            .id,
-        tracking.id
+            .events[0]
+            .actual_eps
+            .as_deref(),
+        Some("0")
     );
 }
 
