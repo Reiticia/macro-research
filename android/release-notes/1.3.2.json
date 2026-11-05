@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.3.2",
+  "notes": {
+    "en": {
+      "client": [
+        "Read backend news archived for the last 30 days, load older headlines in pages, and view saved public article text. Missing article text falls back to the RSS summary without silently connecting to publishers.",
+        "Open the preserved original news link in the system browser on request. Opening a link does not attach app credentials or read browser content into AI research.",
+        "Add an opt-in headline translation switch following the app language: English, Simplified Chinese or Traditional Chinese. Translation uses your personal AI endpoint and may incur model fees; visible titles are cached, failures retain originals, and article text is not translated or uploaded. The reader can switch back to the original headline.",
+        "Add persistent earnings sorting by market capitalization, stock symbol or release session, in ascending or descending order. Lists, month previews and favorites within each date use the same order; missing market caps and unknown times stay last.",
+        "Move history refresh to the page header with loading feedback and duplicate-click protection. Refresh returns to the newest records while preserving filters and keeping visible records on failure.",
+        "Add an event-time display setting for device local time, event-region time or both clocks. The choice applies immediately to macro-event screens and is saved; calendar date groups and earnings market dates do not change.",
+        "Backend news archives require an updated, restarted backend. Headline translation, earnings sorting, the history refresh control and event-time display settings only require the client update."
+      ],
+      "backend": [
+        "Collect public official and financial RSS news every minute and retain metadata, original links and extracted public article text for 30 days. Authenticated news and article endpoints read the archive without triggering publisher downloads.",
+        "Deduplicate equivalent calendar occurrences across providers, preserve provider aliases and existing event data, and avoid duplicate collection for the same occurrence.",
+        "Add migrations 026 and 027 for news archives and event-provider aliases. Back up the database before deployment and restart the backend to enable these changes; existing data is preserved."
+      ]
+    },
+    "zh-CN": {
+      "client": [
+        "后端模式支持分页查看最近 30 天归档新闻，并读取已保存的公开文章提取文本；正文缺失时显示 RSS 摘要，不静默直连媒体。",
+        "新闻阅读页支持主动在系统浏览器打开保留的原始链接，不附带应用凭据，也不会读取浏览器内容给 AI。",
+        "新增默认关闭的标题翻译开关，按应用设置的英语、简体中文或繁体中文显示。使用个人 AI 接口，可能产生模型费用；仅翻译可见标题并缓存，失败保留原文，正文不翻译、不上传。阅读页可切回原标题。",
+        "财报可按市值、股票代码或发布时段升序／降序排列，选择自动保存。列表、月历预览和同日收藏统一排序，市值缺失或时间未知始终置后。",
+        "历史刷新移至页头右侧，提供加载反馈并防止重复点击；刷新回到最新记录，保留筛选，失败不清空已显示的记录。",
+        "设置新增事件时间显示：本地时间、当地时间、本地时间与当地时间。立即作用于宏观事件页面并持久保存，不改变日历日期分组或财报美东日期。",
+        "归档新闻需部署并重启新版后端；标题翻译、财报排序、历史刷新入口和事件时间显示设置只需更新客户端。"
+      ],
+      "backend": [
+        "每分钟采集公开官方及财经 RSS，按发布时间保留最近 30 天的新闻元数据、原始链接和公开文章提取文本。受保护的新闻及正文接口只读归档，不因用户读取触发媒体下载。",
+        "对不同数据源的同一次日历事件去重，保留来源别名和已有事件数据，避免同一次发生重复采集。",
+        "新增新闻归档迁移 026 和事件来源别名迁移 027。部署前备份数据库，重启后端使变更生效；保留已有数据。"
+      ]
+    },
+    "zh-TW": {
+      "client": [
+        "後端模式支援分頁查看最近 30 天歸檔新聞，並讀取已儲存的公開文章擷取文字；正文缺失時顯示 RSS 摘要，不會靜默直連媒體。",
+        "新聞閱讀頁支援主動在系統瀏覽器開啟保留的原始連結，不附帶應用程式憑據，也不會讀取瀏覽器內容給 AI。",
+        "新增預設關閉的標題翻譯開關，依應用程式設定的英語、簡體中文或繁體中文顯示。使用個人 AI 介面，可能產生模型費用；僅翻譯可見標題並快取，失敗保留原文，正文不翻譯、不上傳。閱讀頁可切回原始標題。",
+        "財報可按市值、股票代碼或發佈時段升冪／降冪排列，選擇自動儲存。列表、月曆預覽和同日收藏統一排序，市值缺失或時間未知一律置後。",
+        "歷史重新整理移至頁頭右側，提供載入回饋並防止重複點擊；重新整理回到最新記錄，保留篩選，失敗不清空已顯示的記錄。",
+        "設定新增事件時間顯示：本地時間、當地時間、本地時間與當地時間。立即套用於宏觀事件頁面並持續儲存，不改變日曆日期分組或財報美東日期。",
+        "歸檔新聞需部署並重新啟動新版後端；標題翻譯、財報排序、歷史重新整理入口及事件時間顯示設定只需更新用戶端。"
+      ],
+      "backend": [
+        "每分鐘採集公開官方及財經 RSS，依發佈時間保留最近 30 天的新聞中繼資料、原始連結及公開文章擷取文字。受保護的新聞與正文端點唯讀歸檔，不因使用者讀取觸發媒體下載。",
+        "對不同資料來源的同一次日曆事件去重，保留來源別名及既有事件資料，避免同一次發生重複採集。",
+        "新增新聞歸檔遷移 026 和事件來源別名遷移 027。部署前備份資料庫，重新啟動後端使變更生效；保留既有資料。"
+      ]
+    }
+  }
+}
