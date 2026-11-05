@@ -171,12 +171,6 @@ class BackendClient(
         com.macroresearch.data.decodeEarningsCalendar(root.toString(), date, gson)
     }
 
-    suspend fun earningsMarket(date: java.time.LocalDate, symbol: String): com.macroresearch.data.model.EarningsMarket = withContext(Dispatchers.IO) {
-        val safe = companyLogoSymbol(symbol) ?: throw IllegalArgumentException("Invalid stock symbol")
-        val root = getJson("/api/v1/earnings/market/$date/$safe")
-        com.macroresearch.data.model.decodeEarningsMarket(root.toString(), date, safe, gson)
-    }
-
     suspend fun earningsQuote(symbol: String): com.macroresearch.data.model.EarningsQuote = withContext(Dispatchers.IO) {
         val safe = companyLogoSymbol(symbol) ?: throw IllegalArgumentException("Invalid stock symbol")
         val root = getJson("/api/v1/earnings/quote/$safe")

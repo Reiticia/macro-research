@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="earnings_stock_open">查看当前股价</string>
+    <string name="earnings_stock_date">财报日期 · 纽约：%1$s</string>
+    <string name="earnings_quote_rate_limited">后端请求受限，请稍后再试。</string>
+</resources>

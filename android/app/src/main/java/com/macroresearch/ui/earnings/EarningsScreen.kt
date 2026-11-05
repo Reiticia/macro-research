@@ -45,7 +45,7 @@ fun EarningsScreen(repository: EarningsRepository) {
     var search by rememberSaveable { mutableStateOf("") }
     var session by rememberSaveable { mutableStateOf<String?>(null) }
     var picker by remember { mutableStateOf(false) }
-    var marketEvent by remember(state.date) { mutableStateOf<EarningsEvent?>(null) }
+    var stockEvent by remember(state.date) { mutableStateOf<EarningsEvent?>(null) }
     val locale = appLocale()
     val today = LocalDate.now(EARNINGS_ZONE)
     val minDate = today.minusDays(120)
@@ -106,7 +106,7 @@ fun EarningsScreen(repository: EarningsRepository) {
                 }
             }
             items(filtered, key = { "${it.source}:${it.tradingView?.ticker ?: it.symbol}" }) { event ->
-                EarningsCard(event, repository.logos, source, onMarket = { marketEvent = event },
+                EarningsCard(event, repository.logos, source, onStock = { stockEvent = event },
                     favorite = { EarningsFavoriteButton(state.date, event, repository) })
             }
             state.calendar?.let { calendar -> item {
@@ -121,7 +121,7 @@ fun EarningsScreen(repository: EarningsRepository) {
             } }
         }
     }
-    marketEvent?.let { EarningsMarketDialog(state.date, it, repository) { marketEvent = null } }
+    stockEvent?.let { EarningsStockDialog(state.date, it, repository) { stockEvent = null } }
     if (picker) {
         val pickerState = rememberDatePickerState(
             initialSelectedDateMillis = state.date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
@@ -162,7 +162,7 @@ internal fun EarningsCard(
     event: EarningsEvent,
     logos: com.macroresearch.data.CompanyLogoLoader?,
     source: com.macroresearch.data.BackendSettings,
-    onMarket: (() -> Unit)? = null,
+    onStock: (() -> Unit)? = null,
     favorite: (@Composable () -> Unit)? = null,
 ) {
     var expanded by rememberSaveable(event.symbol, event.source) { mutableStateOf(false) }
@@ -189,8 +189,8 @@ internal fun EarningsCard(
                 Metric(stringResource(R.string.earnings_surprise), event.surprisePercent?.let { "$it%" }, Modifier.weight(1f))
             }
             Text(stringResource(R.string.earnings_primary_source, if (event.source == "nasdaq") "Nasdaq" else "TradingView"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (onMarket != null) OutlinedButton(onClick = onMarket, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(R.string.earnings_market_open))
+            if (onStock != null) OutlinedButton(onClick = onStock, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.earnings_stock_open))
             }
             EarningsPageLink(event)
             event.tradingView?.let { tv ->

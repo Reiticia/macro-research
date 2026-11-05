@@ -171,7 +171,6 @@ request_timeout_seconds = 20
 | GET | `/api/v1/calendar?from&to&country&minimum_importance` | 单日区间 ≤90 天 |
 | GET | `/api/v1/earnings/logo/{symbol}` | 受保护的公司 PNG Logo 转发与本地文件有界缓存（`[earnings_logo].cache_dir`，不存内存/SQLite）；不可用返回 404，不允许传入任意 URL |
 | GET | `/api/v1/earnings/quote/{symbol}` | 当前个股价，独立于财报日期；5 秒有界内存缓存/并发合并，不落库，标注真实报价时间和 stale；详见 [收藏与当前股价](earnings-calendar.md#财报收藏与当前股价) |
-| GET | `/api/v1/earnings/market/{date}/{symbol}` | 财报检测后 60 分钟采样及盘前／盘后财报独立的开盘后 60 分钟阶段；纽约时区自动切换夏冬令时，跳过常规休市日（迁移 025）；只读，不触发抓价，明确时间基准与缺口；详见 [财报行情](earnings-calendar.md#财报公布后的个股行情采集) |
 | GET | `/api/v1/earnings?date=YYYY-MM-DD&refresh=true` | 独立美股财报日历；美东日期，过去 120 天至未来 60 天；省略 refresh 使用缓存策略，详见 [财报日历](earnings-calendar.md) |
 | GET | `/api/v1/events/history?country=a,b&category&importance&limit&offset&from&to` | 历史分页，`country` 支持逗号分隔多值；`importance` 精确筛选 0–3，支持逗号分隔多值（如 `1,3`），省略则包含全部等级，筛选在分页前执行 |
 | GET | `/api/v1/events/{id}` | `{event, observations}` |
@@ -184,6 +183,8 @@ request_timeout_seconds = 20
 | POST | `/api/v1/translations/corrections` | 提交译名勘正（进入管理员审核） |
 | GET | `/api/v1/translations/corrections?eventName=` | 最近一条勘正状态 |
 | GET | `/api/v1/ws` | WebSocket，握手带同一个 Bearer |
+
+财报发布后及常规开盘后的行情追踪已移除；旧 `/api/v1/earnings/market/{date}/{symbol}` 返回 404，不再声明 `earningsMarket` 能力，也不再启动财报 EPS 观察与采样循环。历史表和已发布迁移保留，不主动删除旧数据；当前股价接口和宏观事件行情采集保持不变。须部署并重启新版后端才能停止旧版采样。
 
 事件对象沿用 camelCase 契约：`{id, provider, providerId, country, currency, category, event,
 eventZhCn, eventZhTw, eventTime, importance, actual, previous, consensus, forecast, unit,

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.3.1",
+  "notes": {
+    "en": {
+      "client": [
+        "Remove the post-earnings and next-market-open 60-minute stock price tracking phases, including phase switching, historical sample charts and historical polling. Earnings cards now open a current-price detail with favorites and a company earnings-page link.",
+        "News reading, the news AI panel, device and regional macro-event times, calendar filters and earnings favorites are unchanged.",
+        "Stock-price collection and API changes are in the backend; deploy and restart the backend to stop sampling started by older versions. Existing history is retained, and there is no new configuration or database migration."
+      ],
+      "backend": [
+        "Stop the EPS release watch, earnings price collection and opening-session collection loops. Calendar refreshes no longer create, restore or update earnings price jobs.",
+        "Remove the earnings price-history endpoint and capability while keeping the earnings calendar, logos, favorites support and on-demand current-price endpoint.",
+        "Preserve published migrations and existing history tables and rows. Deploying and restarting the backend is required to stop sampling in an already-running instance; macro-event market collection is unchanged."
+      ]
+    },
+    "zh-CN": {
+      "client": [
+        "移除财报发布后及常规开盘后的两个 60 分钟股价追踪阶段，包括阶段切换、历史采样曲线和历史轮询。财报卡片改为打开当前股价详情，保留收藏和公司财报页链接。",
+        "新闻阅读、新闻 AI 面板、宏观事件本地及地区时间和日历筛选、财报收藏保持不变。",
+        "停止旧版采样需要部署并重启后端；本次保留历史数据，不新增配置或数据库迁移。"
+      ],
+      "backend": [
+        "停止 EPS 发布观察、财报股价采集和开盘阶段采集循环；日历刷新不再创建、恢复或更新财报股价任务。",
+        "移除财报历史行情接口及能力标记，保留财报日历、Logo、收藏支持和按需当前股价接口。",
+        "保留已发布迁移、历史表及数据。已运行实例需部署并重启后端才会停止采样，宏观事件行情采集不受影响。"
+      ]
+    },
+    "zh-TW": {
+      "client": [
+        "移除財報發佈後及常規開盤後的兩個 60 分鐘股價追蹤階段，包括階段切換、歷史採樣曲線及歷史輪詢。財報卡片改為開啟目前股價詳情，保留收藏及公司財報頁連結。",
+        "新聞閱讀、新聞 AI 面板、宏觀事件本地及地區時間、日曆篩選與財報收藏維持不變。",
+        "停止舊版採樣需要部署並重新啟動後端；本次保留歷史資料，不新增設定或資料庫遷移。"
+      ],
+      "backend": [
+        "停止 EPS 發佈觀察、財報股價採集及開盤階段採集迴圈；日曆重新整理不再建立、恢復或更新財報股價任務。",
+        "移除財報歷史行情端點及能力標記，保留財報日曆、Logo、收藏支援及按需目前股價端點。",
+        "保留已發佈遷移、歷史資料表及資料。已執行實例需部署並重新啟動後端才會停止採樣，宏觀事件行情採集不受影響。"
+      ]
+    }
+  }
+}

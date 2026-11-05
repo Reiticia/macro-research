@@ -33,7 +33,6 @@ class EarningsRepository(
     private val gson: Gson = Gson(),
     private val clock: () -> Instant = Instant::now,
     val logos: CompanyLogoLoader? = null,
-    private val backendMarket: (suspend (LocalDate, String) -> com.macroresearch.data.model.EarningsMarket)? = null,
     private val backendQuote: (suspend (String) -> EarningsQuote)? = null,
     private val favoritesStore: EarningsFavoritesStore? = null,
 ) {
@@ -62,17 +61,6 @@ class EarningsRepository(
         val result = fetch(symbol)
         if (settings.value != context) throw CancellationException("Earnings source changed")
         require(result.symbol == symbol) { "Invalid stock quote identity" }
-        return result
-    }
-
-    /** No direct-mode substitute and no implicit collection trigger. */
-    suspend fun market(date: LocalDate, symbol: String): com.macroresearch.data.model.EarningsMarket {
-        val context = settings.value
-        check(context.mode == DataSourceMode.BACKEND) { "Earnings price history requires backend mode" }
-        val fetch = backendMarket ?: throw UnsupportedOperationException("Earnings market is unavailable")
-        val result = fetch(date, symbol)
-        if (settings.value != context) throw CancellationException("Earnings source changed")
-        require(result.date == date.toString() && result.symbol == symbol) { "Invalid earnings market identity" }
         return result
     }
 

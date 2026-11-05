@@ -52,9 +52,9 @@ fun CalendarScreen(
     val warning by repository.calendarWarning.collectAsStateWithLifecycle()
     var showDay by rememberSaveable { mutableStateOf(false) }
     var showPicker by rememberSaveable { mutableStateOf(false) }
-    var marketEvent by remember { mutableStateOf<Pair<LocalDate, com.macroresearch.data.model.EarningsEvent>?>(null) }
+    var stockEvent by remember { mutableStateOf<Pair<LocalDate, com.macroresearch.data.model.EarningsEvent>?>(null) }
     val openEarnings: ((com.macroresearch.data.model.EarningsEvent) -> Unit)? = earningsRepository?.let {
-        { event -> marketEvent = state.selectedDate to event }
+        { event -> stockEvent = state.selectedDate to event }
     }
     BackHandler(enabled = state.presentation == CalendarPresentation.MONTH && !showDay && !showPicker) {
         vm.showWeek()
@@ -84,8 +84,8 @@ fun CalendarScreen(
         onEvent = { showDay = false; onEvent(it) },
         onEarnings = openEarnings, earningsRepository = earningsRepository,
     )
-    marketEvent?.let { (date, event) ->
-        earningsRepository?.let { com.macroresearch.ui.earnings.EarningsMarketDialog(date, event, it) { marketEvent = null } }
+    stockEvent?.let { (date, event) ->
+        earningsRepository?.let { com.macroresearch.ui.earnings.EarningsStockDialog(date, event, it) { stockEvent = null } }
     }
     if (showPicker) {
         val picker = rememberDatePickerState(

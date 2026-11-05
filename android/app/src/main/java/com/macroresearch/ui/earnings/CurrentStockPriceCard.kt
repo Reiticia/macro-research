@@ -47,7 +47,7 @@ internal fun CurrentStockPriceCard(state: EarningsQuoteState, now: Instant, loca
                     "backend_required" -> R.string.earnings_quote_backend_required
                     "unauthorized" -> R.string.earnings_unauthorized
                     "unsupported" -> R.string.earnings_quote_unsupported
-                    "rate_limited" -> R.string.earnings_market_rate_limited
+                    "rate_limited" -> R.string.earnings_quote_rate_limited
                     else -> R.string.earnings_quote_failed
                 }), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }

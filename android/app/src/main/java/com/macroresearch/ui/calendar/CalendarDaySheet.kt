@@ -149,7 +149,7 @@ internal fun CalendarDayContent(
                         Text(stringResource(R.string.earnings_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     items(earnings, key = { "earnings-${it.source}:${it.tradingView?.ticker ?: it.symbol}" }) { event ->
-                        EarningsCard(event, logos, source, onMarket = onEarnings?.let { open -> { open(event) } },
+                        EarningsCard(event, logos, source, onStock = onEarnings?.let { open -> { open(event) } },
                             favorite = earningsRepository?.let { repo -> {
                                 com.macroresearch.ui.earnings.EarningsFavoriteButton(state.selectedDate, event, repo)
                             } })

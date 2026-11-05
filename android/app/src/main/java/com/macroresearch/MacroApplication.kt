@@ -129,7 +129,6 @@ class MacroApplication : Application() {
             store = com.macroresearch.data.local.RoomEarningsStore(database.earningsDao()),
             direct = earningsClient::fetch,
             backend = backendClient::earnings,
-            backendMarket = backendClient::earningsMarket,
             backendQuote = backendClient::earningsQuote,
             favoritesStore = com.macroresearch.data.local.RoomEarningsFavoritesStore(database.earningsDao()),
             gson = gson,

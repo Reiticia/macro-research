@@ -151,7 +151,7 @@ class MonthCalendarUiTest {
                     onContent = {}, onImportance = {}, onRefresh = {}, onEvent = {}, onEarnings = { symbol = it.symbol })
             }
         }
-        compose.onNodeWithText(context.getString(R.string.earnings_market_open)).performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.earnings_stock_open)).performScrollTo().performClick()
         compose.runOnIdle { assertEquals("AAPL", symbol) }
     }
 
@@ -216,7 +216,7 @@ class MonthCalendarUiTest {
         compose.runOnIdle { assertEquals(7L, openedEvent) }
         compose.onNodeWithTag("calendar-filter-EARNINGS").performClick()
         compose.onNodeWithText("AAPL").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText(context.getString(R.string.earnings_market_open)).performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.earnings_stock_open)).performScrollTo().performClick()
         compose.runOnIdle { assertEquals("AAPL", stock) }
         compose.onNodeWithText(context.getString(R.string.earnings_pre_market)).performScrollTo().performClick()
         compose.onNodeWithText(context.getString(R.string.earnings_empty)).performScrollTo().assertIsDisplayed()

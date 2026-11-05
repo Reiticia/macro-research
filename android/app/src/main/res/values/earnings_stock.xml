@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="earnings_stock_open">View current stock price</string>
+    <string name="earnings_stock_date">Earnings date · New York: %1$s</string>
+    <string name="earnings_quote_rate_limited">The backend is rate-limiting requests. Wait before trying again.</string>
+</resources>

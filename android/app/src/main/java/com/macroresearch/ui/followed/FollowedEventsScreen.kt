@@ -18,7 +18,7 @@ import com.macroresearch.ui.common.EventCard
 import com.macroresearch.ui.common.dateLabel
 import com.macroresearch.ui.earnings.EarningsCard
 import com.macroresearch.ui.earnings.EarningsFavoriteButton
-import com.macroresearch.ui.earnings.EarningsMarketDialog
+import com.macroresearch.ui.earnings.EarningsStockDialog
 import com.macroresearch.ui.theme.ResearchLayout
 import kotlinx.coroutines.flow.flowOf
 
@@ -63,7 +63,7 @@ fun FollowedEventsScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap)) {
                         Text(dateLabel(favorite.date), style = MaterialTheme.typography.labelLarge)
                         EarningsCard(favorite.event, earningsRepository?.logos, source,
-                            onMarket = { selected = favorite }, favorite = earningsRepository?.let { repo -> {
+                            onStock = { selected = favorite }, favorite = earningsRepository?.let { repo -> {
                                 EarningsFavoriteButton(favorite.date, favorite.event, repo)
                             } })
                     }
@@ -74,6 +74,6 @@ fun FollowedEventsScreen(
         }
     }
     selected?.let { favorite -> earningsRepository?.let { repo ->
-        EarningsMarketDialog(favorite.date, favorite.event, repo) { selected = null }
+        EarningsStockDialog(favorite.date, favorite.event, repo) { selected = null }
     } }
 }
