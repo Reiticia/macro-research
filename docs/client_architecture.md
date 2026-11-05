@@ -63,7 +63,7 @@ TradingView 接口失败或返回空、且请求范围与当前周重叠时，�
 
 回退周历与主源对同一指标使用不同标题，是历史记录长期缺失公布值的主因。因此维护一份**封闭且逐条核对过的同义表**（如 Core CPI m/m ↔ Core Inflation Rate MoM、CPI m/m ↔ Inflation Rate MoM、Crude Oil Inventories ↔ EIA Crude Oil Stocks Change、Natural Gas Storage ↔ EIA Natural Gas Stocks Change、Final Wholesale Inventories m/m ↔ Wholesale Inventories MoM、Prelim UoM Consumer Sentiment ↔ Michigan Consumer Sentiment Prel），每次合并（日历 / 历史 / 首页 / 手动重试）都把同一次发生（国家 + 精确时刻 + 规范化标题）的主源数值补写进回退行：按 id 去重后必须**恰好一条**带值的主源行，否则不改；名称、ID、译名与已有数值均保留。不得凭猜测添加同义条目——错误别名会把其他指标的数值挂到该行上。主源与回退源都不提供实际值的指标（例如 S&P Global PMI 终值）保持为空，重试时如实提示。
 
-**历史记录不以 Actual 是否为空过滤。** 已到时间但 Actual 缺失时，统一标记 `data_unavailable`（未获取公布值），不再凭倒计时或超过 24 小时认定已公布；有数值才启用分析。缓存读取也重算状态，避免旧 `scheduled` 常驻。历史同步包含今天；手动刷新绕过 10 分钟同步间隔并重新验证 HTTP 缓存。同一筛选下刷新保留可见记录，失败时不清空；回退周历不算完整历史同步成功，主源异常会在日历和历史页显式提示。
+**历史记录不以 Actual 是否为空过滤。** 已到时间但 Actual 缺失时，统一标记 `data_unavailable`（未获取公布值），不再凭倒计时或超过 24 小时认定已公布；有数值才启用分析。缓存读取也重算状态，避免旧 `scheduled` 常驻。历史同步包含今天；手动刷新绕过 10 分钟同步间隔并重新验证 HTTP 缓存。历史页标题栏右侧提供刷新按钮，加载时显示进度并禁用重复点击；手动刷新回到列表顶部、从最新八条重新分页，保留国家、类别和重要性筛选。同一筛选下刷新保留可见记录，失败时不清空；回退周历不算完整历史同步成功，主源异常会在日历和历史页显式提示。
 
 已到时间但尚无 Actual 的事件，详情页提供「重新获取公布值」按钮：绕过历史同步间隔，仅按该事件所在日期重新请求，保留原 ID、关注与译名，并提示已取得、仍未返回或失败原因（含数据源告警）。
 

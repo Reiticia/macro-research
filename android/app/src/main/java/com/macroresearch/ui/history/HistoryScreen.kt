@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +23,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,6 +56,7 @@ fun HistoryScreen(repository: MacroRepository, padding: PaddingValues, onEvent: 
     val warning by repository.calendarWarning.collectAsStateWithLifecycle()
     val events = state.value.orEmpty()
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     // Top-level navigation restores destination state. Reset it deliberately: every visit starts
     // at the newest eight rows, and older pages are appended only after the user scrolls.
     LaunchedEffect(Unit) {
@@ -90,9 +92,11 @@ fun HistoryScreen(repository: MacroRepository, padding: PaddingValues, onEvent: 
             .padding(horizontal = ResearchLayout.pagePadding, vertical = ResearchLayout.gap),
         verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
     ) {
-        Column {
-            Text(stringResource(R.string.history_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(stringResource(R.string.history_subtitle), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        HistoryHeader(state.loading) {
+            scope.launch {
+                listState.scrollToItem(0)
+                vm.refreshFromUser()
+            }
         }
         Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.smallGap)) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -105,9 +109,6 @@ fun HistoryScreen(repository: MacroRepository, padding: PaddingValues, onEvent: 
                 }
             }
             ImportanceFilters(selectedImportance, vm::toggleImportance)
-        }
-        TextButton(onClick = { vm.refresh(forceNetwork = true) }, enabled = !state.loading) {
-            Text(stringResource(R.string.history_refresh))
         }
         SummaryCards(events)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

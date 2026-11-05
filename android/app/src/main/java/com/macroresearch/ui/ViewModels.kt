@@ -16,6 +16,8 @@ import com.macroresearch.data.model.MarketResponse
 import com.macroresearch.data.remote.AiConversationMessage
 import com.macroresearch.data.model.MarketQuotesResponse
 import com.macroresearch.ui.common.toggleImportanceSelection
+import com.macroresearch.ui.history.HistoryDataSource
+import com.macroresearch.ui.history.RepositoryHistoryDataSource
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -457,7 +459,11 @@ class AnalysisViewModel(
     }
 }
 
-class HistoryViewModel(private val repository: MacroRepository) : ViewModel() {
+class HistoryViewModel internal constructor(
+    private val repository: HistoryDataSource,
+) : ViewModel() {
+    constructor(repository: MacroRepository) : this(RepositoryHistoryDataSource(repository))
+
     private val _state = MutableStateFlow(LoadState<List<EconomicEvent>>())
     val state = _state.asStateFlow()
     private val _category = MutableStateFlow<String?>(null)
@@ -507,6 +513,12 @@ class HistoryViewModel(private val repository: MacroRepository) : ViewModel() {
     fun toggleImportance(level: Int) {
         val updated = toggleImportanceSelection(_importance.value, level)
         if (updated != _importance.value) refresh(importance = updated)
+    }
+
+    /** Repeated taps cannot cancel/restart an already active page or refresh request. */
+    fun refreshFromUser() {
+        if (_state.value.loading) return
+        refresh(forceNetwork = true)
     }
 
     fun loadMore() = loadPage(replaceExisting = false)
