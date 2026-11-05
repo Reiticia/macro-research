@@ -25,6 +25,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import com.macroresearch.data.DataSourceMode
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.macroresearch.R
@@ -33,6 +35,8 @@ import com.macroresearch.data.ReaderNewsSources
 import com.macroresearch.data.remote.NewsArticle
 import com.macroresearch.data.remote.newsPublishedInstant
 import com.macroresearch.ui.viewModelFactory
+import com.macroresearch.ui.common.appLocale
+import com.macroresearch.ui.settings.AppLanguage
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -58,21 +62,36 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
         }
     }
     val settings by repository.translationSettings.collectAsStateWithLifecycle()
+    val titleTranslationEnabled by repository.newsTitleTranslationEnabled.collectAsStateWithLifecycle()
+    val language = AppLanguage.fromLocale(appLocale())
+    val translateTitles = titleTranslationEnabled && settings.configured
     var query by rememberSaveable { mutableStateOf("") }
     var source by rememberSaveable { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     val article = state.article
     BackHandler(article != null) { vm.closeArticle() }
-    if (article != null && enabled) {
-        NewsReaderScreen(state, settings.configured, vm::closeArticle, { vm.open(article) },
-            vm::ask, vm::cancelAi, vm::clearConversation)
-        return
-    }
     val sources = state.headlines.articles.map { it.source }.distinct()
     LaunchedEffect(sources) { if (source != null && source !in sources) source = null }
+    fun title(item: NewsArticle) = if (translateTitles) state.title(item, language.tag) else item.title
     val articles = state.headlines.articles.filter {
         (source == null || it.source == source) && (query.isBlank() ||
-            it.title.contains(query.trim(), true) || it.summary.orEmpty().contains(query.trim(), true))
+            it.title.contains(query.trim(), true) || title(it).contains(query.trim(), true) ||
+            it.summary.orEmpty().contains(query.trim(), true))
+    }
+    LaunchedEffect(vm, lifecycle, enabled, translateTitles, settings, dataSettings, language.tag, articles, article) {
+        if (enabled && translateTitles) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            if (article != null) vm.translateTitles(listOf(article), language.tag)
+            else snapshotFlow { listState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } }
+                .distinctUntilChanged().collectLatest { urls ->
+                    delay(250) // Coalesce scrolling; never translate an entire archive in the background.
+                    vm.translateTitles(articles.filter { it.url in urls }, language.tag)
+                }
+        }
+    }
+    if (article != null && enabled) {
+        NewsReaderScreen(state, settings.configured, vm::closeArticle, { vm.open(article) },
+            vm::ask, vm::cancelAi, vm::clearConversation, translatedTitle = title(article))
+        return
     }
     Scaffold(topBar = {
         TopAppBar(title = { Text(stringResource(R.string.news_title), fontWeight = FontWeight.Bold) },
@@ -114,6 +133,10 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
                             Text(stringResource(if (backendNews) R.string.news_backend_note else R.string.news_direct_note), style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
+                    }
+                    item {
+                        NewsTitleTranslationControl(titleTranslationEnabled, settings.configured, language.nativeName,
+                            state.titleTranslationFailed, repository::setNewsTitleTranslationEnabled)
                     }
                     item {
                         OutlinedTextField(query, { if (it.length <= 200) query = it }, singleLine = true,
@@ -160,7 +183,7 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
                         }
                     }
                     if (articles.isEmpty() && !state.loading) item { Text(stringResource(R.string.news_empty), Modifier.padding(vertical = 24.dp)) }
-                    items(articles, key = { it.url }) { item -> NewsHeadline(item) { vm.open(item) } }
+                    items(articles, key = { it.url }) { item -> NewsHeadline(item, title(item)) { vm.open(item) } }
                     if (backendNews && state.headlines.nextOffset != null && state.headlines.articles.size < 5000) item {
                         Column {
                             if (state.moreFailed) Text(stringResource(R.string.news_more_failed), color = MaterialTheme.colorScheme.error)
@@ -178,15 +201,17 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
 }
 
 @Composable
-private fun NewsHeadline(article: NewsArticle, onClick: () -> Unit) {
+internal fun NewsHeadline(article: NewsArticle, title: String = article.title, onClick: () -> Unit) {
     val locale = LocalConfiguration.current.locales[0]
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(ReaderNewsSources.label(article.source), color = MaterialTheme.colorScheme.primary,
             style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
         TextButton(onClick = onClick, contentPadding = PaddingValues(0.dp)) {
-            Text(article.title, style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Serif,
+            Text(title, style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Serif,
                 fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
         }
+        if (title != article.title) Text(stringResource(R.string.news_title_translated),
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         article.summary?.takeIf(String::isNotBlank)?.let {
             Text(it.take(140), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

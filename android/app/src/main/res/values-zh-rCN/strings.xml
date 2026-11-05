@@ -117,7 +117,7 @@
     <string name="save">保存</string>
     <string name="api_key_security_note">密钥由 Android Keystore 加密、不会备份，也不会打包进 APK。请使用设置了权限和消费限额的个人密钥。</string>
     <string name="language">语言</string>
-    <string name="language_note">界面语言切换后立即生效。配置后端后即可获取事件名称翻译，无需个人 AI 密钥。</string>
+    <string name="language_note">界面语言切换后立即生效。配置后端后即可获取事件名称翻译，无需个人 AI 密钥。新闻标题翻译跟随此语言，需在新闻页开启并配置个人 AI 接口。</string>
     <string name="data_network">数据源网络</string>
     <string name="data_proxy">HTTP 代理（可选）</string>
     <string name="data_proxy_note">用于日历与行情请求（美债收益率、报价、K 线）。留空使用系统网络。仍验证 HTTPS 证书；AI 与翻译请求不会经过此代理。</string>
@@ -475,4 +475,11 @@
     <string name="earnings_sort_ascending">升序</string>
     <string name="earnings_sort_descending">降序</string>
     <string name="earnings_sort_note">按美东日期内排序，适用于财报列表、月历预览与收藏。发布时间仅区分盘前／盘后，无精确时刻；市值缺失或时间未知始终置后，同值按股票代码升序排列。</string>
+    <string name="news_title_translation">翻译标题 · %1$s</string>
+    <string name="news_title_translation_note">开启后，仅将可见标题发送到设置中的个人 AI／翻译接口，按应用语言翻译，可能产生模型费用。正文不翻译、不上传。</string>
+    <string name="news_title_translation_key">请先在设置中配置个人 AI 密钥、接口和模型；未配置时显示原标题。</string>
+    <string name="news_title_translation_failed">部分标题翻译失败，已保留原文；一分钟后滚动或重新打开可重试。</string>
+    <string name="news_title_translated">标题由机器翻译</string>
+    <string name="news_title_show_original">显示原标题</string>
+    <string name="news_title_show_translation">显示翻译标题</string>
 </resources>

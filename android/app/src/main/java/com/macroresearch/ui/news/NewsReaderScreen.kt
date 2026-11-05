@@ -37,6 +37,7 @@ internal fun NewsReaderScreen(
     onAsk: (String, String, Boolean) -> Unit,
     onStop: () -> Unit,
     onClear: () -> Unit,
+    translatedTitle: String? = null,
 ) {
     val article = state.article ?: return
     var webMode by rememberSaveable(article.url) { mutableStateOf(false) }
@@ -83,8 +84,7 @@ internal fun NewsReaderScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text(stringResource(R.string.news_provider, ReaderNewsSources.label(article.source)),
                                     color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                SelectionContainer { Text(article.title, style = MaterialTheme.typography.headlineMedium,
-                                    fontFamily = FontFamily.Serif, fontWeight = FontWeight.SemiBold) }
+                                NewsArticleTitle(article.title, translatedTitle)
                                 Text(newsTime(article.publishedAt, LocalConfiguration.current.locales[0]),
                                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 HorizontalDivider(color = MaterialTheme.colorScheme.primary)

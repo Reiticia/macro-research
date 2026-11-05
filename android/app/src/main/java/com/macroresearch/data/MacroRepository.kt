@@ -88,6 +88,7 @@ class MacroRepository(
     private val pushTopicManager: PushTopicManager,
     private val calendarPreferences: CalendarPreferences,
     val newsReader: NewsReaderRepository,
+    private val newsTitleTranslator: NewsTitleTranslator,
 ) {
     private val aiRunGate = AiRunGate()
     val selectedCountries: StateFlow<Set<String>> = countryPreferences.selectedCountries
@@ -123,6 +124,23 @@ class MacroRepository(
     fun setNewsReaderEnabled(enabled: Boolean) = newsPreferences.setReaderEnabled(enabled)
     val newsReaderInternationalEnabled = newsPreferences.readerInternationalEnabled
     fun setNewsReaderInternationalEnabled(enabled: Boolean) = newsPreferences.setReaderInternationalEnabled(enabled)
+
+    val newsTitleTranslationEnabled = newsPreferences.titleTranslationEnabled
+    fun setNewsTitleTranslationEnabled(enabled: Boolean) = newsPreferences.setTitleTranslationEnabled(enabled)
+
+    internal suspend fun translateNewsTitles(titles: List<String>, language: String): NewsTitleTranslationResult {
+        if (!newsReaderEnabled.value || !newsTitleTranslationEnabled.value) return NewsTitleTranslationResult(emptyMap())
+        val settings = translationSettings.value
+        val key = translationPreferences.apiKey() ?: return NewsTitleTranslationResult(emptyMap())
+        val source = newsReader.settings.value
+        val namespace = "${source.mode}|${source.baseUrl.trim().trimEnd('/')}"
+        val result = newsTitleTranslator.titles(titles, language, namespace, settings, key)
+        if (!newsReaderEnabled.value || !newsTitleTranslationEnabled.value || settings != translationSettings.value ||
+            source != newsReader.settings.value || key != translationPreferences.apiKey()) {
+            throw CancellationException("News translation context changed")
+        }
+        return result
+    }
 
     suspend fun analyzeNews(
         article: com.macroresearch.data.remote.NewsArticle,

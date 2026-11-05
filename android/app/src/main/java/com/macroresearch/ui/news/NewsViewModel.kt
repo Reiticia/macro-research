@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+internal data class NewsTitleKey(val language: String, val original: String)
+
 internal data class NewsDeskState(
     val headlines: ReaderHeadlines = ReaderHeadlines(),
     val loading: Boolean = false,
@@ -31,7 +33,12 @@ internal data class NewsDeskState(
     val backendNews: Boolean = false,
     val loadingMore: Boolean = false,
     val moreFailed: Boolean = false,
-)
+    val titleTranslations: Map<NewsTitleKey, String> = emptyMap(),
+    val titleTranslationFailed: Boolean = false,
+) {
+    fun title(article: NewsArticle, language: String): String =
+        titleTranslations[NewsTitleKey(language, article.title)] ?: article.title
+}
 
 internal class NewsViewModel(private val repository: MacroRepository) : ViewModel() {
     private val _state = MutableStateFlow(NewsDeskState())
@@ -45,6 +52,10 @@ internal class NewsViewModel(private val repository: MacroRepository) : ViewMode
     private val conversations = linkedMapOf<String, List<AiConversationMessage>>()
 
     init {
+        viewModelScope.launch {
+            combine(repository.newsTitleTranslationEnabled, repository.translationSettings) { enabled, settings -> enabled to settings }
+                .collect { _state.update { it.copy(titleTranslations = emptyMap(), titleTranslationFailed = false) } }
+        }
         viewModelScope.launch {
             combine(repository.newsReaderEnabled, repository.newsReaderInternationalEnabled,
                 repository.newsReader.settings) { enabled, international, settings ->
@@ -104,6 +115,28 @@ internal class NewsViewModel(private val repository: MacroRepository) : ViewMode
                     nextOffset = page.nextOffset)) }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { if (revision == generation) _state.update { it.copy(loadingMore = false, moreFailed = true) } }
+        }
+    }
+
+    /** Called only for visible rows (or the open article), within the UI's foreground lifecycle. */
+    suspend fun translateTitles(articles: List<NewsArticle>, language: String) {
+        if (!repository.newsTitleTranslationEnabled.value || !repository.translationSettings.value.configured) return
+        val pending = articles.map { it.title }.distinct()
+            .filterNot { NewsTitleKey(language, it) in _state.value.titleTranslations }
+            .take(com.macroresearch.data.NewsTitleTranslator.BATCH_SIZE)
+        if (pending.isEmpty()) return
+        val source = repository.newsReader.settings.value
+        val result = try { repository.translateNewsTitles(pending, language) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            _state.update { it.copy(titleTranslationFailed = true) }
+            return
+        }
+        if (source != repository.newsReader.settings.value) return
+        _state.update { current ->
+            val translated = current.titleTranslations + result.titles.mapKeys { NewsTitleKey(language, it.key) }
+            current.copy(titleTranslations = translated.entries.toList().takeLast(512).associate { it.toPair() },
+                titleTranslationFailed = result.failed)
         }
     }
 

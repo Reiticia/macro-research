@@ -139,6 +139,7 @@ class MacroApplication : Application() {
         val marketClient = DirectMarketClient(http, proxy = networkPreferences::proxy)
         val aiAnalysisClient = AiAnalysisClient(translationHttp, gson)
         val pushTopicManager = PushTopicManager()
+        val translationClient = TranslationClient(translationHttp, gson)
         repository = MacroRepository(
             directSource = DirectDataSource(
                 calendarClient = calendarClient,
@@ -155,7 +156,7 @@ class MacroApplication : Application() {
             newsRssClient = NewsRssClient(http),
             aiHistoryStore = com.macroresearch.data.AiHistoryStore(noBackupFilesDir.resolve("ai-history")),
             backendPreferences = backendPreferences,
-            translationClient = TranslationClient(translationHttp, gson),
+            translationClient = translationClient,
             aiAnalysisClient = aiAnalysisClient,
             dao = database.eventDao(),
             analysisDao = database.analysisDao(),
@@ -164,6 +165,9 @@ class MacroApplication : Application() {
             translationPreferences = translationPreferences,
             pushTopicManager = pushTopicManager,
             calendarPreferences = calendarPreferences,
+            newsTitleTranslator = com.macroresearch.data.NewsTitleTranslator(
+                noBackupFilesDir.resolve("news-reader/title-translations.json"), translationClient::translateNewsTitles,
+            ),
             newsReader = com.macroresearch.data.NewsReaderRepository(
                 NewsRssClient(com.macroresearch.data.newsReaderHttpClient()),
                 com.macroresearch.data.remote.ArticlePreviewClient(),
