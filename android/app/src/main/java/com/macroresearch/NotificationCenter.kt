@@ -75,7 +75,7 @@ class NotificationCenter(private val context: Context) {
         manager.notify(
             id,
             NotificationCompat.Builder(context, RELEASE_CHANNEL)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.drawable.ic_notification_market)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
