@@ -117,7 +117,7 @@
     <string name="save">儲存</string>
     <string name="api_key_security_note">金鑰由 Android Keystore 加密、不會備份，也不會封裝進 APK。請使用已設定權限及消費限額的個人金鑰。</string>
     <string name="language">語言</string>
-    <string name="language_note">介面語言切換後立即生效。設定後端後即可取得事件名稱翻譯，無需個人 AI 金鑰。新聞標題翻譯跟隨此語言，需在新聞頁開啟並設定個人 AI 介面。</string>
+    <string name="language_note">介面語言切換後立即生效。後端可提供事件譯名和目前語言的新聞標題譯文，無需個人 AI 金鑰。直連新聞或譯文尚未就緒時顯示原始標題。</string>
     <string name="data_network">資料來源網路</string>
     <string name="data_proxy">HTTP 代理（選填）</string>
     <string name="data_proxy_note">用於日曆與行情請求（美債殖利率、報價、K 線）。留空使用系統網路。仍驗證 HTTPS 憑證；AI 與翻譯請求不會經過此代理。</string>
@@ -475,11 +475,11 @@
     <string name="earnings_sort_ascending">升冪</string>
     <string name="earnings_sort_descending">降冪</string>
     <string name="earnings_sort_note">按美東日期內排序，適用於財報列表、月曆預覽與收藏。發布時間僅區分盤前／盤後，無精確時刻；市值缺失或時間未知一律置後，同值按股票代碼升冪排列。</string>
-    <string name="news_title_translation">翻譯標題 · %1$s</string>
-    <string name="news_title_translation_note">開啟後，僅將可見標題傳送至設定中的個人 AI／翻譯介面，按應用程式語言翻譯，可能產生模型費用。正文不翻譯、不上傳。</string>
-    <string name="news_title_translation_key">請先在設定中配置個人 AI 金鑰、介面和模型；未配置時顯示原始標題。</string>
-    <string name="news_title_translation_failed">部分標題翻譯失敗，已保留原文；一分鐘後捲動或重新開啟可重試。</string>
-    <string name="news_title_translated">標題由機器翻譯</string>
+    <string name="news_title_translation">伺服器譯文 · %1$s</string>
+    <string name="news_title_translation_note">伺服器準備 English、簡體中文和繁體中文標題。本開關僅控制顯示，不使用個人 AI 金鑰或由用戶端呼叫模型。內文維持原文。</string>
+    <string name="news_title_translation_backend">後端模式可顯示伺服器譯文；直連模式顯示原始標題。</string>
+    <string name="news_title_translation_pending">部分伺服器譯文尚未就緒或暫不支援，已顯示原始標題，可稍後重新整理。</string>
+    <string name="news_title_translated">伺服器機器翻譯標題</string>
     <string name="news_title_show_original">顯示原始標題</string>
     <string name="news_title_show_translation">顯示翻譯標題</string>
 </resources>

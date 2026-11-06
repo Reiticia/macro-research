@@ -165,9 +165,6 @@ class MacroApplication : Application() {
             translationPreferences = translationPreferences,
             pushTopicManager = pushTopicManager,
             calendarPreferences = calendarPreferences,
-            newsTitleTranslator = com.macroresearch.data.NewsTitleTranslator(
-                noBackupFilesDir.resolve("news-reader/title-translations.json"), translationClient::translateNewsTitles,
-            ),
             newsReader = com.macroresearch.data.NewsReaderRepository(
                 NewsRssClient(com.macroresearch.data.newsReaderHttpClient()),
                 com.macroresearch.data.remote.ArticlePreviewClient(),

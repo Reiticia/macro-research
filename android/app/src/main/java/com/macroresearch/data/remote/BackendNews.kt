@@ -21,6 +21,13 @@ internal fun decodeReaderNews(root: JsonObject, gson: Gson, now: Instant = Insta
         it.updatedAt?.let(Instant::parse)
     }
     root.getAsJsonArray("articles").forEach { item ->
+        val objectValue = item.asJsonObject.get("titleTranslations")?.takeIf { it.isJsonObject }?.asJsonObject
+        val translations = listOf("en","zh-CN","zh-TW").mapNotNull { language ->
+            val value = objectValue?.get(language)
+            if (value != null && value.isJsonPrimitive && value.asJsonPrimitive.isString)
+                language to value.asString else null
+        }.toMap()
+        item.asJsonObject.add("titleTranslations", gson.toJsonTree(safeNewsTitleTranslations(translations)))
         require(sources.any { it.id == item.asJsonObject.get("feedId")?.asString })
     }
     val rows: List<NewsArticle> = gson.fromJson(root.get("articles"), object : TypeToken<List<NewsArticle>>() {}.type)
@@ -30,7 +37,7 @@ internal fun decodeReaderNews(root: JsonObject, gson: Gson, now: Instant = Insta
         row.title.isNotBlank() && row.source.isNotBlank() && row.url.length <= 4096 &&
             ArticlePreviewClient.safeArticleUrl(row.url) != null &&
             time != null && time <= now && time >= now.minus(Duration.ofDays(30))
-    }.map { it.copy(title = it.title.take(300), source = it.source.take(120), summary = it.summary?.take(700)) }
+    }.map { it.copy(title = it.title.take(300), source = it.source.take(120), summary = it.summary?.take(700), titleTranslations = safeNewsTitleTranslations(it.titleTranslations)) }
         .sortedByDescending { newsPublishedInstant(it.publishedAt) }.distinctBy { it.url }
     return ReaderHeadlines(articles,updated, when {
         root.get("partial").asBoolean -> "partial_results"

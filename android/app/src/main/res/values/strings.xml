@@ -118,7 +118,7 @@
     <string name="save">Save</string>
     <string name="api_key_security_note">The key is encrypted by Android Keystore, excluded from backups, and never bundled in the APK. Use a restricted personal key with a spending limit.</string>
     <string name="language">Language</string>
-    <string name="language_note">Interface language applies immediately. A configured backend supplies event-name translations without a personal AI key. News headline translation follows this language when enabled on the news page and requires your personal AI settings.</string>
+    <string name="language_note">Interface language applies immediately. A configured backend supplies event names and news headlines in the selected language without a personal AI key. Direct news mode and unavailable translations keep original headlines.</string>
     <string name="data_network">Data source network</string>
     <string name="data_proxy">HTTP proxy (optional)</string>
     <string name="data_proxy_note">Used for calendar and market-data requests (Treasury yields, quotes, candles). Leave blank to use the system network. HTTPS certificate verification stays enabled; AI and translation requests never use it.</string>
@@ -476,11 +476,11 @@
     <string name="earnings_sort_ascending">Ascending</string>
     <string name="earnings_sort_descending">Descending</string>
     <string name="earnings_sort_note">Applies within each market date to earnings lists, month previews and favorites. Release time uses pre-market / after-hours only; no exact time is available. Missing market caps and unknown times stay last in either direction. Ties use stock symbol A–Z.</string>
-    <string name="news_title_translation">Translate headlines · %1$s</string>
-    <string name="news_title_translation_note">When enabled, visible headlines are sent to your personal AI/translation provider in the app language. Model fees may apply. Article text is not translated or sent.</string>
-    <string name="news_title_translation_key">Configure your personal AI key, endpoint and model in Settings to translate headlines. Originals are shown for now.</string>
-    <string name="news_title_translation_failed">Some headlines could not be translated. Showing originals; you can retry by scrolling or reopening after a minute.</string>
-    <string name="news_title_translated">Machine-translated headline</string>
+    <string name="news_title_translation">Server headlines · %1$s</string>
+    <string name="news_title_translation_note">The server prepares English, Simplified Chinese and Traditional Chinese titles. This switch only controls display; no personal AI key or client model request is used. Article text stays unchanged.</string>
+    <string name="news_title_translation_backend">Server translations are available in backend mode. Direct mode shows original headlines.</string>
+    <string name="news_title_translation_pending">Some server translations are not ready or supported yet. Originals remain readable; refresh later.</string>
+    <string name="news_title_translated">Server machine-translated headline</string>
     <string name="news_title_show_original">Show original headline</string>
     <string name="news_title_show_translation">Show translated headline</string>
 </resources>

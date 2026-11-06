@@ -25,8 +25,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
 import com.macroresearch.data.DataSourceMode
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.macroresearch.R
@@ -64,7 +62,7 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
     val settings by repository.translationSettings.collectAsStateWithLifecycle()
     val titleTranslationEnabled by repository.newsTitleTranslationEnabled.collectAsStateWithLifecycle()
     val language = AppLanguage.fromLocale(appLocale())
-    val translateTitles = titleTranslationEnabled && settings.configured
+    val translateTitles = titleTranslationEnabled && backendNews
     var query by rememberSaveable { mutableStateOf("") }
     var source by rememberSaveable { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
@@ -77,16 +75,6 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
         (source == null || it.source == source) && (query.isBlank() ||
             it.title.contains(query.trim(), true) || title(it).contains(query.trim(), true) ||
             it.summary.orEmpty().contains(query.trim(), true))
-    }
-    LaunchedEffect(vm, lifecycle, enabled, translateTitles, settings, dataSettings, language.tag, articles, article) {
-        if (enabled && translateTitles) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            if (article != null) vm.translateTitles(listOf(article), language.tag)
-            else snapshotFlow { listState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } }
-                .distinctUntilChanged().collectLatest { urls ->
-                    delay(250) // Coalesce scrolling; never translate an entire archive in the background.
-                    vm.translateTitles(articles.filter { it.url in urls }, language.tag)
-                }
-        }
     }
     if (article != null && enabled) {
         NewsReaderScreen(state, settings.configured, vm::closeArticle, { vm.open(article) },
@@ -135,8 +123,9 @@ fun NewsDeskScreen(repository: MacroRepository, onBack: () -> Unit) {
                         }
                     }
                     item {
-                        NewsTitleTranslationControl(titleTranslationEnabled, settings.configured, language.nativeName,
-                            state.titleTranslationFailed, repository::setNewsTitleTranslationEnabled)
+                        NewsTitleTranslationControl(titleTranslationEnabled, backendNews, language.nativeName,
+                            articles.any { language.tag !in com.macroresearch.data.remote.safeNewsTitleTranslations(it.titleTranslations) },
+                            repository::setNewsTitleTranslationEnabled)
                     }
                     item {
                         OutlinedTextField(query, { if (it.length <= 200) query = it }, singleLine = true,

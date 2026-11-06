@@ -15,7 +15,7 @@ import com.macroresearch.R
 import com.macroresearch.data.NewsPreferences
 import com.macroresearch.data.remote.NewsArticle
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,13 +26,13 @@ class NewsTitleTranslationUiTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val article = NewsArticle("Fed holds rates", "https://publisher.example/report", "Source", null, "Original RSS summary")
 
-    @Test fun newsTranslationPermissionIsSavedAndDoesNotEnableAiNewsOrPreviews() {
+    @Test fun serverTitleDisplayIsDefaultOnAndPreferenceDoesNotEnableAiNewsOrPreviews() {
         val storage = context.getSharedPreferences("research_preferences", Context.MODE_PRIVATE)
         val original = storage.all["news_title_translation"] as? Boolean
         try {
             storage.edit().remove("news_title_translation").commit()
             val preferences = NewsPreferences(context)
-            assertFalse(preferences.titleTranslationEnabled.value)
+            assertTrue(preferences.titleTranslationEnabled.value)
             val ai = preferences.settings.value
             val reader = preferences.readerEnabled.value
             compose.setContent {
@@ -41,9 +41,9 @@ class NewsTitleTranslationUiTest {
                     NewsTitleTranslationControl(enabled, true, "简体中文", false, preferences::setTitleTranslationEnabled)
                 }
             }
-            compose.onNodeWithTag("news-title-translation").assertIsOff().performClick().assertIsOn()
+            compose.onNodeWithTag("news-title-translation").assertIsOn().performClick().assertIsOff()
             compose.runOnIdle {
-                assertEquals(true, NewsPreferences(context).titleTranslationEnabled.value)
+                assertEquals(false, NewsPreferences(context).titleTranslationEnabled.value)
                 assertEquals(ai, preferences.settings.value)
                 assertEquals(reader, preferences.readerEnabled.value)
             }
@@ -78,10 +78,10 @@ class NewsTitleTranslationUiTest {
         compose.onNodeWithText(article.title).assertDoesNotExist()
     }
 
-    @Test fun missingKeyAndTranslationFailuresAreExplicitInDarkLargeFontLayout() {
+    @Test fun directModeAndPendingServerTranslationsAreExplicitInDarkLargeFontLayout() {
         var configured by mutableStateOf(false)
-        val missingKey = context.getString(R.string.news_title_translation_key)
-        val failure = context.getString(R.string.news_title_translation_failed)
+        val missingKey = context.getString(R.string.news_title_translation_backend)
+        val failure = context.getString(R.string.news_title_translation_pending)
         compose.setContent {
             val config = Configuration(LocalConfiguration.current).apply { fontScale = 1.4f }
             CompositionLocalProvider(LocalConfiguration provides config) {

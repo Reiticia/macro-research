@@ -6,7 +6,7 @@
     <string name="news_kicker">MARKET INTELLIGENCE</string>
     <string name="news_subtitle">Read the story. Question the market impact.</string>
     <string name="news_enable_title">Your personal news desk</string>
-    <string name="news_enable_note">News follows the selected data mode. Backend mode reads your server’s minute-by-minute public feed cache only; this device does not automatically contact publishers. You may explicitly open an original link in your browser. Direct mode uses domestic feeds first and optional international feeds. Reading needs no paid news API or AI Key. Feeds and summaries are not verified full articles. AI runs only when you choose Analyze or Send.</string>
+    <string name="news_enable_note">News follows the selected data mode. Backend mode reads your server’s minute-by-minute public feed cache only; this device does not automatically contact publishers. You may explicitly open an original link in your browser. Direct mode uses domestic feeds first and optional international feeds. Reading needs no paid news API or AI Key. Feeds and summaries are not verified full articles. Personal AI research runs only when you choose Analyze or Send; server headline translations are prepared separately.</string>
     <string name="news_enable">Enable public news</string>
     <string name="news_disable">Disconnect feeds</string>
     <string name="news_international">Include international feeds</string>

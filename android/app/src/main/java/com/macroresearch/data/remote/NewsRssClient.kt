@@ -35,7 +35,15 @@ data class NewsArticle(
     val publishedAt: String?,
     val summary: String?,
     val archiveId: String? = null,
+    val titleTranslations: Map<String, String>? = emptyMap(),
 )
+
+/** Shared server translations only; never resolve a client AI configuration here. */
+internal fun safeNewsTitleTranslations(value: Map<*, *>?): Map<String, String> = listOf("en", "zh-CN", "zh-TW").mapNotNull { language ->
+    val title = value?.get(language) as? String ?: return@mapNotNull null
+    if (title.isBlank() || title.codePointCount(0, title.length) > 600 ||
+        title.any { it.isISOControl() || it == '<' || it == '>' }) null else language to title
+}.toMap()
 
 data class NewsFetchResult(
     val articles: List<NewsArticle>,

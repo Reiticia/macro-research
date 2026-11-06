@@ -93,10 +93,11 @@ class NewsReaderCache(private val file: File, private val gson: Gson = Gson()) {
     private fun sanitize(articles: List<NewsArticle>): List<NewsArticle> = articles.take(160)
         .filter { it.title.isNotBlank() && ArticlePreviewClient.safeArticleUrl(it.url) != null }
         .map { it.copy(title = it.title.take(300), source = it.source.take(120),
-            summary = it.summary?.take(700), publishedAt = it.publishedAt?.take(100)) }
+            summary = it.summary?.take(700), publishedAt = it.publishedAt?.take(100),
+            titleTranslations = com.macroresearch.data.remote.safeNewsTitleTranslations(it.titleTranslations)) }
         .distinctBy(NewsArticle::url)
 
-    companion object { private const val MAX_BYTES = 1024 * 1024 }
+    companion object { private const val MAX_BYTES = 4 * 1024 * 1024 }
 }
 
 class NewsReaderRepository(

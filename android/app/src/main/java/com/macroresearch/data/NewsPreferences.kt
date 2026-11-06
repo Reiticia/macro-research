@@ -25,7 +25,7 @@ class NewsPreferences(context: Context) {
     private val _readerInternationalEnabled = MutableStateFlow(preferences.getBoolean("news_reader_international", false))
     val readerInternationalEnabled: StateFlow<Boolean> = _readerInternationalEnabled.asStateFlow()
 
-    private val _titleTranslationEnabled = MutableStateFlow(preferences.getBoolean("news_title_translation", false))
+    private val _titleTranslationEnabled = MutableStateFlow(preferences.getBoolean("news_title_translation", true))
     val titleTranslationEnabled: StateFlow<Boolean> = _titleTranslationEnabled.asStateFlow()
 
     fun setTitleTranslationEnabled(enabled: Boolean) {

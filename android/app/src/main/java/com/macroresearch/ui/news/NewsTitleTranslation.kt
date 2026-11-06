@@ -27,7 +27,7 @@ import com.macroresearch.R
 
 @Composable
 internal fun NewsTitleTranslationControl(
-    enabled: Boolean, configured: Boolean, language: String, failed: Boolean, onEnabled: (Boolean) -> Unit,
+    enabled: Boolean, backendMode: Boolean, language: String, pending: Boolean, onEnabled: (Boolean) -> Unit,
 ) {
     val label = stringResource(R.string.news_title_translation, language)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -40,10 +40,10 @@ internal fun NewsTitleTranslationControl(
         }
         Text(stringResource(R.string.news_title_translation_note), style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (enabled && !configured) Text(stringResource(R.string.news_title_translation_key),
+        if (enabled && !backendMode) Text(stringResource(R.string.news_title_translation_backend),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (enabled && configured && failed) Text(stringResource(R.string.news_title_translation_failed),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        if (enabled && backendMode && pending) Text(stringResource(R.string.news_title_translation_pending),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
