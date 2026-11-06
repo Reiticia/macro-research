@@ -22,6 +22,7 @@ const STALE_TTL: Duration = Duration::from_secs(86400);
 pub struct NewsArticle {
     pub archive_id: String,
     pub title: String,
+    pub title_translations: crate::news_translation::Titles,
     pub url: String,
     pub source: String,
     pub feed_id: String,
@@ -481,6 +482,7 @@ fn parse_rss(raw: &str, source: &NewsSource) -> Result<Vec<NewsArticle>, AppErro
                 .filter(|s| !s.is_empty());
             (!title.is_empty()).then(|| NewsArticle {
                 archive_id: crate::news_archive::article_id(&url),
+                title_translations: Default::default(),
                 title,
                 url,
                 source: source.name.clone(),

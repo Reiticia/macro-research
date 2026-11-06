@@ -116,6 +116,7 @@ async fn meta() -> impl IntoResponse {
                 "market",
                 "news",
                 "newsArchive",
+                "newsTitleTranslations",
                 "analysis",
                 "translation",
                 "translationCorrection",

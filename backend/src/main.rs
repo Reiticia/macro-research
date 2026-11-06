@@ -505,6 +505,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     tokio::spawn(market_event_analyzer::news::sync_loop(news_service.clone()));
     tokio::spawn(market_event_analyzer::news::body_loop(news_service.clone()));
+    if config.translation.enabled && config.translation.news_titles_enabled {
+        use market_event_analyzer::news_translation::{NewsTitleWorker, OpenAiNewsTitleTranslator};
+        let proxy = config
+            .network
+            .proxies("translation")
+            .then_some(config.network.proxy_url.trim());
+        match OpenAiNewsTitleTranslator::new(&config.translation, proxy, llm_usage.clone()) {
+            Ok(translator) => {
+                let worker = Arc::new(NewsTitleWorker::new(
+                    market_event_analyzer::news_archive::NewsArchive::new(pool.clone()),
+                    Arc::new(translator),
+                ));
+                tokio::spawn(market_event_analyzer::news_translation::sync_loop(worker));
+            }
+            Err(_) => tracing::warn!(
+                "news title translation disabled: check server translation configuration"
+            ),
+        }
+    }
     let (event_bus, _) = broadcast::channel(256);
     let state = AppState {
         config: Arc::new(config.clone()),

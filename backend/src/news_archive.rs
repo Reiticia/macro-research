@@ -11,7 +11,7 @@ pub const RETENTION_SECONDS: i64 = 30 * 24 * 3600;
 const RETRY_SECONDS: i64 = 3600;
 #[derive(Clone)]
 pub struct NewsArchive {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +19,7 @@ pub struct ArchivedArticle {
     pub archive_id: String,
     pub url: String,
     pub title: String,
+    pub title_translations: crate::news_translation::Titles,
     pub source: String,
     pub published_at: DateTime<Utc>,
     pub summary: Option<String>,
@@ -47,6 +48,9 @@ fn metadata(row: &SqliteRow) -> Result<NewsArticle, AppError> {
     Ok(NewsArticle {
         archive_id: row.try_get("id")?,
         title: row.try_get("title")?,
+        title_translations: crate::news_translation::stored_titles(
+            &row.try_get::<String, _>("title_translations")?,
+        ),
         url: row.try_get("original_url")?,
         source: row.try_get("source")?,
         feed_id: row.try_get("feed_id")?,
@@ -74,8 +78,13 @@ impl NewsArchive {
                 continue;
             };
             sqlx::query("INSERT INTO news_articles(id,original_url,title,source,feed_id,published_at,summary,first_seen_at,last_seen_at)
-                VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(original_url) DO UPDATE SET title=excluded.title,
-                summary=excluded.summary,last_seen_at=excluded.last_seen_at,published_at=MIN(news_articles.published_at,excluded.published_at)")
+                VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(original_url) DO UPDATE SET
+                title_translations=CASE WHEN news_articles.title!=excluded.title THEN '{}' ELSE news_articles.title_translations END,
+                title_translation_status=CASE WHEN news_articles.title!=excluded.title THEN 'pending' ELSE news_articles.title_translation_status END,
+                title_translation_attempts=CASE WHEN news_articles.title!=excluded.title THEN 0 ELSE news_articles.title_translation_attempts END,
+                title_translation_attempted_at=CASE WHEN news_articles.title!=excluded.title THEN NULL ELSE news_articles.title_translation_attempted_at END,
+                title_translation_claim=CASE WHEN news_articles.title!=excluded.title THEN NULL ELSE news_articles.title_translation_claim END,
+                title=excluded.title,summary=excluded.summary,last_seen_at=excluded.last_seen_at,published_at=MIN(news_articles.published_at,excluded.published_at)")
                 .bind(article_id(&url)).bind(&url).bind(&row.title).bind(&row.source).bind(&row.feed_id)
                 .bind(row.published_at.timestamp()).bind(&row.summary).bind(now.timestamp()).bind(now.timestamp())
                 .execute(&mut *tx).await?;
@@ -126,7 +135,7 @@ impl NewsArchive {
                 "news offset must be between 0 and 100000".into(),
             ));
         }
-        let rows = sqlx::query("SELECT id,original_url,title,source,feed_id,published_at,summary FROM news_articles
+        let rows = sqlx::query("SELECT id,original_url,title,title_translations,source,feed_id,published_at,summary FROM news_articles
             WHERE published_at>=? AND published_at<=? ORDER BY published_at DESC,id LIMIT 101 OFFSET ?")
             .bind(now.timestamp()-RETENTION_SECONDS).bind(now.timestamp()).bind(offset).fetch_all(&self.pool).await?;
         let next = (rows.len() > 100 && offset + 100 <= 100_000).then_some(offset + 100);
@@ -160,6 +169,7 @@ impl NewsArchive {
             archive_id: base.archive_id,
             url: base.url,
             title: base.title,
+            title_translations: base.title_translations,
             source: base.source,
             published_at: base.published_at,
             summary: base.summary,
@@ -190,6 +200,9 @@ impl NewsArchive {
         .bind(now.timestamp() - 300)
         .execute(&self.pool)
         .await?;
+        sqlx::query("UPDATE news_articles SET title_translation_status='unavailable',title_translation_claim=NULL
+            WHERE title_translation_status='pending' AND title_translation_attempts>=3 AND title_translation_attempted_at<?")
+            .bind(now.timestamp()-300).execute(&self.pool).await?;
         Ok(removed)
     }
     pub async fn pending(&self, now: DateTime<Utc>) -> Result<Vec<BodyJob>, AppError> {

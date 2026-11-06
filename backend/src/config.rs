@@ -267,6 +267,8 @@ impl Default for AuthConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct TranslationConfig {
     pub enabled: bool,
+    /// Prepare shared English/Simplified/Traditional Chinese news titles in the background.
+    pub news_titles_enabled: bool,
     /// OpenAI-compatible endpoint. A relay may be written as `https://relay/v1` or as the
     /// full `.../v1/chat/completions` URL.
     pub base_url: String,
@@ -296,6 +298,7 @@ impl Default for TranslationConfig {
             enabled: false,
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-5-mini".into(),
+            news_titles_enabled: true,
             api_key: String::new(),
             extra_headers: BTreeMap::new(),
             extra_body: BTreeMap::new(),

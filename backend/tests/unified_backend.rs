@@ -312,6 +312,7 @@ async fn archived_news_routes_preserve_original_links_and_never_fetch_on_read() 
     archive
         .ingest(
             &[NewsArticle {
+                title_translations: Default::default(),
                 archive_id: id.clone(),
                 title: "Policy release".into(),
                 url: url.into(),
@@ -340,6 +341,9 @@ async fn archived_news_routes_preserve_original_links_and_never_fetch_on_read() 
         NewsService::with_sources(http_client(None).unwrap(), vec![source])
             .with_archive(app.pool.clone(), PageReader::new(None).unwrap()),
     );
+    sqlx::query("UPDATE news_articles SET title_translations=?,title_translation_status='available' WHERE id=?")
+        .bind(serde_json::json!({"en":"Policy release","zh-CN":"政策公布","zh-TW":"政策公布"}).to_string())
+        .bind(&id).execute(&app.pool).await.unwrap();
     let router = api::router(app.state);
     let path = format!("/api/v1/news/articles/{id}");
     assert_eq!(
@@ -366,6 +370,8 @@ async fn archived_news_routes_preserve_original_links_and_never_fetch_on_read() 
         assert_eq!(body["url"], url);
         assert_eq!(body["archiveId"], id);
         assert_eq!(body["bodyStatus"], "available");
+        assert_eq!(body["titleTranslations"]["zh-CN"], "政策公布");
+        assert_eq!(body["title"], "Policy release");
         assert!(
             body["text"]
                 .as_str()
@@ -386,6 +392,15 @@ async fn archived_news_routes_preserve_original_links_and_never_fetch_on_read() 
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body["articles"][0]["url"], url);
     assert_eq!(body["articles"][0]["archiveId"], id);
+    assert_eq!(
+        body["articles"][0]["titleTranslations"]["en"],
+        "Policy release"
+    );
+    assert_eq!(
+        body["articles"][0]["titleTranslations"]["zh-TW"],
+        "政策公布"
+    );
+    assert_eq!(body["articles"][0]["title"], "Policy release");
     assert_eq!(body["stale"], true);
     for path in [
         "/api/v1/news?offset=bad",

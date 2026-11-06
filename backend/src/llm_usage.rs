@@ -31,6 +31,8 @@ impl LlmScope {
 pub enum LlmKind {
     /// One translation batch.
     Translation,
+    /// Shared three-language news headline translation.
+    NewsTitleTranslation,
     /// One Jev market-symbol selection request.
     MarketSelection,
 }
@@ -39,6 +41,7 @@ impl LlmKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Translation => "translation",
+            Self::NewsTitleTranslation => "news_title_translation",
             Self::MarketSelection => "market_selection",
         }
     }

@@ -19,6 +19,7 @@ pub mod model;
 pub mod news;
 pub mod news_archive;
 pub mod news_page;
+pub mod news_translation;
 pub mod openai_compat;
 pub mod quota;
 pub mod repository;

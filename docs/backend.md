@@ -327,6 +327,12 @@ base_url 可填 API 根地址或完整的 /chat/completions 地址。显式在 [
 `cargo run -- --check-ai`（或部署脚本 check-ai）现在仅检查翻译，会访问外部翻译模型；不再检查已移除的 AI 分析。
 模型用量写入 llm_usage，可通过受保护的 GET /api/v1/usage 或 Telegram /usage 查看。保留天数由 [limits].llm_usage_retention_days 控制。
 
+## 新闻标题翻译
+
+新闻标题由独立后台任务使用服务端 `[translation]` 配置生成，默认准备 `en`、`zh-CN`、`zh-TW`，而非使用 Android 的个人 Key。可选 `translation.news_titles_enabled=false` 可仅停止新闻翻译；默认 `true`，整体 `translation.enabled` 和有效 Key 仍是前提。
+
+迁移 028 持久化译文、认领与退避状态，标题改变才重新入队，保留 30 天。每分钟最多 5 条，最多三轮、至少一小时退避，失败不影响原文。新闻 API 只返回已缓存的 `titleTranslations`，不触发模型；审计使用 `translation/news_title_translation`。只传标题，不传正文/链接/客户端身份，不沿用事件名的 TypeSafe 审核循环。详细接口、费用与兼容行为见[新闻阅读台](news-reader.md#服务端三语标题)。原有事件名的只读译名接口不变。
+
 ## 后端 AI 市场分析已移除
 
 - 不再提供事件 AI 分析、按 provider 读取 AI、反馈与重新生成接口；旧 URL 返回 404。

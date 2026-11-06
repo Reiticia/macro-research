@@ -16,6 +16,7 @@ async fn pool() -> SqlitePool {
 }
 fn row(url: &str, time: DateTime<Utc>) -> NewsArticle {
     NewsArticle {
+        title_translations: Default::default(),
         archive_id: article_id(url),
         url: url.into(),
         title: "Policy announcement".into(),
