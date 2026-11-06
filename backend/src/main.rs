@@ -41,6 +41,8 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let started_at = chrono::Utc::now();
+    let started_instant = std::time::Instant::now();
     // axum-server enables aws-lc-rs while reqwest/sqlx enable ring; select one
     // explicitly so rustls does not panic when loading the server certificate.
     rustls::crypto::ring::default_provider()
@@ -628,6 +630,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ));
         if let Some(telegram) = telegram.clone() {
             tokio::spawn(bot_loop(BotState {
+                started_at,
+                started_instant,
                 telegram,
                 chat_ids: config.telegram.admin_chat_ids(),
                 health,

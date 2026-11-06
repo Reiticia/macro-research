@@ -5,6 +5,8 @@ use serde_json::json;
 pub(super) async fn fixture(mock: &TelegramMock) -> BotState {
     let pool = test_pool().await;
     BotState {
+        started_at: chrono::Utc::now(),
+        started_instant: std::time::Instant::now(),
         telegram: mock.client.clone(),
         chat_ids: vec![42],
         health: Arc::new(HealthRegistry::new(pool.clone(), None, 3, 3600)),
@@ -173,7 +175,7 @@ async fn notification_preferences_require_admin_and_valid_callback() {
 }
 
 #[tokio::test]
-async fn admin_command_menu_includes_notification_panel() {
+async fn admin_command_menu_includes_notification_panel_and_version() {
     let mock = TelegramMock::start().await;
     mock.client.set_admin_commands(&[42]).await.unwrap();
     let requests = mock.requests.lock().await;
@@ -185,5 +187,101 @@ async fn admin_command_menu_includes_notification_panel() {
             .unwrap()
             .iter()
             .any(|command| command["command"] == "notifications")
+    );
+    assert!(
+        requests[0].1["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|command| command["command"] == "version")
+    );
+    let public_menu = requests
+        .iter()
+        .find(|(_, body)| body["scope"]["type"] == "default")
+        .unwrap();
+    assert!(
+        !public_menu.1["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|command| command["command"] == "version")
+    );
+}
+
+#[test]
+fn uptime_formats_seconds_minutes_hours_and_days() {
+    for (seconds, expected) in [
+        (0, "0 天 0 小时 0 分钟 0 秒"),
+        (59, "0 天 0 小时 0 分钟 59 秒"),
+        (60, "0 天 0 小时 1 分钟 0 秒"),
+        (3_600, "0 天 1 小时 0 分钟 0 秒"),
+        (86_400, "1 天 0 小时 0 分钟 0 秒"),
+        (176_461, "2 天 1 小时 1 分钟 1 秒"),
+    ] {
+        assert_eq!(format_uptime(seconds), expected);
+    }
+}
+
+#[tokio::test]
+async fn version_reports_embedded_commit_fixed_start_time_and_monotonic_uptime() {
+    let mock = TelegramMock::start().await;
+    let mut state = fixture(&mock).await;
+    // A future wall-clock timestamp must not produce a negative/reset uptime.
+    state.started_at = "2099-01-02T03:04:05Z".parse().unwrap();
+    state.started_instant = std::time::Instant::now() - std::time::Duration::from_secs(90_061);
+    for command in ["/version", "/version@our_bot"] {
+        handle_update(
+            &state,
+            &json!({"message": {
+                "chat": {"id": 42}, "text": command
+            }}),
+        )
+        .await
+        .unwrap();
+    }
+    let requests = mock.requests.lock().await;
+    assert_eq!(requests.len(), 2);
+    for (method, body) in requests.iter() {
+        assert_eq!(method, "sendMessage");
+        assert_eq!(body["chat_id"], 42);
+        let text = body["text"].as_str().unwrap();
+        assert!(text.contains(&format!(
+            "Git 提交：<code>{}</code>",
+            env!("BACKEND_GIT_COMMIT")
+        )));
+        assert!(text.contains("启动时间：2099-01-02 03:04:05 UTC"));
+        assert!(text.contains("运行时间：1 天 1 小时 1 分钟"));
+    }
+}
+
+#[tokio::test]
+async fn version_requires_admin_and_is_listed_in_admin_help() {
+    let mock = TelegramMock::start().await;
+    let state = fixture(&mock).await;
+    for command in ["/version", "/version@our_bot"] {
+        handle_update(
+            &state,
+            &json!({"message": {
+                "chat": {"id": 99}, "text": command
+            }}),
+        )
+        .await
+        .unwrap();
+    }
+    assert!(mock.requests.lock().await.is_empty());
+    handle_update(
+        &state,
+        &json!({"message": {
+            "chat": {"id": 42}, "text": "/help"
+        }}),
+    )
+    .await
+    .unwrap();
+    let requests = mock.requests.lock().await;
+    assert!(
+        requests[0].1["text"]
+            .as_str()
+            .unwrap()
+            .contains("/version — 查看部署提交、启动时间和运行时长")
     );
 }

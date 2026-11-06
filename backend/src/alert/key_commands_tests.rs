@@ -9,6 +9,8 @@ use std::sync::Arc;
 async fn fixture(mock: &TelegramMock) -> BotState {
     let pool = test_pool().await;
     BotState {
+        started_at: chrono::Utc::now(),
+        started_instant: std::time::Instant::now(),
         telegram: mock.client.clone(),
         chat_ids: vec![42],
         health: Arc::new(HealthRegistry::new(pool.clone(), None, 3, 3600)),

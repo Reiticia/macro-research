@@ -360,7 +360,7 @@ base_url 可填 API 根地址或完整的 /chat/completions 地址。显式在 [
 4. 采纳 → 写入 `event_name_translation` 并回写所有同名事件，所有设备下次刷新即生效；
    屏蔽 → 写入 `translation_correction_mute`，该词条不再接受勘正、不再通知。
 
-机器人命令：`/status`（数据源健康）、`/usage`（近 24 小时模型用量）、`/notifications`（通知开关按钮）、`/events [关键词]`（查询事件 ID）、`/test_fcm [事件ID]`（FCM 验证/测试推送）、`/test_calendar_api`（宏观/财报日历源按钮）、`/test_earnings_api [YYYY-MM-DD] [股票代码]`（按纽约日期独立测试 Nasdaq、TradingView 财报及实时 Logo，默认今天/AAPL）。财报诊断仅限管理员本人私聊，使用生产服务共享代理与冷却；显示日期、HTTP 与安全结构摘要，不靠缓存/备用源判定成功，不重置后台健康计数。见[财报诊断](earnings-calendar.md#telegram-财报-api-诊断)。
+机器人命令：`/version`（部署提交、启动时间与运行时长）、`/status`（数据源健康）、`/usage`（近 24 小时模型用量）、`/notifications`（通知开关按钮）、`/events [关键词]`（查询事件 ID）、`/test_fcm [事件ID]`（FCM 验证/测试推送）、`/test_calendar_api`（宏观/财报日历源按钮）、`/test_earnings_api [YYYY-MM-DD] [股票代码]`（按纽约日期独立测试 Nasdaq、TradingView 财报及实时 Logo，默认今天/AAPL）。财报诊断仅限管理员本人私聊，使用生产服务共享代理与冷却；显示日期、HTTP 与安全结构摘要，不靠缓存/备用源判定成功，不重置后台健康计数。见[财报诊断](earnings-calendar.md#telegram-财报-api-诊断)。
 仅配置文件里 `telegram.admin_chat_ids` 白名单中的 chat 会被响应。
 
 ## 告警
@@ -412,6 +412,8 @@ quiet_hours_timezone = "Asia/Shanghai"
 鉴权/翻译的启用状态与所用翻译模型、出网代理，以及最近一次模型调用时间。它**不受静默时段
 抑制**（夜间重启也值得关注，且第一次启动必须证明 bot 配置可用）；崩溃循环（systemd 自动拉起）
 时会每个重启各发一条，这也是预期行为——那是真出了问题。
+
+管理员可随时发送 `/version`，查询当前进程构建时的完整 GitHub 提交 hash、启动时间（UTC，精确到秒）和运行时长（天/小时/分钟/秒）。启动时间在进入 `main` 时记录，包含初始化耗时；运行时长使用单调时钟，不受系统校时影响，每次进程重启重新计时。该指令仅对白名单管理员开放，已加入管理员命令菜单及 `/help`；原 `/status` 仍只查询数据源健康。
 
 提交 hash 在编译时嵌入二进制，不依赖服务器上的 Git 仓库或 `.deploy-revision` 文件。
 构建时优先读取 `BACKEND_GIT_COMMIT`，其次是 GitHub Actions 的 `GITHUB_SHA`，本地构建则使用

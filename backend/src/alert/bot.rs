@@ -22,10 +22,14 @@ use crate::{
 
 /// Telegram long-polling loop: the admin console for the server.
 ///
-/// It answers `/status`, `/usage`, `/notifications` and `/help`, and resolves buttons attached to
+/// It answers `/version`, `/status`, `/usage`, `/notifications` and `/help`, and resolves buttons attached to
 /// translation review. Admin operations require whitelisted chats; private key applications
 /// and own-key records are also available to ordinary users.
 pub struct BotState {
+    /// Captured at entry to main, not when Telegram polling starts.
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    /// Monotonic clock keeps uptime independent of wall-clock adjustments.
+    pub started_instant: std::time::Instant,
     pub telegram: Arc<TelegramClient>,
     pub chat_ids: Vec<i64>,
     pub health: Arc<HealthRegistry>,
@@ -317,6 +321,7 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
     // Commands may arrive as `/status@the_bot`; the suffix is not part of the command.
     let command = command.split('@').next().unwrap_or(command);
     let reply = match command {
+        "/version" => version_text(state),
         "/status" => status_text(state).await?,
         "/usage" => usage_text(state).await?,
         "/notifications" => {
@@ -366,7 +371,7 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
             return Ok(());
         }
         "/help" | "/start" => {
-            "可用命令：\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/events [关键词] — 查询事件 ID、名称和公布时间\n/test_fcm [事件ID] — 验证 FCM；指定 ID 向关注者发送测试通知\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试宏观/财报日历源\n/test_earnings_api [日期] [股票代码] — 独立测试财报源及实时 Logo\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
+            "可用命令：\n/version — 查看部署提交、启动时间和运行时长\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/events [关键词] — 查询事件 ID、名称和公布时间\n/test_fcm [事件ID] — 验证 FCM；指定 ID 向关注者发送测试通知\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试宏观/财报日历源\n/test_earnings_api [日期] [股票代码] — 独立测试财报源及实时 Logo\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
         }
         _ => return Ok(()),
     };
@@ -657,6 +662,25 @@ async fn test_ai_module(state: &BotState, module: &str) -> Result<(), String> {
         return Err(crate::openai_compat::error_detail(status, &body));
     }
     Ok(())
+}
+
+fn version_text(state: &BotState) -> String {
+    format!(
+        "<b>后端部署信息</b>\nGit 提交：<code>{}</code>\n启动时间：{}\n运行时间：{}",
+        crate::alert::telegram::escape(env!("BACKEND_GIT_COMMIT")),
+        state.started_at.format("%Y-%m-%d %H:%M:%S UTC"),
+        format_uptime(state.started_instant.elapsed().as_secs()),
+    )
+}
+
+fn format_uptime(seconds: u64) -> String {
+    format!(
+        "{} 天 {} 小时 {} 分钟 {} 秒",
+        seconds / 86_400,
+        seconds % 86_400 / 3_600,
+        seconds % 3_600 / 60,
+        seconds % 60,
+    )
 }
 
 async fn status_text(state: &BotState) -> Result<String, crate::error::AppError> {

@@ -107,6 +107,7 @@ impl TelegramClient {
             {"command": "keys", "description": "查看密钥分发记录（遮罩）"},
             {"command": "my_keys", "description": "查看自己的密钥记录"},
             {"command": "revoke_key", "description": "撤销 API Key"},
+            {"command": "version", "description": "查看部署提交、启动时间和运行时长"},
             {"command": "status", "description": "查看数据源健康状态"},
             {"command": "usage", "description": "查看近24小时模型用量"},
             {"command": "notifications", "description": "按钮控制公布值缺失/数据源通知"},
