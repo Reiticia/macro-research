@@ -218,6 +218,29 @@ impl CalendarService {
         })
     }
 
+    /// Independent release-window reads: never wait for TradingView or invoke translation.
+    pub async fn lookup_biquote_release(
+        &self,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<EconomicEvent>, AppError> {
+        let Some(secondary) = &self.secondary else {
+            return Ok(Vec::new());
+        };
+        let result = secondary.fetch_events(start, end).await;
+        if let Some(health) = &self.health {
+            match &result {
+                Ok(_) => health.record_success(SECONDARY_KEY).await,
+                Err(error) => {
+                    health
+                        .record_failure(SECONDARY_KEY, error.to_string())
+                        .await
+                }
+            }
+        }
+        result
+    }
+
     async fn enrich(&self, mut events: Vec<EconomicEvent>) -> Vec<EconomicEvent> {
         if let Some(translation) = &self.translation
             && let Err(error) = translation.enrich(&mut events).await

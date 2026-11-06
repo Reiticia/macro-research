@@ -40,10 +40,13 @@ async fn watch_once(
         )
         .await?;
     for event in candidates {
-        state
+        if !state
             .events
-            .set_status(event.id, EventStatus::Watching)
-            .await?;
+            .transition_status(event.id, EventStatus::Scheduled, EventStatus::Watching)
+            .await?
+        {
+            continue;
+        }
         tracing::info!(event_id = event.id, event = %event.event, "event entered watching state");
         if let Some(selector) = &state.market_selector {
             let selector = selector.clone();
@@ -63,11 +66,13 @@ async fn watch_once(
     let mut active = Vec::with_capacity(watching.len());
     for watched in watching {
         if now > watched.event_time + Duration::minutes(scheduler.release_timeout_minutes) {
-            state
+            if state
                 .events
-                .set_status(watched.id, EventStatus::Timeout)
-                .await?;
-            tracing::warn!(event_id = watched.id, "event release timed out");
+                .transition_status(watched.id, EventStatus::Watching, EventStatus::Timeout)
+                .await?
+            {
+                tracing::warn!(event_id = watched.id, "event release timed out");
+            }
         } else {
             active.push(watched);
         }
@@ -145,7 +150,7 @@ async fn watch_once(
     Ok(())
 }
 
-fn same_occurrence(left: &EconomicEvent, right: &EconomicEvent) -> bool {
+pub(super) fn same_occurrence(left: &EconomicEvent, right: &EconomicEvent) -> bool {
     same_named_occurrence(left, right)
         || (left.time_exact
             && right.time_exact
@@ -157,11 +162,14 @@ fn same_occurrence(left: &EconomicEvent, right: &EconomicEvent) -> bool {
                 == occurrence_key(&right.country, right.event_time, &right.event))
 }
 
-async fn release(state: &AppState, event: &EconomicEvent) -> Result<(), crate::error::AppError> {
-    state
-        .events
-        .set_status(event.id, EventStatus::Released)
-        .await?;
+pub(super) async fn release(
+    state: &AppState,
+    event: &EconomicEvent,
+) -> Result<(), crate::error::AppError> {
+    if !state.events.claim_release(event.id).await? {
+        return Ok(());
+    }
+    let event = state.events.get(event.id).await?;
     let _ = state.event_bus.send(AppEvent::EconomicEventReleased {
         event_id: event.id,
         event: event.event.clone(),

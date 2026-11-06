@@ -221,7 +221,14 @@ impl EventRepository {
                         event.event_zh_cn = old.event_zh_cn.clone().or(event.event_zh_cn);
                         event.event_zh_tw = old.event_zh_tw.clone().or(event.event_zh_tw);
                     }
-                    if !same_identity && event.actual.is_none() && old.actual.is_some() {
+                    if (!same_identity
+                        || old.time_exact
+                            && event.time_exact
+                            && old.country == event.country
+                            && old.event_time == event.event_time)
+                        && event.actual.is_none()
+                        && old.actual.is_some()
+                    {
                         event.actual = old.actual;
                         event.previous = old.previous;
                         event.consensus = old.consensus;
@@ -816,6 +823,94 @@ impl EventRepository {
         rows.into_iter().map(event_from_row).collect()
     }
 
+    /// Missing exact-time releases only; no network traffic outside the configured window.
+    pub async fn biquote_release_candidates(
+        &self,
+        now: DateTime<Utc>,
+        timeout_minutes: i64,
+        minimum_importance: u8,
+    ) -> Result<Vec<EconomicEvent>, AppError> {
+        let rows = sqlx::query(
+            "SELECT * FROM economic_event WHERE actual IS NULL AND time_exact=1
+             AND status IN ('scheduled','watching','data_unavailable') AND importance >= ?
+             AND julianday(event_time) <= julianday(?) AND julianday(event_time) >= julianday(?)
+             ORDER BY event_time,id",
+        )
+        .bind(i64::from(minimum_importance))
+        .bind(now.to_rfc3339())
+        .bind((now - Duration::minutes(timeout_minutes.max(0))).to_rfc3339())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(event_from_row).collect()
+    }
+
+    /// Include legacy `Z` and canonical `+00:00` timestamp storage in ambiguity checks.
+    pub async fn events_at_release_time(
+        &self,
+        time: DateTime<Utc>,
+    ) -> Result<Vec<EconomicEvent>, AppError> {
+        let rows = sqlx::query(
+            "SELECT * FROM economic_event WHERE julianday(event_time)=julianday(?) ORDER BY id",
+        )
+        .bind(time.to_rfc3339())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(event_from_row).collect()
+    }
+
+    /// Atomic first-value fill for a previously matched BiQuote occurrence. Keep the owning
+    /// provider/title/ID and the entire numeric tuple's source units. Never overwrite a value
+    /// obtained by another poll, a rescheduled occurrence or a terminal historical row.
+    pub async fn fill_biquote_release(
+        &self,
+        expected: &EconomicEvent,
+        source: &EconomicEvent,
+    ) -> Result<bool, AppError> {
+        if source.provider != "biquote"
+            || source.actual.is_none()
+            || !source.time_exact
+            || !expected.time_exact
+            || source.country != expected.country
+            || source.event_time != expected.event_time
+        {
+            return Ok(false);
+        }
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let owner = find_identity(&mut transaction, &source.provider, &source.provider_id).await?;
+        if owner.as_ref().is_some_and(|owner| owner.id != expected.id) {
+            return Ok(false);
+        }
+        if owner.is_none()
+            && !same_named_occurrence(expected, source)
+            && (expected.provider == source.provider
+                || occurrence_key(&expected.country, expected.event_time, &expected.event)
+                    != occurrence_key(&source.country, source.event_time, &source.event))
+        {
+            return Ok(false);
+        }
+        let result = sqlx::query(
+            "UPDATE economic_event SET actual=?,previous=?,consensus=?,forecast=?,unit=?,updated_at=?
+             WHERE id=? AND provider=? AND provider_id=? AND country=? AND event=?
+             AND julianday(event_time)=julianday(?) AND time_exact=1 AND actual IS NULL
+             AND status IN ('scheduled','watching','data_unavailable')",
+        )
+        .bind(source.actual.map(|v| v.to_string()))
+        .bind(source.previous.map(|v| v.to_string()))
+        .bind(source.consensus.map(|v| v.to_string()))
+        .bind(source.forecast.map(|v| v.to_string()))
+        .bind(&source.unit)
+        .bind(Utc::now().to_rfc3339())
+        .bind(expected.id).bind(&expected.provider).bind(&expected.provider_id)
+        .bind(&expected.country).bind(&expected.event).bind(expected.event_time.to_rfc3339())
+        .execute(&mut *transaction).await?;
+        let filled = result.rows_affected() == 1;
+        if filled {
+            remember_identity(&mut transaction, source, expected.id).await?;
+        }
+        transaction.commit().await?;
+        Ok(filled)
+    }
+
     pub async fn watching(&self) -> Result<Vec<EconomicEvent>, AppError> {
         self.by_statuses(&[EventStatus::Watching]).await
     }
@@ -845,6 +940,33 @@ impl EventRepository {
         }
         let rows = query.fetch_all(&self.pool).await?;
         rows.into_iter().map(event_from_row).collect()
+    }
+
+    pub async fn transition_status(
+        &self,
+        id: i64,
+        from: EventStatus,
+        to: EventStatus,
+    ) -> Result<bool, AppError> {
+        Ok(
+            sqlx::query("UPDATE economic_event SET status=?,updated_at=? WHERE id=? AND status=?")
+                .bind(to.as_str())
+                .bind(Utc::now().to_rfc3339())
+                .bind(id)
+                .bind(from.as_str())
+                .execute(&self.pool)
+                .await?
+                .rows_affected()
+                == 1,
+        )
+    }
+
+    /// Both release watchers share this claim, so only one sends WebSocket/FCM notifications.
+    pub async fn claim_release(&self, id: i64) -> Result<bool, AppError> {
+        Ok(sqlx::query("UPDATE economic_event SET status='released',updated_at=?
+            WHERE id=? AND actual IS NOT NULL AND status IN ('scheduled','watching','data_unavailable')")
+            .bind(Utc::now().to_rfc3339()).bind(id)
+            .execute(&self.pool).await?.rows_affected() == 1)
     }
 
     pub async fn set_status(&self, id: i64, status: EventStatus) -> Result<(), AppError> {

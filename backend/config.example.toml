@@ -44,8 +44,10 @@ minimum_importance = 3
 
 [scheduler]
 calendar_sync_seconds = 43200
+# 原有主源监控；公布后缺 Actual 的事件另有独立 BiQuote 2 秒轮询，不受此项影响。
 watch_scan_seconds = 15
 watch_before_minutes = 5
+# 同时限定 BiQuote 快速轮询窗口：从计划公布时刻到此分钟数，获取 Actual 后即停。
 release_timeout_minutes = 30
 # 事件行情点价采样频率；后端会聚合成 1 分钟 OHLC，客户端实时行情另由 market.live_quote_refresh_seconds 控制。
 market_poll_seconds = 15

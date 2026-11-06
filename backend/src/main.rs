@@ -587,6 +587,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.calendar.clone(),
         config.scheduler.calendar_sync_seconds,
     ));
+    tokio::spawn(scheduler::biquote_release_loop(state.clone()));
     tokio::spawn(scheduler::event_watch_loop(
         state.clone(),
         config.calendar.clone(),

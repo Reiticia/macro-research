@@ -137,6 +137,82 @@ async fn unsplittable_row_cap_fails_instead_of_reporting_partial_success() {
     task.abort();
 }
 
+#[tokio::test]
+async fn biquote_429_cooldown_is_shared_and_recovers_without_extra_http_requests() {
+    use axum::{http::StatusCode, response::IntoResponse};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let router = Router::new().route(
+        "/api/calendar",
+        get(move || {
+            let seen = seen.clone();
+            async move {
+                if seen.fetch_add(1, Ordering::SeqCst) == 0 {
+                    (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        [("retry-after", "2")],
+                        "rate limited",
+                    )
+                        .into_response()
+                } else {
+                    Json(vec![row(1, start())]).into_response()
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let provider = Arc::new(BiquoteCalendarProvider::new(
+        reqwest::Client::new(),
+        format!("http://{}/api/calendar", listener.local_addr().unwrap()),
+    ));
+    let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let calls_list = Arc::new(Mutex::new(Vec::new()));
+    let service = CalendarService::new(
+        Arc::new(Feed {
+            name: "trading_view",
+            result: 1,
+            calls: calls_list.clone(),
+        }),
+        Arc::new(Feed {
+            name: "forex_factory",
+            result: 1,
+            calls: calls_list,
+        }),
+        repository().await,
+    )
+    .with_secondary(provider.clone());
+    let error = service
+        .lookup_biquote_release(start(), start() + Duration::seconds(1))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("429"));
+    service
+        .lookup(start(), start() + Duration::days(1))
+        .await
+        .unwrap();
+    assert!(
+        provider
+            .fetch_events(start(), start() + Duration::seconds(1))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("cooling down")
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+    assert_eq!(
+        service
+            .lookup_biquote_release(start(), start() + Duration::seconds(1))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    task.abort();
+}
+
 struct Feed {
     name: &'static str,
     result: u8,

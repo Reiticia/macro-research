@@ -1,8 +1,10 @@
+mod biquote_release;
 mod calendar_sync;
 mod event_watcher;
 mod market_collector;
 mod release_health;
 
+pub use biquote_release::biquote_release_loop;
 pub use calendar_sync::{calendar_sync_loop, startup_calendar_sync};
 pub use event_watcher::event_watch_loop;
 pub use market_collector::market_collect_loop;

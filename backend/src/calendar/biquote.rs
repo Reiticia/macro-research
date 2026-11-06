@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use rust_decimal::Decimal;
 use serde::Deserialize;
+use tokio::{sync::Mutex, time::Instant};
 
 use crate::{
     calendar::{CalendarProvider, parse::release_status, tradingview::trading_view_country},
@@ -18,6 +19,8 @@ const PAGE_LIMIT: usize = 500;
 pub struct BiquoteCalendarProvider {
     client: reqwest::Client,
     url: String,
+    // Shared by background release polling and ordinary calendar requests.
+    gate: Mutex<Option<(Instant, u64)>>,
 }
 
 impl BiquoteCalendarProvider {
@@ -25,6 +28,7 @@ impl BiquoteCalendarProvider {
         Self {
             client,
             url: url.into(),
+            gate: Mutex::new(None),
         }
     }
 }
@@ -44,13 +48,23 @@ impl CalendarProvider for BiquoteCalendarProvider {
             let day_end = (cursor + Duration::days(1)).min(end);
             let mut windows = vec![(cursor, day_end)];
             while let Some((from, to)) = windows.pop() {
+                // Yield between range pages so a full calendar sync cannot monopolize
+                // the provider while the two-second release poll is waiting.
+                let mut blocked_until = self.gate.lock().await;
+                if blocked_until
+                    .is_some_and(|(started, seconds)| started.elapsed().as_secs() < seconds)
+                {
+                    return Err(AppError::Provider(
+                        "BiQuote calendar cooling down after HTTP 429".into(),
+                    ));
+                }
                 requests += 1;
                 if requests > 512 {
                     return Err(AppError::Provider(
                         "BiQuote calendar request budget exceeded".into(),
                     ));
                 }
-                let rows: Vec<CalendarRow> = self
+                let response = self
                     .client
                     .get(&self.url)
                     .query(&[
@@ -60,10 +74,16 @@ impl CalendarProvider for BiquoteCalendarProvider {
                     ])
                     .header("accept", "application/json")
                     .send()
-                    .await?
-                    .error_for_status()?
-                    .json()
                     .await?;
+                if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    let seconds = retry_after_seconds(response.headers(), Utc::now());
+                    *blocked_until = Some((Instant::now(), seconds));
+                    return Err(AppError::Provider(format!(
+                        "BiQuote calendar HTTP 429; retry after {seconds}s"
+                    )));
+                }
+                let rows: Vec<CalendarRow> = response.error_for_status()?.json().await?;
+                drop(blocked_until);
                 if rows.len() >= PAGE_LIMIT {
                     let milliseconds = (to - from).num_milliseconds();
                     if milliseconds <= 1_000 {
@@ -90,6 +110,21 @@ impl CalendarProvider for BiquoteCalendarProvider {
         events.sort_by_key(|event| event.event_time);
         Ok(events)
     }
+}
+
+fn retry_after_seconds(headers: &reqwest::header::HeaderMap, now: DateTime<Utc>) -> u64 {
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| {
+            value.trim().parse::<u64>().ok().or_else(|| {
+                DateTime::parse_from_rfc2822(value)
+                    .ok()
+                    .map(|until| (until.with_timezone(&Utc) - now).num_seconds().max(1) as u64)
+            })
+        })
+        .unwrap_or(60)
+        .max(2)
 }
 
 #[derive(Deserialize)]
@@ -219,6 +254,26 @@ fn display_unit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_after_accepts_seconds_http_dates_and_safe_defaults() {
+        let now: DateTime<Utc> = "2026-11-06T13:30:00Z".parse().unwrap();
+        for (value, expected) in [
+            ("120", 120),
+            ("Fri, 06 Nov 2026 13:32:00 GMT", 120),
+            ("invalid", 60),
+            ("0", 2),
+            ("172800", 172800),
+        ] {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(reqwest::header::RETRY_AFTER, value.parse().unwrap());
+            assert_eq!(retry_after_seconds(&headers, now), expected);
+        }
+        assert_eq!(
+            retry_after_seconds(&reqwest::header::HeaderMap::new(), now),
+            60
+        );
+    }
 
     #[test]
     fn shared_fixture_preserves_occurrences_values_units_and_time_precision() {

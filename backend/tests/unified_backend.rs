@@ -26,6 +26,8 @@ use sqlx::sqlite::SqlitePoolOptions;
 use tokio::sync::broadcast;
 use tower::ServiceExt;
 
+#[path = "support/biquote_release.rs"]
+mod biquote_release_tests;
 #[path = "support/logo_cache.rs"]
 mod logo_cache;
 
