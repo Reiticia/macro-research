@@ -21,6 +21,7 @@ fn event(provider: &str, id: &str, name: &str) -> EconomicEvent {
         provider: provider.into(),
         provider_id: id.into(),
         release_group_id: None,
+        release_metadata: Default::default(),
         country: "United States".into(),
         currency: Some("USD".into()),
         category: "prices".into(),
@@ -69,12 +70,12 @@ fn english_rule_lowercases_then_removes_everything_except_ascii_letters_and_digi
     );
 }
 #[test]
-fn chinese_matching_is_exact_nonblank_and_scoped_even_across_language_fields() {
+fn chinese_display_labels_never_authorize_identity_even_across_language_fields() {
     let mut left = event("biquote", "a", "First English Name");
     let mut right = event("biquote", "b", "Different English Name");
     left.event_zh_cn = Some("失业率".into());
     right.event_zh_tw = Some("失业率".into());
-    assert!(same_named_occurrence(&left, &right));
+    assert!(!same_named_occurrence(&left, &right));
     right.event_zh_tw = Some("失业率 ".into());
     assert!(!same_named_occurrence(&left, &right));
     left.event_zh_cn = Some(" ".into());
@@ -133,7 +134,7 @@ async fn one_batch_duplicate_names_reuse_one_row_and_do_not_lose_an_actual_to_a_
     assert_eq!(repo.observations(ids[0]).await.unwrap().len(), 1);
 }
 #[tokio::test]
-async fn nonblank_exact_chinese_or_cached_chinese_can_match_different_english_names() {
+async fn identical_cached_chinese_does_not_merge_different_english_names() {
     let repo = repository().await;
     let mut first = event("biquote", "first", "Consumer Climate");
     first.event_zh_cn = Some("消费者信心指数".into());
@@ -147,12 +148,13 @@ async fn nonblank_exact_chinese_or_cached_chinese_can_match_different_english_na
     .unwrap();
     let mut updated = event("biquote", "second", "Household Sentiment");
     updated.actual = Some(Decimal::new(75, 0));
-    assert_eq!(repo.save_events(&[updated]).await.unwrap(), vec![id]);
-    assert_eq!(count(&repo).await, 1);
+    assert_ne!(repo.save_events(&[updated]).await.unwrap(), vec![id]);
+    assert_eq!(count(&repo).await, 2);
+    assert!(repo.get(id).await.unwrap().actual.is_none());
     let mut traditional = event("biquote", "third", "Another Sentiment Title");
     traditional.event_zh_tw = Some("消费者信心指数".into());
-    assert_eq!(repo.save_events(&[traditional]).await.unwrap(), vec![id]);
-    assert_eq!(count(&repo).await, 1);
+    assert_ne!(repo.save_events(&[traditional]).await.unwrap(), vec![id]);
+    assert_eq!(count(&repo).await, 3);
 }
 #[tokio::test]
 async fn exact_country_exact_instant_and_exact_time_flag_are_required_for_name_dedup() {
@@ -359,6 +361,10 @@ async fn migration_027_seeds_existing_identities_without_changing_events_or_obse
     sqlx::query("INSERT INTO economic_event(provider,provider_id,country,category,event,event_time,importance) VALUES('biquote','old','United States','prices','CPI','2026-11-05T13:30:00+00:00',3)").execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO event_observation(event_id,observed_at,actual) VALUES(1,'2026-11-05T13:31:00+00:00','3.1')").execute(&pool).await.unwrap();
     pool.execute(include_str!("../migrations/027_event_provider_aliases.sql"))
+        .await
+        .unwrap();
+    // The current repository also reads the additive metadata column.
+    pool.execute(include_str!("../migrations/029_release_metadata.sql"))
         .await
         .unwrap();
     let repo = EventRepository::new(pool);

@@ -240,6 +240,7 @@ fn event(provider: &str, id: &str) -> EconomicEvent {
         provider: provider.into(),
         provider_id: id.into(),
         release_group_id: None,
+        release_metadata: Default::default(),
         country: "United States".into(),
         currency: Some("USD".into()),
         category: "prices".into(),

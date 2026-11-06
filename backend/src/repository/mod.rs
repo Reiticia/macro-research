@@ -41,6 +41,14 @@ pub(crate) fn event_from_row(row: SqliteRow) -> Result<EconomicEvent, AppError> 
         // Release grouping was removed from the server schema; keep the nullable API field for
         // wire compatibility with older Android clients.
         release_group_id: None,
+        release_metadata: row
+            .try_get::<Option<String>, _>("release_metadata")?
+            .map(|json| {
+                serde_json::from_str(&json)
+                    .map_err(|_| AppError::Internal("invalid stored release metadata".into()))
+            })
+            .transpose()?
+            .unwrap_or_default(),
         country: row.try_get("country")?,
         currency: row.try_get("currency")?,
         category: row.try_get("category")?,

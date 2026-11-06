@@ -102,6 +102,7 @@ pub fn parse_events(
             provider: "forex_factory".to_owned(),
             provider_id: format!("{currency}|{date_text}|{title}"),
             release_group_id: None,
+            release_metadata: Default::default(),
             country: currencies_by_feed(&currency)
                 .unwrap_or(&currency)
                 .to_owned(),

@@ -118,6 +118,7 @@ pub fn parse_calendar(html: &str) -> Result<Vec<EconomicEvent>, AppError> {
             provider: "trading_economics".to_owned(),
             provider_id,
             release_group_id: None,
+            release_metadata: Default::default(),
             country: country.clone(),
             currency: attribute(&row, &["data-currency"]).or_else(|| country_currency(&country)),
             category,

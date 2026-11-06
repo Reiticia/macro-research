@@ -30,6 +30,10 @@ use tower::ServiceExt;
 mod biquote_release_tests;
 #[path = "support/logo_cache.rs"]
 mod logo_cache;
+#[path = "support/release_identity.rs"]
+mod release_identity_tests;
+#[path = "support/release_safety.rs"]
+mod release_safety_tests;
 
 struct StubCalendar(Vec<EconomicEvent>);
 
@@ -92,6 +96,7 @@ fn fixture_event(hours_from_now: i64) -> EconomicEvent {
         provider: "trading_view".into(),
         provider_id: format!("fixture-{hours_from_now}"),
         release_group_id: None,
+        release_metadata: Default::default(),
         country: "United States".into(),
         currency: Some("USD".into()),
         category: "inflation".into(),
@@ -452,13 +457,13 @@ async fn renamed_public_provider_ids_keep_authenticated_by_provider_lookup_worki
     let mut old = fixture_event(0);
     old.provider = "biquote".into();
     old.provider_id = "old-occurrence".into();
-    old.event = "Old English Label".into();
+    old.event = "Core CPI m/m".into();
     old.event_zh_cn = Some("消费者信心指数".into());
     let id = app.state.events.save_events(&[old.clone()]).await.unwrap()[0];
     let mut new = old.clone();
     new.provider = "trading_view".into();
     new.provider_id = "new-occurrence".into();
-    new.event = "New English Label".into();
+    new.event = "Core Inflation Rate MoM".into();
     assert_eq!(
         app.state.events.save_events(&[new]).await.unwrap(),
         vec![id]
@@ -496,7 +501,7 @@ async fn renamed_public_provider_ids_keep_authenticated_by_provider_lookup_worki
 }
 
 #[tokio::test]
-async fn watcher_uses_cached_chinese_identity_without_models_and_preserves_the_watched_id() {
+async fn watcher_never_uses_cached_chinese_as_identity_evidence() {
     let mut app = app().await;
     let mut old = fixture_event(0);
     old.event_time = Utc::now() - Duration::minutes(2);
@@ -536,27 +541,23 @@ async fn watcher_uses_cached_chinese_identity_without_models_and_preserves_the_w
         app.state.config.calendar.clone(),
         app.state.config.scheduler.clone(),
     ));
-    let published = tokio::time::timeout(std::time::Duration::from_secs(3), receiver.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    task.abort();
     assert!(
-        matches!(published,market_event_analyzer::model::AppEvent::EconomicEventReleased { event_id,.. } if event_id==id)
+        tokio::time::timeout(std::time::Duration::from_millis(250), receiver.recv())
+            .await
+            .is_err()
     );
+    task.abort();
     let stored = app.state.events.get(id).await.unwrap();
-    assert_eq!(stored.actual, Some(Decimal::new(75, 0)));
+    assert!(stored.actual.is_none());
     assert_eq!(stored.provider, "trading_view");
     assert_eq!(app.state.events.observations(id).await.unwrap().len(), 1);
-    assert_eq!(
+    assert!(
         app.state
             .events
             .find_provider_event("biquote", "remote-new")
             .await
             .unwrap()
-            .unwrap()
-            .id,
-        id
+            .is_none()
     );
 }
 

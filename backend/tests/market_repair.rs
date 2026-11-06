@@ -66,6 +66,7 @@ fn event(
         provider: "fixture".into(),
         provider_id: provider_id.into(),
         release_group_id: None,
+        release_metadata: Default::default(),
         country: "United States".into(),
         currency: Some("USD".into()),
         category: "inflation".into(),

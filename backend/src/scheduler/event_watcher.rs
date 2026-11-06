@@ -4,7 +4,7 @@ use chrono::{Duration, Utc};
 
 use crate::{
     AppState,
-    calendar::parse::{conflicting_duplicate_actual, occurrence_key, same_named_occurrence},
+    calendar::parse::{conflicting_duplicate_actual, same_occurrence},
     config::{CalendarConfig, SchedulerConfig},
     model::{AppEvent, EconomicEvent, EventStatus},
 };
@@ -83,27 +83,8 @@ async fn watch_once(
 
     let start = active.iter().map(|event| event.event_time).min().unwrap() - Duration::hours(12);
     let end = active.iter().map(|event| event.event_time).max().unwrap() + Duration::hours(12);
-    let mut remote = state.calendar_service.lookup(start, end).await?.events;
-    // Chinese-name matching uses existing translations only, never a model call on a poll.
-    let names: Vec<_> = remote
-        .iter()
-        .map(|e| e.event.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    for chunk in names.chunks(500) {
-        let translations = state.events.cached_event_name_translations(chunk).await?;
-        for event in &mut remote {
-            if let Some((cn, tw)) = translations.get(&event.event) {
-                if event.event_zh_cn.is_none() {
-                    event.event_zh_cn = Some(cn.clone());
-                }
-                if event.event_zh_tw.is_none() {
-                    event.event_zh_tw = Some(tw.clone());
-                }
-            }
-        }
-    }
+    // Identity never depends on translated display labels. Ingest still enriches saved labels.
+    let remote = state.calendar_service.lookup(start, end).await?.events;
     let relevant: Vec<EconomicEvent> = active
         .iter()
         .filter_map(|watched| {
@@ -148,18 +129,6 @@ async fn watch_once(
         }
     }
     Ok(())
-}
-
-pub(super) fn same_occurrence(left: &EconomicEvent, right: &EconomicEvent) -> bool {
-    same_named_occurrence(left, right)
-        || (left.time_exact
-            && right.time_exact
-            && left.provider != right.provider
-            && !occurrence_key(&left.country, left.event_time, &left.event)
-                .2
-                .is_empty()
-            && occurrence_key(&left.country, left.event_time, &left.event)
-                == occurrence_key(&right.country, right.event_time, &right.event))
 }
 
 pub(super) async fn release(

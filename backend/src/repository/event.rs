@@ -3,9 +3,14 @@ use sqlx::{Row, SqlitePool};
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    calendar::parse::{
-        conflicting_duplicate_actual, normalized_event_name, occurrence_key, provider_priority,
-        release_status, same_named_occurrence,
+    calendar::{
+        parse::{
+            conflicting_duplicate_actual, normalized_event_name, occurrence_key, provider_priority,
+            release_status, same_named_occurrence, same_occurrence,
+        },
+        release_identity::{
+            inherit_actual_provenance, release_value_for, validate_release_identity,
+        },
     },
     error::AppError,
     event_description::EventDescription,
@@ -130,8 +135,7 @@ impl EventRepository {
                             && (same_named_occurrence(old, &event)
                                 || allow_alias
                                     && old.provider != event.provider
-                                    && occurrence_key(&old.country, old.event_time, &old.event)
-                                        == key)
+                                    && same_occurrence(old, &event))
                     })
                     .collect();
                 match candidates.as_slice() {
@@ -147,33 +151,78 @@ impl EventRepository {
                 }
             }
             if let Some(old) = existing {
+                let same_identity =
+                    old.provider == event.provider && old.provider_id == event.provider_id;
+                let mut peers = Vec::new();
+                if !same_identity {
+                    peers = sqlx::query("SELECT * FROM economic_event WHERE country=? AND julianday(event_time)=julianday(?)")
+                        .bind(&event.country).bind(event.event_time.to_rfc3339())
+                        .fetch_all(&mut *transaction).await?.into_iter()
+                        .map(event_from_row).collect::<Result<Vec<_>, _>>()?;
+                    // Include later rows in this batch, not only rows already persisted.
+                    peers.extend_from_slice(&prepared);
+                    if let Err(reason) = validate_release_identity(&old, &observed, &peers) {
+                        tracing::warn!(
+                            event_id = old.id,
+                            ?reason,
+                            "calendar identity update skipped"
+                        );
+                        ids.push(old.id);
+                        continue;
+                    }
+                    // Do not relabel a valued fallback row as primary if its value cannot
+                    // be expressed in the primary comparison basis. Leave it intact.
+                    if provider_priority(&event.provider) >= provider_priority(&old.provider)
+                        && event.actual.is_none()
+                        && old.actual.is_some()
+                        && release_value_for(&event, &old, &peers).is_err()
+                    {
+                        tracing::warn!(
+                            event_id = old.id,
+                            "calendar promotion skipped: incompatible units"
+                        );
+                        ids.push(old.id);
+                        continue;
+                    }
+                }
                 if conflicting {
                     event.actual = old.actual;
                     event.previous = old.previous;
                     event.consensus = old.consensus;
                     event.forecast = old.forecast;
                     event.unit = old.unit.clone();
+                    event.release_metadata.actual_source =
+                        old.release_metadata.actual_source.clone();
+                    event.release_metadata.actual_source_id =
+                        old.release_metadata.actual_source_id.clone();
+                    event.release_metadata.actual_observed_at =
+                        old.release_metadata.actual_observed_at;
                     event.status = if old.status == EventStatus::Historical {
                         observed.status
                     } else {
                         old.status
                     };
                 }
+                // Keep the first receipt time for an unchanged value from the same source.
+                if observed.actual.is_some()
+                    && observed.actual == old.actual
+                    && old.release_metadata.actual_source.as_deref()
+                        == Some(observed.provider.as_str())
+                    && old.release_metadata.actual_source_id.as_deref()
+                        == Some(observed.provider_id.as_str())
+                {
+                    event.release_metadata.actual_source =
+                        old.release_metadata.actual_source.clone();
+                    event.release_metadata.actual_source_id =
+                        old.release_metadata.actual_source_id.clone();
+                    event.release_metadata.actual_observed_at =
+                        old.release_metadata.actual_observed_at;
+                }
                 remember_identity(&mut transaction, &old, old.id).await?;
-                let same_identity =
-                    old.provider == event.provider && old.provider_id == event.provider_id;
                 let lower_source =
                     provider_priority(&event.provider) < provider_priority(&old.provider);
                 if lower_source {
-                    if !same_named_occurrence(&old, &event)
-                        && !(old.time_exact
-                            && event.time_exact
-                            && !occurrence_key(&old.country, old.event_time, &old.event)
-                                .2
-                                .is_empty()
-                            && occurrence_key(&old.country, old.event_time, &old.event)
-                                == occurrence_key(&event.country, event.event_time, &event.event))
-                    {
+                    if !same_occurrence(&old, &event) {
                         ids.push(old.id);
                         continue;
                     }
@@ -186,15 +235,20 @@ impl EventRepository {
                         ids.push(old.id);
                         continue;
                     }
-                    // A fallback can fill missing numbers, never replace the primary owner.
+                    // Keep the primary comparison basis: only convert/fill Actual.
+                    let actual = match release_value_for(&old, &event, &peers) {
+                        Ok(actual) => actual,
+                        Err(reason) => {
+                            tracing::warn!(event_id = old.id, ?reason, "release fill skipped");
+                            ids.push(old.id);
+                            continue;
+                        }
+                    };
                     event = EconomicEvent {
-                        actual: event.actual,
-                        previous: event.previous,
-                        consensus: event.consensus,
-                        forecast: event.forecast,
-                        unit: event.unit,
+                        actual: Some(actual),
                         ..old.clone()
                     };
+                    inherit_actual_provenance(&mut event, &observed);
                 } else {
                     if !same_identity
                         && old.status == EventStatus::Historical
@@ -221,32 +275,73 @@ impl EventRepository {
                         event.event_zh_cn = old.event_zh_cn.clone().or(event.event_zh_cn);
                         event.event_zh_tw = old.event_zh_tw.clone().or(event.event_zh_tw);
                     }
-                    if (!same_identity
-                        || old.time_exact
-                            && event.time_exact
-                            && old.country == event.country
-                            && old.event_time == event.event_time)
+                    if same_identity
+                        && old.event_time == event.event_time
+                        && old.country == event.country
+                    {
+                        event.release_metadata.period = event
+                            .release_metadata
+                            .period
+                            .clone()
+                            .or(old.release_metadata.period.clone());
+                        event.release_metadata.series_id = event
+                            .release_metadata
+                            .series_id
+                            .clone()
+                            .or(old.release_metadata.series_id.clone());
+                    }
+                    if crate::calendar::release_identity::verified_relation(&old, &event)
+                        != Some(false)
+                        && (!same_identity
+                            || old.time_exact
+                                && event.time_exact
+                                && old.country == event.country
+                                && old.event_time == event.event_time)
                         && event.actual.is_none()
                         && old.actual.is_some()
                     {
-                        event.actual = old.actual;
-                        event.previous = old.previous;
-                        event.consensus = old.consensus;
-                        event.forecast = old.forecast;
-                        event.unit = old.unit.clone();
+                        if !same_identity {
+                            // Promoting a fallback row to the primary owner must adopt the
+                            // primary forecast/previous, not keep the fallback's comparison basis.
+                            event.actual = release_value_for(&event, &old, &peers).ok();
+                        } else {
+                            // Only the exact same source occurrence may retain its old basis
+                            // after an empty response. Cross-source conversion already passed.
+                            event.actual = old.actual;
+                            event.previous = old.previous;
+                            event.consensus = old.consensus;
+                            event.forecast = old.forecast;
+                            event.unit = old.unit.clone();
+                        }
                         event.status = old.status;
+                        event.release_metadata.actual_source =
+                            old.release_metadata.actual_source.clone();
+                        event.release_metadata.actual_source_id =
+                            old.release_metadata.actual_source_id.clone();
+                        event.release_metadata.actual_observed_at =
+                            old.release_metadata.actual_observed_at;
                     }
                 }
             }
+            if !conflicting
+                && observed.actual.is_some()
+                && event.release_metadata.actual_source.is_none()
+            {
+                event.release_metadata.actual_source = Some(observed.provider.clone());
+                event.release_metadata.actual_source_id = Some(observed.provider_id.clone());
+                event.release_metadata.actual_observed_at = Some(Utc::now());
+            }
+            let metadata = serde_json::to_string(&event.release_metadata)
+                .map_err(|_| AppError::Internal("cannot encode release metadata".into()))?;
             let event_query = sqlx::query(
                 r#"INSERT INTO economic_event (
                     provider, provider_id, country, currency, category, event,
                     event_zh_cn, event_zh_tw, event_time, importance, actual, previous, consensus,
-                    forecast, unit, status, time_exact, updated_at
+                    forecast, unit, status, time_exact, updated_at, release_metadata
                 ) VALUES (?, ?, ?, ?, ?, ?,
                     COALESCE(?, (SELECT zh_cn FROM event_name_translation WHERE source_text = ?)),
                     COALESCE(?, (SELECT zh_tw FROM event_name_translation WHERE source_text = ?)),
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(provider, provider_id) DO UPDATE SET
                     country = excluded.country,
                     currency = excluded.currency,
@@ -270,7 +365,8 @@ impl EventRepository {
                     forecast = excluded.forecast,
                     unit = excluded.unit,
                     time_exact = excluded.time_exact,
-                    updated_at = excluded.updated_at
+                    updated_at = excluded.updated_at,
+                    release_metadata = excluded.release_metadata
                 WHERE economic_event.status != 'historical' OR excluded.status = 'historical'
                 RETURNING id"#,
             )
@@ -293,7 +389,8 @@ impl EventRepository {
             .bind(&event.unit)
             .bind(event.status.as_str())
             .bind(event.time_exact)
-            .bind(Utc::now().to_rfc3339());
+            .bind(Utc::now().to_rfc3339())
+            .bind(metadata);
             let (id, persisted) = match event_query.fetch_optional(&mut *transaction).await? {
                 Some(row) => (row.try_get("id")?, true),
                 // SQLite returns no row when the historical-preservation WHERE clause rejects
@@ -858,53 +955,95 @@ impl EventRepository {
         rows.into_iter().map(event_from_row).collect()
     }
 
-    /// Atomic first-value fill for a previously matched BiQuote occurrence. Keep the owning
-    /// provider/title/ID and the entire numeric tuple's source units. Never overwrite a value
-    /// obtained by another poll, a rescheduled occurrence or a terminal historical row.
+    /// Atomic first-value fill. Keep every existing ID/topic and the target comparison basis.
+    /// Verified source pairs may fill legacy duplicate rows without stealing their aliases.
     pub async fn fill_biquote_release(
         &self,
         expected: &EconomicEvent,
         source: &EconomicEvent,
     ) -> Result<bool, AppError> {
-        if source.provider != "biquote"
-            || source.actual.is_none()
-            || !source.time_exact
-            || !expected.time_exact
-            || source.country != expected.country
-            || source.event_time != expected.event_time
-        {
+        use crate::calendar::release_identity::verified_relation;
+        if source.provider != "biquote" || source.actual.is_none() {
             return Ok(false);
         }
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let owner = find_identity(&mut transaction, &source.provider, &source.provider_id).await?;
-        if owner.as_ref().is_some_and(|owner| owner.id != expected.id) {
-            return Ok(false);
-        }
-        if owner.is_none()
-            && !same_named_occurrence(expected, source)
-            && (expected.provider == source.provider
-                || occurrence_key(&expected.country, expected.event_time, &expected.event)
-                    != occurrence_key(&source.country, source.event_time, &source.event))
+        let current = sqlx::query("SELECT * FROM economic_event WHERE id=?")
+            .bind(expected.id)
+            .fetch_one(&mut *transaction)
+            .await?;
+        let current = event_from_row(current)?;
+        if current.provider != expected.provider
+            || current.provider_id != expected.provider_id
+            || current.country != expected.country
+            || current.event != expected.event
+            || current.event_time != expected.event_time
+            || current.actual.is_some()
+            || !current.time_exact
+            || !source.time_exact
+            || current.country != source.country
+            || current.event_time != source.event_time
         {
             return Ok(false);
         }
-        let result = sqlx::query(
-            "UPDATE economic_event SET actual=?,previous=?,consensus=?,forecast=?,unit=?,updated_at=?
-             WHERE id=? AND provider=? AND provider_id=? AND country=? AND event=?
-             AND julianday(event_time)=julianday(?) AND time_exact=1 AND actual IS NULL
-             AND status IN ('scheduled','watching','data_unavailable')",
+        let verified = verified_relation(&current, source);
+        if verified == Some(false) {
+            return Ok(false);
+        }
+        // Recheck all identity rules under the write lock, including generic matches.
+        let peers = sqlx::query(
+            "SELECT * FROM economic_event WHERE country=? AND julianday(event_time)=julianday(?)",
         )
-        .bind(source.actual.map(|v| v.to_string()))
-        .bind(source.previous.map(|v| v.to_string()))
-        .bind(source.consensus.map(|v| v.to_string()))
-        .bind(source.forecast.map(|v| v.to_string()))
-        .bind(&source.unit)
-        .bind(Utc::now().to_rfc3339())
-        .bind(expected.id).bind(&expected.provider).bind(&expected.provider_id)
-        .bind(&expected.country).bind(&expected.event).bind(expected.event_time.to_rfc3339())
-        .execute(&mut *transaction).await?;
-        let filled = result.rows_affected() == 1;
-        if filled {
+        .bind(&current.country)
+        .bind(current.event_time.to_rfc3339())
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .map(event_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+        if peers
+            .iter()
+            .filter(|peer| peer.provider == current.provider && same_occurrence(peer, source))
+            .count()
+            != 1
+        {
+            return Ok(false);
+        }
+        let owner = find_identity(&mut transaction, &source.provider, &source.provider_id).await?;
+        if owner.as_ref().is_some_and(|owner| owner.id != expected.id) && verified != Some(true) {
+            return Ok(false);
+        }
+        if owner.is_none() && !same_occurrence(&current, source) {
+            return Ok(false);
+        }
+        let actual = match release_value_for(&current, source, &peers) {
+            Ok(actual) => actual,
+            Err(reason) => {
+                tracing::debug!(
+                    event_id = current.id,
+                    ?reason,
+                    "BiQuote transactional fill skipped"
+                );
+                return Ok(false);
+            }
+        };
+        let now = Utc::now();
+        let mut metadata = current.release_metadata.clone();
+        if current.provider == source.provider && current.provider_id == source.provider_id {
+            metadata.period = metadata.period.or(source.release_metadata.period.clone());
+            metadata.series_id = metadata
+                .series_id
+                .or(source.release_metadata.series_id.clone());
+        }
+        metadata.actual_source = Some(source.provider.clone());
+        metadata.actual_source_id = Some(source.provider_id.clone());
+        metadata.actual_observed_at = Some(now);
+        let metadata = serde_json::to_string(&metadata)
+            .map_err(|_| AppError::Internal("cannot encode release metadata".into()))?;
+        let filled = sqlx::query("UPDATE economic_event SET actual=?,release_metadata=?,updated_at=?
+            WHERE id=? AND actual IS NULL AND status IN ('scheduled','watching','data_unavailable')")
+            .bind(actual.to_string()).bind(metadata).bind(now.to_rfc3339()).bind(current.id)
+            .execute(&mut *transaction).await?.rows_affected() == 1;
+        if filled && owner.is_none() {
             remember_identity(&mut transaction, source, expected.id).await?;
         }
         transaction.commit().await?;

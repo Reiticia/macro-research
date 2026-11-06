@@ -131,6 +131,8 @@ fn retry_after_seconds(headers: &reqwest::header::HeaderMap, now: DateTime<Utc>)
 #[serde(rename_all = "camelCase")]
 struct CalendarRow {
     id: String,
+    event_id: Option<String>,
+    period: Option<String>,
     time: DateTime<Utc>,
     country_code: String,
     currency: Option<String>,
@@ -177,6 +179,11 @@ impl CalendarRow {
             // `id` is an occurrence; `eventId` is a series and must NOT be the upsert key.
             provider_id: self.id,
             release_group_id: None,
+            release_metadata: crate::model::ReleaseMetadata {
+                period: self.period,
+                series_id: self.event_id,
+                ..Default::default()
+            },
             country: trading_view_country(&country_code)
                 .unwrap_or(&country_code)
                 .to_owned(),
@@ -254,6 +261,25 @@ fn display_unit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn monthly_period_and_series_are_not_discarded() {
+        let raw = r#"{"id":"mql5:268717","eventId":"mql5:840210001","name":"Michigan Consumer Sentiment","countryCode":"US","time":"2026-11-06T15:00:00Z","period":"2026-11-01T00:00:00Z","actual":51,"forecast":48.5,"previous":48,"unit":"none","multiplier":"none","timeMode":"exact"}"#;
+        let row: CalendarRow = serde_json::from_str(raw).unwrap();
+        let event = row
+            .into_event("2026-11-06T15:01:00Z".parse().unwrap())
+            .unwrap();
+        assert_eq!(
+            event.release_metadata.period.as_deref(),
+            Some("2026-11-01T00:00:00Z")
+        );
+        assert_eq!(
+            event.release_metadata.series_id.as_deref(),
+            Some("mql5:840210001")
+        );
+        assert_eq!(event.consensus.unwrap().to_string(), "48.5");
+        assert_eq!(event.previous.unwrap().to_string(), "48");
+    }
 
     #[test]
     fn retry_after_accepts_seconds_http_dates_and_safe_defaults() {

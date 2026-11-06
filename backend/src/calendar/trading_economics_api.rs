@@ -114,6 +114,7 @@ fn parse_event(row: &Value) -> Result<EconomicEvent, AppError> {
         provider: "trading_economics".into(),
         provider_id: required("CalendarId")?,
         release_group_id: None,
+        release_metadata: Default::default(),
         country: required("Country")?,
         currency: text(row, "Currency"),
         category: required("Category")?,

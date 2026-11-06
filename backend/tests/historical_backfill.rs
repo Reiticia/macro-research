@@ -39,6 +39,7 @@ impl CalendarProvider for Calendar {
                 provider: "fixture".into(),
                 provider_id: format!("{from}-{n}"),
                 release_group_id: None,
+                release_metadata: Default::default(),
                 country: "United States".into(),
                 currency: Some("USD".into()),
                 category: "inflation".into(),

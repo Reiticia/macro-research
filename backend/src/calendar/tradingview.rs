@@ -149,6 +149,11 @@ pub fn parse_events(json: &str, now: DateTime<Utc>) -> Result<Vec<EconomicEvent>
             provider: "trading_view".to_owned(),
             provider_id,
             release_group_id: None,
+            release_metadata: crate::model::ReleaseMetadata {
+                period: entry.get("period").and_then(scalar_text),
+                series_id: entry.get("ticker").and_then(scalar_text),
+                ..Default::default()
+            },
             country,
             currency: entry.get("currency").and_then(scalar_text),
             category: entry
@@ -336,6 +341,18 @@ mod tests {
         assert_eq!(unit_for("ISM Manufacturing PMI"), Some("index points"));
         assert_eq!(unit_for("New Home Sales"), Some("M"));
         assert_eq!(unit_for("Retail Sales MoM"), Some("%"));
+    }
+
+    #[test]
+    fn monthly_release_metadata_is_not_discarded() {
+        let raw = r#"{"status":"ok","result":[{"id":"1001652126805","title":"Michigan Consumer Sentiment Prel","country":"US","date":"2026-11-06T15:00:00Z","period":"Nov. 2026","actual":51,"forecast":48,"previous":46.3}]}"#;
+        let rows = parse_events(raw, "2026-11-06T15:01:00Z".parse().unwrap()).unwrap();
+        assert_eq!(
+            rows[0].release_metadata.period.as_deref(),
+            Some("Nov. 2026")
+        );
+        assert_eq!(rows[0].consensus.unwrap().to_string(), "48");
+        assert_eq!(rows[0].previous.unwrap().to_string(), "46.3");
     }
 
     #[test]

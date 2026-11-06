@@ -31,6 +31,7 @@ fn event(name: &str) -> EconomicEvent {
         provider: "fixture".into(),
         provider_id: format!("fixture-{name}"),
         release_group_id: None,
+        release_metadata: Default::default(),
         country: "United States".into(),
         currency: Some("USD".into()),
         category: "inflation".into(),

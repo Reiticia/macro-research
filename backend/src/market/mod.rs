@@ -516,6 +516,7 @@ mod tests {
                 provider: "fixture".into(),
                 provider_id: "selected-collection".into(),
                 release_group_id: None,
+                release_metadata: Default::default(),
                 country: "United States".into(),
                 currency: Some("USD".into()),
                 category: "employment".into(),

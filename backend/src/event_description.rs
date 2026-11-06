@@ -211,6 +211,7 @@ mod tests {
             provider: "test".into(),
             provider_id: "1".into(),
             release_group_id: None,
+            release_metadata: Default::default(),
             country: "United States".into(),
             currency: Some("USD".into()),
             category: category.into(),

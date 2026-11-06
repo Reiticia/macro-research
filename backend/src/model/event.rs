@@ -4,6 +4,17 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
+/// Optional, additive provenance. Old clients can continue reading the original event fields.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ReleaseMetadata {
+    pub period: Option<String>,
+    pub series_id: Option<String>,
+    pub actual_source: Option<String>,
+    pub actual_source_id: Option<String>,
+    pub actual_observed_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EconomicEvent {
@@ -11,6 +22,8 @@ pub struct EconomicEvent {
     pub provider: String,
     pub provider_id: String,
     pub release_group_id: Option<i64>,
+    #[serde(default)]
+    pub release_metadata: ReleaseMetadata,
     pub country: String,
     pub currency: Option<String>,
     pub category: String,

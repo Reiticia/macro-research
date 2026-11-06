@@ -137,9 +137,13 @@ async fn polls_every_two_seconds_independent_of_slow_primary_and_stops_after_act
     let stored = app.state.events.get(event.id).await.unwrap();
     assert_eq!(stored.provider, "trading_view");
     assert_eq!(stored.provider_id, event.provider_id);
-    assert_eq!(stored.unit, source.unit);
-    assert_eq!(stored.consensus, source.consensus);
-    assert_eq!(stored.previous, source.previous);
+    assert_eq!(stored.unit, event.unit);
+    assert_eq!(stored.consensus, event.consensus);
+    assert_eq!(stored.previous, event.previous);
+    assert_eq!(
+        stored.release_metadata.actual_source.as_deref(),
+        Some("biquote")
+    );
     assert_eq!(
         app.state.events.observations(event.id).await.unwrap().len(),
         1
@@ -295,7 +299,7 @@ async fn rejects_wrong_identity_time_country_ambiguous_and_conflicting_values() 
 }
 
 #[tokio::test]
-async fn accepts_cached_chinese_known_alias_and_legacy_utc_timestamp_without_model_calls() {
+async fn translations_and_unverified_aliases_cannot_authorize_fills_but_legacy_timestamps_work() {
     for scenario in ["chinese", "alias", "timestamp_z"] {
         let mut app = app().await;
         let mut event = missing_event(&app).await;
@@ -342,6 +346,26 @@ async fn accepts_cached_chinese_known_alias_and_legacy_utc_timestamp_without_mod
         let calls = use_feed(&mut app, vec![source], 1);
         let mut receiver = app.state.event_bus.subscribe();
         let task = tokio::spawn(biquote_release_loop(app.state.clone()));
+        if scenario != "timestamp_z" {
+            assert!(
+                tokio::time::timeout(StdDuration::from_millis(250), receiver.recv())
+                    .await
+                    .is_err()
+            );
+            task.abort();
+            assert!(!calls.lock().unwrap().is_empty(), "{scenario}");
+            assert!(
+                app.state
+                    .events
+                    .get(event.id)
+                    .await
+                    .unwrap()
+                    .actual
+                    .is_none(),
+                "{scenario}"
+            );
+            continue;
+        }
         tokio::time::timeout(StdDuration::from_secs(3), receiver.recv())
             .await
             .unwrap()
@@ -393,7 +417,7 @@ async fn late_fill_does_not_overwrite_another_value_or_rescheduled_occurrence_an
         .unwrap();
     let stored = app.state.events.get(event.id).await.unwrap();
     assert_eq!(stored.actual, source.actual);
-    assert_eq!(stored.unit, source.unit);
+    assert_eq!(stored.unit, event.unit);
     let mut renamed_empty = event.clone();
     renamed_empty.event = "Nonfarm Payrolls Revised Label".into();
     app.state

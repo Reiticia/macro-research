@@ -20,6 +20,7 @@ async fn archived_unit_recovery_is_metadata_only_and_requires_matching_values() 
         provider: "trading_view".into(),
         provider_id: "unit-recovery".into(),
         release_group_id: None,
+        release_metadata: Default::default(),
         country: "United States".into(),
         currency: Some("USD".into()),
         category: "Initial Jobless Claims".into(),

@@ -92,8 +92,8 @@ pub fn normalized_event_name(value: &str) -> String {
         .collect()
 }
 
-/// Exact country + exact instant, then normalized English OR a nonblank, identical Chinese name.
-/// Chinese text is compared verbatim (including punctuation and whitespace); no guessed aliases.
+/// Exact country + exact instant, then a verified source rule or normalized English.
+/// Translations (including AI-reviewed translations) are display text, never identity evidence.
 pub fn same_named_occurrence(
     left: &crate::model::EconomicEvent,
     right: &crate::model::EconomicEvent,
@@ -105,20 +105,31 @@ pub fn same_named_occurrence(
     {
         return false;
     }
-    let english = normalized_event_name(&left.event);
-    if !english.is_empty() && english == normalized_event_name(&right.event) {
-        return true;
+    if let Some(result) = super::release_identity::verified_relation(left, right) {
+        return result;
     }
-    [left.event_zh_cn.as_deref(), left.event_zh_tw.as_deref()]
-        .into_iter()
-        .flatten()
-        .filter(|s| !s.trim().is_empty())
-        .any(|name| {
-            [right.event_zh_cn.as_deref(), right.event_zh_tw.as_deref()]
-                .into_iter()
-                .flatten()
-                .any(|other| !other.trim().is_empty() && name == other)
-        })
+    let english = normalized_event_name(&left.event);
+    !english.is_empty() && english == normalized_event_name(&right.event)
+}
+
+/// Shared identity predicate for ingest, regular monitoring and the fast release poll.
+/// A source-specific veto must never be bypassed by a generic name/translation alias.
+pub fn same_occurrence(
+    left: &crate::model::EconomicEvent,
+    right: &crate::model::EconomicEvent,
+) -> bool {
+    if let Some(result) = super::release_identity::verified_relation(left, right) {
+        return result;
+    }
+    same_named_occurrence(left, right)
+        || (left.time_exact
+            && right.time_exact
+            && left.provider != right.provider
+            && !occurrence_key(&left.country, left.event_time, &left.event)
+                .2
+                .is_empty()
+            && occurrence_key(&left.country, left.event_time, &left.event)
+                == occurrence_key(&right.country, right.event_time, &right.event))
 }
 
 /// Distinct nonmissing Actuals in one same-priority duplicate batch are not a revision order.

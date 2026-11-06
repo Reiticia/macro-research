@@ -2,6 +2,7 @@ mod biquote;
 mod forex_factory;
 pub mod parse;
 mod provider;
+pub mod release_identity;
 pub mod trading_economics;
 pub mod trading_economics_api;
 mod tradingview;
@@ -13,7 +14,7 @@ pub use trading_economics::TradingEconomicsProvider;
 pub use trading_economics_api::TradingEconomicsApiProvider;
 pub use tradingview::TradingViewProvider;
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 
@@ -258,34 +259,20 @@ impl CalendarService {
 /// (country + exact instant + canonical title) and that row actually carries a value. Names,
 /// ids and corrected translations are preserved and no row is ever deleted.
 pub fn fill_missing_values(fallback: &mut [EconomicEvent], sources: &[EconomicEvent]) {
-    let mut by_occurrence: HashMap<(String, DateTime<Utc>, String), Vec<&EconomicEvent>> =
-        HashMap::new();
-    for event in sources {
-        if !matches!(event.provider.as_str(), "biquote" | "trading_view")
-            || event.actual.is_none()
-            || !event.time_exact
-        {
-            continue;
-        }
-        by_occurrence
-            .entry(parse::occurrence_key(
-                &event.country,
-                event.event_time,
-                &event.event,
-            ))
-            .or_default()
-            .push(event);
-    }
+    // Include empty-valued rows and all phases when checking ambiguity.
+    let mut peers = sources.to_vec();
+    peers.extend_from_slice(fallback);
     for target in fallback.iter_mut() {
         if target.provider != "forex_factory" || target.actual.is_some() || !target.time_exact {
             continue;
         }
-        let key = parse::occurrence_key(&target.country, target.event_time, &target.event);
-        // Ambiguity leaves the row untouched: a wrong alias would attach another
-        // indicator's value to it.
-        let Some(matcher) = by_occurrence.get(&key) else {
-            continue;
-        };
+        let matcher: Vec<_> = sources
+            .iter()
+            .filter(|source| {
+                matches!(source.provider.as_str(), "biquote" | "trading_view")
+                    && parse::same_occurrence(target, source)
+            })
+            .collect();
         let best = matcher
             .iter()
             .map(|e| parse::provider_priority(&e.provider))
@@ -299,11 +286,15 @@ pub fn fill_missing_values(fallback: &mut [EconomicEvent], sources: &[EconomicEv
         if candidates.next().is_some() {
             continue;
         }
-        target.actual = source.actual;
-        target.previous = source.previous;
-        target.consensus = source.consensus;
-        target.forecast = source.forecast;
-        target.unit = source.unit.clone();
+        let actual = match release_identity::release_value_for(target, source, &peers) {
+            Ok(actual) => actual,
+            Err(reason) => {
+                tracing::debug!(?reason, event=%target.event, "weekly release fill skipped");
+                continue;
+            }
+        };
+        target.actual = Some(actual);
+        release_identity::inherit_actual_provenance(target, source);
         target.status = if source.status == EventStatus::Historical {
             EventStatus::Historical
         } else {
@@ -325,6 +316,7 @@ mod tests {
             provider: provider.to_owned(),
             provider_id: format!("{provider}|{event}"),
             release_group_id: None,
+            release_metadata: Default::default(),
             country: country.to_owned(),
             currency: Some("USD".into()),
             category: event.to_owned(),
