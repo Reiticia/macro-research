@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.3.4",
+  "notes": {
+    "en": {
+      "client": [
+        "Economic release notifications now use a monochrome market-trend icon matching the app instead of the generic system information icon. Update the app to see the new icon on new notifications."
+      ],
+      "backend": [
+        "During the release window, an independent task polls BiQuote every two seconds for monitored exact-time events missing an actual value, without waiting for TradingView. Simultaneous releases share a request; polling stops when the value arrives or the configured timeout is reached (30 minutes by default). Slow responses and upstream rate limits can extend the interval; this does not guarantee immediate upstream publication.",
+        "Release values are matched strictly to the corresponding event. HTTP 429 Retry-After is respected, late empty primary responses cannot erase an acquired value, and concurrent monitors do not send duplicate release notifications.",
+        "Deploy and restart the updated backend to enable faster release polling. Existing configuration is reused with no new required settings or database migration; the client can be updated independently for the icon fix."
+      ]
+    },
+    "zh-CN": {
+      "client": [
+        "经济数据公布通知改用与应用风格一致的单色行情折线图标，替换系统默认的圆圈 i；更新客户端后，新通知即可使用。"
+      ],
+      "backend": [
+        "公布窗口内，对符合监控条件、时间精确且缺少公布值的事件，独立任务每 2 秒轮询 BiQuote，不再等待 TradingView。同一时刻事件合并请求，取得数值或达到现有等待上限后停止（默认 30 分钟）；慢响应和上游限流可能延长周期，不保证上游即时发布。",
+        "严格匹配对应事件，遵守 HTTP 429 的 Retry-After；主源迟到的空值不再清除已获取的公布值，并避免两个监控任务重复发送公布通知。",
+        "快速轮询需部署并重启新版后端，复用已有配置，无新增必填项或数据库迁移；通知图标修正可单独更新客户端。"
+      ]
+    },
+    "zh-TW": {
+      "client": [
+        "經濟數據公布通知改用與應用程式風格一致的單色行情折線圖示，取代系統預設的圓圈 i；更新用戶端後，新通知即可使用。"
+      ],
+      "backend": [
+        "公布視窗內，針對符合監控條件、時間精確且缺少公布值的事件，獨立工作每 2 秒輪詢 BiQuote，不再等待 TradingView。同一時刻事件合併請求，取得數值或達到既有等待上限後停止（預設 30 分鐘）；慢回應和上游限流可能延長週期，不保證上游即時發布。",
+        "嚴格比對對應事件，遵守 HTTP 429 的 Retry-After；主來源延遲傳回的空值不再清除已取得的公布值，並避免兩個監控工作重複傳送公布通知。",
+        "快速輪詢需部署並重新啟動新版後端，沿用既有設定，無新增必填項目或資料庫遷移；通知圖示修正可單獨更新用戶端。"
+      ]
+    }
+  }
+}
