@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.3.3",
+  "notes": {
+    "en": {
+      "client": [
+        "In backend mode, news headlines now use shared server translations in English, Simplified Chinese and Traditional Chinese, following the app language without a personal AI key.",
+        "Server headline translations are enabled by default for new preferences; existing display choices are preserved. You can switch back to original headlines, and search matches both original and translated titles.",
+        "Direct mode, older servers and headlines without a ready translation keep the original title and never fall back to your personal model. Summaries and article bodies remain unchanged; news AI research and follow-up questions still use your personal AI settings."
+      ],
+      "backend": [
+        "A background worker prepares and caches shared three-language news headlines using the server translation settings. It processes at most five headlines per minute with bounded retries; failures do not block original news. Model costs are charged to the server account.",
+        "Administrators can use Telegram /version to check the deployed full GitHub commit hash, process start time in UTC and uptime.",
+        "Upgrade both the client and backend to use server headline translations. Backend startup automatically applies migration 028; back up the database before deployment. Existing enabled server translation settings can be reused without new required settings."
+      ]
+    },
+    "zh-CN": {
+      "client": [
+        "后端模式的新闻标题改用服务端共享译文，支持英语、简体中文和繁体中文，跟随应用语言，无需个人 AI Key。",
+        "首次使用默认显示服务端译文，保留已有的手动开关选择；可切回原标题，搜索同时匹配原文和译文。",
+        "直连模式、旧服务器或译文未就绪时保留原标题，不回退个人模型。摘要和正文不变，新闻 AI 研究与追问仍使用个人 AI 配置。"
+      ],
+      "backend": [
+        "后台复用服务端翻译配置生成并缓存三语新闻标题，每分钟最多处理 5 条，失败有界重试且不影响原文阅读；模型费用由服务端账户承担。",
+        "管理员可通过 Telegram /version 查询当前部署的完整 GitHub 提交 hash、UTC 启动时间和运行时长。",
+        "服务端标题翻译需同时升级客户端与后端。后端启动自动执行迁移 028，部署前请备份数据库；已有启用的服务端翻译配置可直接复用，无新增必填配置。"
+      ]
+    },
+    "zh-TW": {
+      "client": [
+        "後端模式的新聞標題改用伺服器共享譯文，支援英語、簡體中文和繁體中文，跟隨應用程式語言，無需個人 AI Key。",
+        "首次使用預設顯示伺服器譯文，保留既有的手動開關選擇；可切回原始標題，搜尋同時比對原文和譯文。",
+        "直連模式、舊伺服器或譯文尚未就緒時保留原始標題，不回退個人模型。摘要和內文不變，新聞 AI 研究與追問仍使用個人 AI 設定。"
+      ],
+      "backend": [
+        "背景工作沿用伺服器翻譯設定產生並快取三語新聞標題，每分鐘最多處理 5 則，失敗採有限重試且不影響原文閱讀；模型費用由伺服器帳戶承擔。",
+        "管理員可透過 Telegram /version 查詢目前部署的完整 GitHub 提交 hash、UTC 啟動時間和執行時長。",
+        "伺服器標題翻譯需同時升級用戶端與後端。後端啟動時自動執行遷移 028，部署前請備份資料庫；既有已啟用的伺服器翻譯設定可直接沿用，無新增必填設定。"
+      ]
+    }
+  }
+}
