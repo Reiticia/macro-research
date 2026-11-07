@@ -16,7 +16,7 @@ fn today() -> NaiveDate {
     Utc::now().with_timezone(&New_York).date_naive()
 }
 
-fn admin_chat(state: &BotState, message: &Value, sender: &Value) -> Option<i64> {
+pub(super) fn admin_chat(state: &BotState, message: &Value, sender: &Value) -> Option<i64> {
     let chat = message.get("chat")?;
     let id = chat.get("id")?.as_i64()?;
     (chat.get("type")?.as_str()? == "private"
@@ -44,7 +44,7 @@ pub(super) fn buttons(date: NaiveDate, symbol: &str) -> Vec<Vec<InlineButton>> {
     ]
 }
 
-const USAGE: &str = "用法：/test_earnings_api [YYYY-MM-DD] [股票代码]\n默认纽约今天、AAPL。日期范围为今天前120天至后60天；TradingView 只测试今天及未来的下一期预测。\n例：/test_earnings_api 2026-11-02 AAPL";
+const USAGE: &str = "用法：/test_api [YYYY-MM-DD] [股票代码]\n财报/Logo 默认纽约今天、AAPL；日期和股票参数不影响行情/宏观日历测试。日期范围为今天前120天至后60天；TradingView 财报只测试今天及未来的下一期预测。\n例：/test_api 2026-11-02 AAPL";
 
 fn parse_date(value: &str) -> Result<NaiveDate, &'static str> {
     let date = NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| USAGE)?;
@@ -54,48 +54,18 @@ fn parse_date(value: &str) -> Result<NaiveDate, &'static str> {
     Ok(date)
 }
 
-pub(super) async fn message(state: &BotState, message: &Value) -> Result<bool, AppError> {
-    let text = message
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim();
-    let mut words = text.split_whitespace();
-    if words.next().unwrap_or_default().split('@').next() != Some("/test_earnings_api") {
-        return Ok(false);
+/// Shared target parser for the unified command and menu navigation callbacks.
+pub(super) fn parse_target(args: &[&str]) -> Result<(NaiveDate, String), &'static str> {
+    if args.len() > 2 {
+        return Err(USAGE);
     }
-    let Some(chat_id) = admin_chat(state, message, &message["from"]) else {
-        return Ok(true);
-    };
-    let args: Vec<_> = words.take(3).collect();
-    let parsed = (|| {
-        if text.len() > 180 || args.len() > 2 {
-            return Err(USAGE);
-        }
-        let date = args
-            .first()
-            .map(|value| parse_date(value))
-            .transpose()?
-            .unwrap_or_else(today);
-        let symbol = normalize_symbol(args.get(1).copied().unwrap_or("AAPL")).ok_or(USAGE)?;
-        Ok((date, symbol))
-    })();
-    match parsed {
-        Ok((date, symbol)) => {
-            let text = format!(
-                "<b>财报 API 分源测试</b>\n纽约日期：{date}\n股票代码：{}\n每次只测试所选上游，不使用缓存或备用源判定成功。\n同源同日期至少间隔60秒；Logo 测试全局至少间隔60秒，并共享生产限流冷却。",
-                escape(&symbol)
-            );
-            state
-                .telegram
-                .send_message(chat_id, &text, Some(buttons(date, &symbol)))
-                .await?;
-        }
-        Err(usage) => {
-            state.telegram.send_message(chat_id, usage, None).await?;
-        }
-    }
-    Ok(true)
+    let date = args
+        .first()
+        .map(|value| parse_date(value))
+        .transpose()?
+        .unwrap_or_else(today);
+    let symbol = normalize_symbol(args.get(1).copied().unwrap_or("AAPL")).ok_or(USAGE)?;
+    Ok((date, symbol))
 }
 
 pub(super) async fn callback(state: &BotState, callback: &Value) -> Result<bool, AppError> {
@@ -127,7 +97,7 @@ pub(super) async fn callback(state: &BotState, callback: &Value) -> Result<bool,
     let Ok((source, date, symbol)) = parsed else {
         state
             .telegram
-            .answer_callback(id, "测试参数无效或已过期，请重新发送 /test_earnings_api")
+            .answer_callback(id, "测试参数无效或已过期，请重新发送 /test_api")
             .await?;
         return Ok(true);
     };
@@ -191,9 +161,14 @@ pub(super) async fn callback(state: &BotState, callback: &Value) -> Result<bool,
         escape(&symbol)
     );
     if let Some(message_id) = callback["message"]["message_id"].as_i64() {
+        let mut keyboard = buttons(date, &symbol);
+        keyboard.push(vec![InlineButton {
+            text: "← 返回 API 菜单".into(),
+            callback_data: format!("api_menu:{date}:{symbol}"),
+        }]);
         state
             .telegram
-            .edit_message(chat_id, message_id, &text, Some(buttons(date, &symbol)))
+            .edit_message(chat_id, message_id, &text, Some(keyboard))
             .await?;
     } else {
         state.telegram.send_message(chat_id, &text, None).await?;

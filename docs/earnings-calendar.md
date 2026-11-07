@@ -116,7 +116,7 @@ GET /api/v1/earnings?date=2026-11-02&refresh=true
 
 ## Telegram 财报 API 诊断
 
-管理员私聊发送 `/test_earnings_api [YYYY-MM-DD] [股票代码]`，默认纽约今天与 `AAPL`，通过按钮分别测试 Nasdaq 财报、TradingView 财报和公司 Logo。也可以从原 `/test_calendar_api` 菜单进入默认财报测试；新命令已加入机器人命令菜单与 `/help`。
+管理员私聊发送 `/test_api [YYYY-MM-DD] [股票代码]`，默认纽约今天与 `AAPL`，在统一菜单的行情、宏观日历按钮之后选择 Nasdaq 财报、TradingView 财报或公司 Logo；测完可点「返回 API 菜单」。菜单只展示按钮，不会因为打开菜单而请求任何上游；日期/股票参数不影响行情和宏观日历测试。旧 `/test_earnings_api` 与 `/test_calendar_api` 仍可打开同一菜单，但命令列表与 `/help` 只发布 `/test_api`。
 
 - 日期支持纽约今天前 120 天至后 60 天，股票代码只接受经过校验的代码，不接受 URL 或路径。TradingView 仅测试今天及未来的下一期快照，历史日期不会发起请求。
 - 使用运行中的同一个 `EarningsService` / `CompanyLogoService`，因此代理路由、请求串行化及 403/429 冷却与生产请求一致，不额外创建能绕过冷却的诊断客户端。Nasdaq/TradingView 同源同日期测试至少间隔 60 秒；Logo 测试全局至少间隔 60 秒，间隔记录在缓存目录 `probe.json`，重启仍保留。

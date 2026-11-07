@@ -49,7 +49,7 @@ fallback_url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
 缺少新字段时自动使用 BiQuote 默认备用地址；TradingView 仍为主源。旧 `primary_url` 作为 `tradingview_url` 的兼容别名，
 **不能同时填写这两个名字**。无需改动现有密钥配置。后端代理名单中加入 `biquote` 可代理
-BiQuote 日历和行情；默认直连。Telegram `/test_calendar_api` 新增 BiQuote 备用源检测按钮。
+BiQuote 日历和行情；默认直连。Telegram `/test_api` 的宏观日历分组包含 BiQuote 备用源检测按钮。
 健康键为 `calendar.primary`（TradingView）、`calendar.biquote`、`calendar.fallback`。
 
 Android 日历使用设置中的日历代理，各源独立记录熔断和 Retry-After；升级后旧 TradingView

@@ -151,9 +151,9 @@ async fn set_reply(
 }
 
 #[tokio::test]
-async fn earnings_tests_are_in_calendar_menu_help_and_admin_command_menu() {
+async fn earnings_tests_are_in_unified_menu_help_and_admin_command_menu() {
     let (telegram, state, upstream, _cache, date) = setup().await;
-    for command in ["/help", "/test_calendar_api", "/test_earnings_api@our_bot"] {
+    for command in ["/help", "/test_api", "/test_earnings_api@our_bot"] {
         handle_update(&state, &message(42, command)).await.unwrap();
     }
     state.telegram.set_admin_commands(&[42]).await.unwrap();
@@ -162,7 +162,7 @@ async fn earnings_tests_are_in_calendar_menu_help_and_admin_command_menu() {
         requests[0].1["text"]
             .as_str()
             .unwrap()
-            .contains("/test_earnings_api")
+            .contains("/test_api")
     );
     for index in [1, 2] {
         let keyboard = requests[index].1["reply_markup"]["inline_keyboard"].to_string();
@@ -175,7 +175,7 @@ async fn earnings_tests_are_in_calendar_menu_help_and_admin_command_menu() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|c| c["command"] == "test_earnings_api")
+            .any(|c| c["command"] == "test_api")
     );
     assert!(upstream.state.requests.lock().await.is_empty());
 }
@@ -184,12 +184,9 @@ async fn earnings_tests_are_in_calendar_menu_help_and_admin_command_menu() {
 async fn commands_normalize_symbols_and_bound_callback_lengths() {
     let (telegram, state, upstream, _cache, date) = setup().await;
     for symbol in ["brk.b", "A1234567890123456789012345678901"] {
-        handle_update(
-            &state,
-            &message(42, &format!("/test_earnings_api {date} {symbol}")),
-        )
-        .await
-        .unwrap();
+        handle_update(&state, &message(42, &format!("/test_api {date} {symbol}")))
+            .await
+            .unwrap();
         let requests = telegram.requests.lock().await;
         let keyboard = requests.last().unwrap().1["reply_markup"]["inline_keyboard"]
             .as_array()
@@ -198,7 +195,9 @@ async fn commands_normalize_symbols_and_bound_callback_lengths() {
             for button in row.as_array().unwrap() {
                 let data = button["callback_data"].as_str().unwrap();
                 assert!(data.len() <= 64);
-                assert!(data.ends_with(&symbol.to_ascii_uppercase()));
+                if data.starts_with("earnprobe:") {
+                    assert!(data.ends_with(&symbol.to_ascii_uppercase()));
+                }
             }
         }
     }

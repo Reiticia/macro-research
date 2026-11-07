@@ -1,3 +1,4 @@
+mod api_test_commands;
 pub mod bot;
 mod earnings_commands;
 mod event_commands;

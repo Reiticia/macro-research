@@ -22,8 +22,8 @@ use crate::{
 
 /// Telegram long-polling loop: the admin console for the server.
 ///
-/// It answers `/version`, `/status`, `/usage`, `/notifications` and `/help`, and resolves buttons attached to
-/// translation review. Admin operations require whitelisted chats; private key applications
+/// It answers `/version`, `/status`, `/usage`, `/notifications`, `/test_api` and `/help`,
+/// and resolves buttons attached to diagnostics and translation review. Admin operations require whitelisted chats; private key applications
 /// and own-key records are also available to ordinary users.
 pub struct BotState {
     /// Captured at entry to main, not when Telegram polling starts.
@@ -101,6 +101,7 @@ async fn handle_update(state: &BotState, update: &Value) -> Result<(), crate::er
 
 async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate::error::AppError> {
     if super::key_commands::callback(state, callback).await?
+        || super::api_test_commands::callback(state, callback).await?
         || super::earnings_commands::callback(state, callback).await?
     {
         return Ok(());
@@ -129,6 +130,12 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
         return Ok(());
     };
     if let Some((action, module)) = data.split_once(':') {
+        if matches!(action, "apitest" | "apiprobe")
+            && super::earnings_commands::admin_chat(state, &callback["message"], &callback["from"])
+                .is_none()
+        {
+            return Ok(());
+        }
         match action {
             "notify" => {
                 let Some((key, value)) = module.split_once(':') else {
@@ -164,7 +171,7 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
                 return Ok(());
             }
             "apitest" => {
-                let buttons = api_symbol_buttons(module);
+                let mut buttons = api_symbol_buttons(module);
                 if buttons.is_empty() {
                     if !matches!(
                         module,
@@ -196,11 +203,17 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
                     if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
                         state
                             .telegram
-                            .edit_message(chat_id, message_id, &text, None)
+                            .edit_message(
+                                chat_id,
+                                message_id,
+                                &text,
+                                Some(super::api_test_commands::back_buttons()),
+                            )
                             .await?;
                     }
                     return Ok(());
                 }
+                buttons.extend(super::api_test_commands::back_buttons());
                 state
                     .telegram
                     .answer_callback(callback_id, "请选择测试标的")
@@ -220,6 +233,22 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
             }
             "apiprobe" => {
                 let (provider, symbol) = module.split_once(':').unwrap_or((module, ""));
+                if data.len() > 64
+                    || !api_symbol_buttons(provider)
+                        .iter()
+                        .flatten()
+                        .any(|button| button.callback_data == data)
+                {
+                    state
+                        .telegram
+                        .answer_callback(callback_id, "无效的 API 或标的，请重新发送 /test_api")
+                        .await?;
+                    return Ok(());
+                }
+                state
+                    .telegram
+                    .answer_callback(callback_id, "正在测试行情 API…")
+                    .await?;
                 let result = test_market_api(state, provider, symbol).await;
                 let label = api_label(provider);
                 let text = match result {
@@ -231,11 +260,15 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
                         crate::alert::telegram::escape(&error)
                     ),
                 };
-                state.telegram.answer_callback(callback_id, &text).await?;
                 if let (Some(chat_id), Some(message_id)) = (chat_id, message_id) {
                     state
                         .telegram
-                        .edit_message(chat_id, message_id, &text, None)
+                        .edit_message(
+                            chat_id,
+                            message_id,
+                            &text,
+                            Some(super::api_test_commands::back_buttons()),
+                        )
                         .await?;
                 }
                 return Ok(());
@@ -298,7 +331,7 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
 
 async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::error::AppError> {
     if super::key_commands::message(state, message).await?
-        || super::earnings_commands::message(state, message).await?
+        || super::api_test_commands::message(state, message).await?
     {
         return Ok(());
     }
@@ -331,23 +364,6 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
         }
         "/events" => super::event_commands::list(state, text).await?,
         "/test_fcm" => test_fcm(state, text).await?,
-        "/test_market_api" => {
-            state.telegram.send_message(chat_id, "请选择要测试的行情 API：", Some(vec![
-                vec![InlineButton { text: "Yahoo Finance".into(), callback_data: "apitest:yahoo".into() }, InlineButton { text: "BiQuote".into(), callback_data: "apitest:biquote".into() }],
-                vec![InlineButton { text: "Binance".into(), callback_data: "apitest:binance".into() }, InlineButton { text: "CNBC".into(), callback_data: "apitest:cnbc".into() }],
-            ])).await?;
-            return Ok(());
-        }
-        "/test_calendar_api" => {
-            let mut buttons = vec![
-                vec![InlineButton { text: "BiQuote（备用源）".into(), callback_data: "apitest:biquote_calendar".into() }],
-                vec![InlineButton { text: "TradingView（宏观主源）".into(), callback_data: "apitest:tradingview".into() }, InlineButton { text: "Forex Factory".into(), callback_data: "apitest:forexfactory".into() }],
-                vec![InlineButton { text: "Trading Economics 页面".into(), callback_data: "apitest:tradingeconomics".into() }, InlineButton { text: "Trading Economics API".into(), callback_data: "apitest:te_api".into() }],
-            ];
-            buttons.extend(super::earnings_commands::buttons(chrono::Utc::now().with_timezone(&chrono_tz::America::New_York).date_naive(), "AAPL"));
-            state.telegram.send_message(chat_id, "请选择宏观/财报日历源。财报默认纽约今天、AAPL；用 /test_earnings_api 日期 股票代码 可指定诊断目标。", Some(buttons)).await?;
-            return Ok(());
-        }
         "/test_ai" => {
             state.telegram.send_message(chat_id, "请选择要测试的 AI 模块：", Some(vec![
                 vec![InlineButton { text: "事件名翻译".into(), callback_data: "aitest:translation".into() }],
@@ -371,7 +387,7 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
             return Ok(());
         }
         "/help" | "/start" => {
-            "可用命令：\n/version — 查看部署提交、启动时间和运行时长\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/events [关键词] — 查询事件 ID、名称和公布时间\n/test_fcm [事件ID] — 验证 FCM；指定 ID 向关注者发送测试通知\n/test_ai — 测试 AI 接口可用性\n/test_market_api — 测试行情 API 连通性\n/test_calendar_api — 测试宏观/财报日历源\n/test_earnings_api [日期] [股票代码] — 独立测试财报源及实时 Logo\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
+            "可用命令：\n/version — 查看部署提交、启动时间和运行时长\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/events [关键词] — 查询事件 ID、名称和公布时间\n/test_fcm [事件ID] — 验证 FCM；指定 ID 向关注者发送测试通知\n/test_ai — 测试 AI 接口可用性\n/test_api [日期] [股票代码] — 按钮选择行情、宏观日历、财报或 Logo API\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
         }
         _ => return Ok(()),
     };
@@ -784,3 +800,7 @@ async fn write_offset(pool: &SqlitePool, offset: i64) -> Result<(), crate::error
         .await?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "bot_api_tests.rs"]
+mod api_tests;
