@@ -43,6 +43,7 @@ jobs:
       - name: 自动部署及发行版本回归测试
         run: |
           bash backend/deploy/test-auto-deploy.sh
+          bash backend/deploy/test-upload-artifact.sh
           bash backend/scripts/test-release-version.sh
 
       - name: 代码格式检查

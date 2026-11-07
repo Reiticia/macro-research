@@ -27,7 +27,8 @@ jobs:
     # Never expose deployment credentials to PRs, tags, or other branches.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Upload has its own deadline; reserve time for backup and process observation.
+    timeout-minutes: 35
     env:
       DEPLOY_HOST: ${{ secrets.BACKEND_DEPLOY_HOST }}
       DEPLOY_PORT: ${{ secrets.BACKEND_DEPLOY_PORT || '22' }}
@@ -36,13 +37,14 @@ jobs:
       OBSERVE_SECONDS: ${{ vars.BACKEND_DEPLOY_OBSERVE_SECONDS || '60' }}
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 2
 
       - name: 跳过已过期的构建
         id: current
         shell: bash
         run: |
           set -euo pipefail
-          latest="$(git ls-remote origin refs/heads/main | cut -f1)"
+          latest="$(timeout --kill-after=10s 45s git ls-remote origin refs/heads/main | cut -f1)"
           if [[ "$latest" == "$GITHUB_SHA" ]]; then
             echo "proceed=true" >> "$GITHUB_OUTPUT"
           else
@@ -78,9 +80,9 @@ jobs:
         run: |
           set -euo pipefail
           expected="$(sha256sum backend/config.example.toml | cut -d' ' -f1)"
-          baseline="$(ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
+          baseline="$(timeout --kill-after=10s 45s ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
             -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
-            -o ConnectTimeout=15 "$DEPLOY_USER@$DEPLOY_HOST" \
+            -o ConnectTimeout=15 -o IdentitiesOnly=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "$DEPLOY_USER@$DEPLOY_HOST" \
             'if test -f /root/macro-research/.deploy-config-example.sha256; then cat /root/macro-research/.deploy-config-example.sha256; fi')"
           echo "template_hash=$expected" >> "$GITHUB_OUTPUT"
           if [[ "$baseline" == "$expected" ]]; then
@@ -93,46 +95,99 @@ jobs:
 
       - uses: actions/download-artifact@v4
         if: steps.config.outputs.proceed == 'true'
+        timeout-minutes: 3
         with:
           name: market-event-analyzer-x86_64-unknown-linux-gnu
           path: dist
 
-      - name: 校验并上传本次构建产物
-        id: upload
+      - name: 校验本地产物并记录大小
+        id: package
         if: steps.config.outputs.proceed == 'true'
+        timeout-minutes: 2
         shell: bash
         run: |
           set -euo pipefail
+          started=$SECONDS
           shopt -s nullglob
           archives=(dist/*-x86_64-unknown-linux-gnu.tar.gz)
           [[ ${#archives[@]} -eq 1 ]] || { echo '::error::未找到唯一的后端构建产物'; exit 1; }
           archive="${archives[0]}"
           (cd dist && sha256sum -c "$(basename "$archive").sha256")
           archive_hash="$(sha256sum "$archive" | cut -d' ' -f1)"
-          remote_dir="$(ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
-            -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
-            -o ConnectTimeout=15 "$DEPLOY_USER@$DEPLOY_HOST" \
+          script_hash="$(sha256sum backend/deploy/auto-deploy.sh | cut -d' ' -f1)"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "archive_hash=$archive_hash" >> "$GITHUB_OUTPUT"
+          echo "script_hash=$script_hash" >> "$GITHUB_OUTPUT"
+          echo "本地校验完成：$(stat -c %s "$archive") bytes，耗时 $((SECONDS - started))s"
+          printf '### 本地产物校验通过\n\n- 包大小：%s bytes\n- 耗时：%ss\n- SHA256：`%s`\n' \
+            "$(stat -c %s "$archive")" "$((SECONDS - started))" "$archive_hash" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 创建服务器临时目录（60 秒上限）
+        id: staging
+        if: steps.config.outputs.proceed == 'true'
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          started=$SECONDS
+          echo '开始 SSH 连接并创建临时目录（尚未停服）'
+          remote_dir="$(timeout --kill-after=10s 60s ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "$DEPLOY_USER@$DEPLOY_HOST" \
             'mktemp -d /tmp/macro-research-deploy.XXXXXXXX')"
           [[ "$remote_dir" =~ ^/tmp/macro-research-deploy\.[a-zA-Z0-9]+$ ]] || { echo '::error::服务器临时目录不合法'; exit 1; }
           echo "remote_dir=$remote_dir" >> "$GITHUB_OUTPUT"
-          echo "archive_hash=$archive_hash" >> "$GITHUB_OUTPUT"
-          scp_host="$DEPLOY_HOST"
-          [[ "$scp_host" != *:* ]] || scp_host="[$scp_host]"
-          scp_options=(-i "$SSH_DIR/key" -P "$DEPLOY_PORT" -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" -o ConnectTimeout=15)
-          scp "${scp_options[@]}" "$archive" "$DEPLOY_USER@$scp_host:$remote_dir/release.tar.gz"
-          scp "${scp_options[@]}" backend/deploy/auto-deploy.sh "$DEPLOY_USER@$scp_host:$remote_dir/auto-deploy.sh"
+          echo "临时目录创建完成，耗时 $((SECONDS - started))s"
+
+      - name: SCP 上传后端压缩包（10 分钟上限，每 15 秒心跳）
+        if: steps.config.outputs.proceed == 'true'
+        timeout-minutes: 11
+        env:
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          REMOTE_DIR: ${{ steps.staging.outputs.remote_dir }}
+        shell: bash
+        run: bash backend/deploy/upload-artifact.sh "$ARCHIVE" release.tar.gz 600
+
+      - name: SCP 上传部署脚本（60 秒上限）
+        if: steps.config.outputs.proceed == 'true'
+        timeout-minutes: 2
+        env:
+          REMOTE_DIR: ${{ steps.staging.outputs.remote_dir }}
+        shell: bash
+        run: bash backend/deploy/upload-artifact.sh backend/deploy/auto-deploy.sh auto-deploy.sh 60
+
+      - name: 远端复核压缩包及脚本 SHA256（尚未停服）
+        if: steps.config.outputs.proceed == 'true'
+        timeout-minutes: 2
+        env:
+          REMOTE_DIR: ${{ steps.staging.outputs.remote_dir }}
+          ARCHIVE_HASH: ${{ steps.package.outputs.archive_hash }}
+          SCRIPT_HASH: ${{ steps.package.outputs.script_hash }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          started=$SECONDS
+          [[ "$REMOTE_DIR" =~ ^/tmp/macro-research-deploy\.[a-zA-Z0-9]+$ ]]
+          [[ "$ARCHIVE_HASH" =~ ^[a-f0-9]{64}$ && "$SCRIPT_HASH" =~ ^[a-f0-9]{64}$ ]]
+          printf '%s  %s\n' "$ARCHIVE_HASH" release.tar.gz "$SCRIPT_HASH" auto-deploy.sh | \
+            timeout --kill-after=10s 60s ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
+              -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
+              -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+              "$DEPLOY_USER@$DEPLOY_HOST" "cd '$REMOTE_DIR' && sha256sum -c -"
+          echo "远端 SHA256 复核通过，耗时 $((SECONDS - started))s"
 
       - name: 停止旧后端、备份、替换并验证新后端持续运行
         if: steps.config.outputs.proceed == 'true'
+        timeout-minutes: 15
         env:
-          REMOTE_DIR: ${{ steps.upload.outputs.remote_dir }}
-          ARCHIVE_HASH: ${{ steps.upload.outputs.archive_hash }}
+          REMOTE_DIR: ${{ steps.staging.outputs.remote_dir }}
+          ARCHIVE_HASH: ${{ steps.package.outputs.archive_hash }}
           CONFIG_HASH: ${{ steps.config.outputs.template_hash }}
         shell: bash
         run: |
           set -euo pipefail
           # Recheck main after upload so a slow build never knowingly overwrites a newer commit.
-          latest="$(git ls-remote origin refs/heads/main | cut -f1)"
+          latest="$(timeout --kill-after=10s 45s git ls-remote origin refs/heads/main | cut -f1)"
           if [[ "$latest" != "$GITHUB_SHA" ]]; then
             echo '::notice::上传期间 main 已更新，本次旧构建不部署。'
             echo '### 跳过部署：上传期间 main 已更新' >> "$GITHUB_STEP_SUMMARY"
@@ -159,13 +214,15 @@ jobs:
 
       - name: 清理 SSH 凭据及服务器临时产物
         if: always()
+        timeout-minutes: 2
         env:
-          REMOTE_DIR: ${{ steps.upload.outputs.remote_dir }}
+          REMOTE_DIR: ${{ steps.staging.outputs.remote_dir }}
         shell: bash
         run: |
+          trap 'rm -rf -- "${SSH_DIR:-$RUNNER_TEMP/backend-deploy-ssh}"' EXIT
           if [[ "$REMOTE_DIR" =~ ^/tmp/macro-research-deploy\.[a-zA-Z0-9]+$ && -f "$SSH_DIR/key" ]]; then
-            ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
+            timeout --kill-after=10s 45s ssh -i "$SSH_DIR/key" -p "$DEPLOY_PORT" \
               -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$SSH_DIR/known_hosts" \
-              -o ConnectTimeout=15 "$DEPLOY_USER@$DEPLOY_HOST" "rm -rf -- '$REMOTE_DIR'" || true
+              -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+              "$DEPLOY_USER@$DEPLOY_HOST" "rm -rf -- '$REMOTE_DIR'" || echo '::warning::远端临时文件清理失败，请检查服务器 /tmp/macro-research-deploy.*'
           fi
-          rm -rf -- "${SSH_DIR:-$RUNNER_TEMP/backend-deploy-ssh}"
