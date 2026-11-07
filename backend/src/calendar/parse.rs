@@ -109,7 +109,8 @@ pub fn same_named_occurrence(
         return result;
     }
     let english = normalized_event_name(&left.event);
-    !english.is_empty() && english == normalized_event_name(&right.event)
+    (!english.is_empty() && english == normalized_event_name(&right.event))
+        || super::audited_identity::same_metric(left, right)
 }
 
 /// Shared identity predicate for ingest, regular monitoring and the fast release poll.

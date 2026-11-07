@@ -28,6 +28,8 @@ use tower::ServiceExt;
 
 #[path = "support/biquote_release.rs"]
 mod biquote_release_tests;
+#[path = "support/duplicate_repair.rs"]
+mod duplicate_repair_tests;
 #[path = "support/logo_cache.rs"]
 mod logo_cache;
 #[path = "support/release_identity.rs"]

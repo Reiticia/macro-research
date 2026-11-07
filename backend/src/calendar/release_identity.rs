@@ -130,6 +130,7 @@ pub fn verified_relation(left: &EconomicEvent, right: &EconomicEvent) -> Option<
         // Only known monthly series may discard the day component. Weekly/daily
         // periods must never collapse simply because they fall in the same month.
         let monthly = (identity(left).is_some() && identity(right).is_some())
+            || super::audited_identity::same_monthly_metric(left, right)
             || (known_dimension(left) == Some("jobs") && known_dimension(right) == Some("jobs"));
         if !monthly
             || !matches!((normalize_period(l), normalize_period(r)), (Some(l), Some(r)) if l == r)

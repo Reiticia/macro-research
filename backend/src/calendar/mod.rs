@@ -1,3 +1,4 @@
+mod audited_identity;
 mod biquote;
 mod forex_factory;
 pub mod parse;

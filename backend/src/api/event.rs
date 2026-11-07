@@ -40,6 +40,7 @@ pub struct EventDetail {
 }
 
 async fn detail_for(state: &AppState, id: i64) -> Result<EventDetail, AppError> {
+    let id = state.events.resolve_id(id).await?;
     let event = state.events.get(id).await?;
     let observations = state.events.observations(id).await?;
     let description = match state.events.description(id).await? {
@@ -70,6 +71,7 @@ pub async fn refresh(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<EventDetail>, AppError> {
+    let id = state.events.resolve_id(id).await?;
     let event = state.events.get(id).await?;
     let day_start = event
         .event_time
@@ -88,6 +90,7 @@ pub async fn analysis(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<AnalysisReport>, AppError> {
+    let id = state.events.resolve_id(id).await?;
     Ok(Json(state.analyses.get(id).await?))
 }
 

@@ -113,15 +113,10 @@ impl EventRepository {
                 let allow_alias = !key.2.is_empty()
                     && occurrences.get(&key).is_some_and(|names| names.len() == 1);
                 let rows = sqlx::query(
-                    "SELECT * FROM economic_event WHERE country=? AND event_time IN (?,?)",
+                    "SELECT * FROM economic_event WHERE country=? AND julianday(event_time)=julianday(?)",
                 )
                 .bind(&event.country)
                 .bind(event.event_time.to_rfc3339())
-                .bind(
-                    event
-                        .event_time
-                        .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
-                )
                 .fetch_all(&mut *transaction)
                 .await?;
                 let candidates: Vec<_> = rows
@@ -719,6 +714,20 @@ impl EventRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Offline repairs flatten mappings to a retained ID. Current IDs always win.
+    /// Resolve at the API boundary, not inside background jobs holding pre-repair state.
+    pub async fn resolve_id(&self, id: i64) -> Result<i64, AppError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT canonical_id FROM event_duplicate_merge WHERE old_id=?
+             AND NOT EXISTS(SELECT 1 FROM economic_event WHERE id=?)",
+        )
+        .bind(id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or(id))
     }
 
     pub async fn get(&self, id: i64) -> Result<EconomicEvent, AppError> {

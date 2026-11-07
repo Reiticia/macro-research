@@ -87,6 +87,7 @@ pub async fn market(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<MarketResponse>, AppError> {
+    let id = state.events.resolve_id(id).await?;
     state.events.get(id).await?;
     Ok(Json(MarketResponse {
         snapshots: state.market.snapshots(id).await?,
