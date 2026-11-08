@@ -28,7 +28,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Upload has its own deadline; reserve time for backup and process observation.
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
       DEPLOY_HOST: ${{ secrets.BACKEND_DEPLOY_HOST }}
       DEPLOY_PORT: ${{ secrets.BACKEND_DEPLOY_PORT || '22' }}
@@ -139,20 +139,24 @@ jobs:
           echo "remote_dir=$remote_dir" >> "$GITHUB_OUTPUT"
           echo "临时目录创建完成，耗时 $((SECONDS - started))s"
 
-      - name: SCP 上传后端压缩包（10 分钟上限，每 15 秒心跳）
+      - name: 上传后端压缩包（优先 rsync 续传，15 分钟总预算，真实进度）
         if: steps.config.outputs.proceed == 'true'
-        timeout-minutes: 11
+        timeout-minutes: 16
         env:
           ARCHIVE: ${{ steps.package.outputs.archive }}
           REMOTE_DIR: ${{ steps.staging.outputs.remote_dir }}
+          UPLOAD_TRANSPORT: auto
+          UPLOAD_ATTEMPT_SECONDS: "600"
+          UPLOAD_HEARTBEAT_SECONDS: "15"
         shell: bash
-        run: bash backend/deploy/upload-artifact.sh "$ARCHIVE" release.tar.gz 600
+        run: bash backend/deploy/upload-artifact.sh "$ARCHIVE" release.tar.gz 900
 
       - name: SCP 上传部署脚本（60 秒上限）
         if: steps.config.outputs.proceed == 'true'
         timeout-minutes: 2
         env:
           REMOTE_DIR: ${{ steps.staging.outputs.remote_dir }}
+          UPLOAD_TRANSPORT: scp
         shell: bash
         run: bash backend/deploy/upload-artifact.sh backend/deploy/auto-deploy.sh auto-deploy.sh 60
 
