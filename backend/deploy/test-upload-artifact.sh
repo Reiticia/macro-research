@@ -57,7 +57,11 @@ case "${TEST_MODE:-success}" in
     hang) sleep 30 ;;
 esac
 cp "$source" "$TEST_ROOT/partial"
-printf '\r       15 100%%    1.00kB/s    0:00:00 (xfr#1, to-chk=0/1)\n'
+if [[ "${TEST_MODE:-}" == retransmit ]]; then
+    printf '\r       30 200%%    1.00kB/s    0:00:00 (xfr#2, to-chk=0/1)\n'
+else
+    printf '\r       15 100%%    1.00kB/s    0:00:00 (xfr#1, to-chk=0/1)\n'
+fi
 EOF
 chmod +x "$ROOT/bin/ssh" "$ROOT/bin/scp" "$ROOT/bin/rsync"
 export PATH="$ROOT/bin:$PATH" TEST_ROOT="$ROOT" SSH_DIR="$ROOT/ssh dir'quote"
@@ -99,6 +103,14 @@ DEPLOY_HOST=2001:db8::1 run_upload
 grep -Fxq 'root@[2001:db8::1]:/tmp/macro-research-deploy.Abc123/release.tar.gz' "$ROOT/args" || fail 'IPv6 destination not bracketed'
 TEST_MODE=slow run_upload
 grep -q '33%' "$ROOT/output" || fail 'Missing in-flight byte progress'
+
+# A successful internal checksum-recovery transfer may report >100%.
+TEST_MODE=retransmit run_upload
+assert_calls 1
+grep -q '200%' "$ROOT/output" || fail 'Cumulative retransmission progress lost'
+grep -E 'rsync 最近报告.*[0-9]+%' "$ROOT/output" >/dev/null || fail 'Real-test progress assertion rejects retransmission'
+grep -q '上传完成' "$ROOT/output" || fail 'Successful retransmission rejected'
+cmp "$ROOT/partial" "$ROOT/package with spaces.tar.gz" || fail 'Wrong retransmitted content'
 
 for code in 10 12 30; do
     TEST_MODE=retry TEST_FAIL_CODE="$code" run_upload
