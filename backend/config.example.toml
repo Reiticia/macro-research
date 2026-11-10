@@ -10,6 +10,10 @@ port = 8080
 # 日志过滤级别；环境变量 RUST_LOG 仍然优先。留空用默认 info。
 # 例：market_event_analyzer=debug,tower_http=info
 log_level = ""
+# 可选日志文件：留空仅输出控制台；填写后同时向文件追加无 ANSI 颜色的日志。
+# 相对路径以 config.toml 所在目录为基准，也可用绝对路径；自动创建父目录。
+# 例：logs/backend.log。需服务进程有写权限，无法打开时启动报错；不自动轮转。
+log_file = ""
 # 直出 HTTPS：两项同时填写即由后端自己终结 TLS，无需 Caddy/Nginx。
 # 证书也可以是 Cloudflare Origin Certificate（长期有效，不用续期）。
 # 留空则监听明文 HTTP，仅适合内网或已经被隧道加密的场景。

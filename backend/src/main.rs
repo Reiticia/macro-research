@@ -37,7 +37,9 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
 use tokio::sync::broadcast;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::util::SubscriberInitExt;
+
+mod logging;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -63,9 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             (!from_config.is_empty()).then(|| from_config.to_owned())
         })
         .unwrap_or_else(|| "market_event_analyzer=info,tower_http=info".to_owned());
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new(log_filter))
-        .init();
+    logging::subscriber(&config.server, &config_dir, &log_filter)?.try_init()?;
     tracing::info!("configuration: {}", config_path.display());
     let args: Vec<String> = std::env::args().skip(1).collect();
     // `--check-ai` is a diagnostic that does not touch the database, so it is intercepted

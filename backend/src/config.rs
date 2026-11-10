@@ -48,6 +48,10 @@ pub struct ServerConfig {
     /// `market_event_analyzer=info,tower_http=info`.
     #[serde(default)]
     pub log_level: String,
+    /// Optional append-only log file, resolved relative to the configuration directory.
+    /// Empty keeps console-only logging.
+    #[serde(default)]
+    pub log_file: String,
     /// Path to a PEM certificate chain. Set together with `tls_key` to serve HTTPS
     /// directly, without a reverse proxy.
     #[serde(default)]
@@ -58,6 +62,11 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
+    pub fn resolve_log_file(&self, config_dir: &Path) -> Option<std::path::PathBuf> {
+        let value = self.log_file.trim();
+        (!value.is_empty()).then(|| config_dir.join(value))
+    }
+
     /// True when the service terminates TLS itself.
     pub fn tls_enabled(&self) -> bool {
         let cert = self.tls_cert.as_deref().map(str::trim).unwrap_or("");
@@ -710,6 +719,29 @@ market_collect_after_minutes = 60
         .unwrap();
         assert_eq!(config.biquote_url, "https://biquote.io/api/calendar");
         assert_eq!(config.tradingview_url, "https://old.example/events");
+    }
+
+    #[test]
+    fn log_file_is_optional_and_resolves_against_configuration() {
+        let mut server: ServerConfig = toml::from_str("host = '127.0.0.1'\nport = 8080").unwrap();
+        let root = std::env::temp_dir();
+        assert!(server.log_file.is_empty());
+        assert_eq!(server.resolve_log_file(&root), None);
+        server.log_file = "  ".into();
+        assert_eq!(server.resolve_log_file(&root), None);
+        server.log_file = " logs/backend.log ".into();
+        assert_eq!(
+            server.resolve_log_file(&root),
+            Some(root.join("logs/backend.log"))
+        );
+        let absolute = root.join("custom.log");
+        server.log_file = absolute.to_string_lossy().into_owned();
+        assert_eq!(
+            server.resolve_log_file(Path::new("ignored")),
+            Some(absolute)
+        );
+        let example: AppConfig = toml::from_str(include_str!("../config.example.toml")).unwrap();
+        assert_eq!(example.server.resolve_log_file(&root), None);
     }
 
     #[test]
