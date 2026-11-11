@@ -32,6 +32,10 @@ data class BackendSettings(
     val configured: Boolean get() = baseUrl.isNotBlank() && tokenConfigured
 }
 
+/** Only an active backend's address changes the macro event-id namespace. */
+internal fun BackendSettings.requiresMacroCacheReset(normalizedBaseUrl: String): Boolean =
+    mode == DataSourceMode.BACKEND && baseUrl != normalizedBaseUrl
+
 /**
  * Data-source selection plus the backend endpoint and credential.
  *

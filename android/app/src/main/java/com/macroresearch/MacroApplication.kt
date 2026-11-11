@@ -134,7 +134,11 @@ class MacroApplication : Application() {
             favoritesStore = com.macroresearch.data.local.RoomEarningsFavoritesStore(database.earningsDao()),
             sort = calendarPreferences.earningsSort,
             gson = gson,
-            logos = com.macroresearch.data.CompanyLogoLoader(backendPreferences.settings, logoClient::image, backendClient::companyLogo),
+            logos = com.macroresearch.data.CompanyLogoLoader(
+                backendPreferences.settings, logoClient::image, backendClient::companyLogo,
+                diskCache = com.macroresearch.data.CompanyLogoDiskCache(cacheDir.resolve("company-logos")),
+                refreshScope = applicationScope,
+            ),
         )
         val marketClient = DirectMarketClient(http, proxy = networkPreferences::proxy)
         val aiAnalysisClient = AiAnalysisClient(translationHttp, gson)

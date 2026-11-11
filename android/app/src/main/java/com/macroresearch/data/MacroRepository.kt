@@ -27,7 +27,7 @@ import com.macroresearch.data.remote.BackendUnauthorizedException
 import com.macroresearch.data.remote.BackendVerificationResult
 import com.macroresearch.data.remote.EconomicCalendarClient
 import com.macroresearch.data.remote.NewsRssClient
-import com.macroresearch.data.remote.PushTopicManager
+import com.macroresearch.data.remote.EventPushTopics
 import com.macroresearch.data.remote.TranslationClient
 import com.macroresearch.data.remote.stableEventId
 import kotlinx.coroutines.CancellationException
@@ -85,11 +85,13 @@ class MacroRepository(
     private val countryPreferences: CountryPreferences,
     private val marketPreferences: MarketPreferences,
     private val translationPreferences: TranslationPreferences,
-    private val pushTopicManager: PushTopicManager,
+    private val pushTopicManager: EventPushTopics,
     private val calendarPreferences: CalendarPreferences,
     val newsReader: NewsReaderRepository,
 ) {
     private val aiRunGate = AiRunGate()
+    // Captured before registration, so a reset also rejects work queued just before it.
+    private val conversationResets = mutableMapOf<Long, Long>()
     val selectedCountries: StateFlow<Set<String>> = countryPreferences.selectedCountries
     val selectedMarkets: StateFlow<List<String>> = marketPreferences.selectedMarkets
     val translationSettings: StateFlow<TranslationSettings> = translationPreferences.settings
@@ -167,33 +169,54 @@ class MacroRepository(
      * the event-derived cache is dropped. The caller must confirm this with the user first.
      */
     suspend fun setDataSourceMode(mode: DataSourceMode) {
-        val previousMode = dataSourceSettings.value.mode
-        if (mode == previousMode) return
-        if (previousMode == DataSourceMode.BACKEND) {
-            pushTopicManager.unsubscribeAll(dao.followedEventIds())
-        }
         releaseCommitMutex.withLock {
-            backendPreferences.setMode(mode)
-            invalidateReleaseRefresh()
-            dao.clearCache()
-            analysisDao.clearAll()
-            analysisDao.clearAllConversations()
-            analysisDao.clearAllAutoRefreshAttempts()
-            withContext(Dispatchers.IO) { aiHistoryStore.clearAll() }
-            marketCache.clear()
+            val previousMode = dataSourceSettings.value.mode
+            if (mode == previousMode) return
+            withContext(kotlinx.coroutines.NonCancellable) {
+                invalidateReleaseRefresh()
+                if (previousMode == DataSourceMode.BACKEND) {
+                    pushTopicManager.unsubscribeAll(dao.followedEventIds())
+                }
+                clearMacroSourceCache()
+                backendPreferences.setMode(mode)
+            }
         }
-        historySyncedAt = 0L
-        networkPreferences.clearUpcomingSync()
-        publishWarning(null)
     }
 
-    fun saveBackendSettings(baseUrl: String, token: String) {
-        backendPreferences.save(baseUrl, token)
+    /** Changing servers changes the numeric event-id namespace, unlike rotating a Key. */
+    suspend fun saveBackendSettings(baseUrl: String, token: String) {
+        releaseCommitMutex.withLock {
+            val previous = dataSourceSettings.value
+            // Validate before invalidating or deleting anything; invalid edits preserve the cache.
+            val normalized = BackendPreferences.normalizeBaseUrl(baseUrl, previous.allowCleartext)
+            withContext(kotlinx.coroutines.NonCancellable) {
+                invalidateReleaseRefresh()
+                if (previous.requiresMacroCacheReset(normalized)) {
+                    pushTopicManager.unsubscribeAll(dao.followedEventIds())
+                    clearMacroSourceCache()
+                }
+                backendPreferences.save(normalized, token)
+                marketCache.clear()
+                backendPreferences.clearVerification()
+                networkPreferences.clearUpcomingSync()
+                historySyncedAt = 0L
+                publishWarning(null)
+            }
+        }
+    }
+
+    /** Caller holds the source commit lock; preferences and earnings namespaces are preserved. */
+    private suspend fun clearMacroSourceCache() {
+        dao.clearCache()
+        analysisDao.clearAll()
+        analysisDao.clearAllConversations()
+        analysisDao.clearAllAutoRefreshAttempts()
+        withContext(Dispatchers.IO) { aiHistoryStore.clearAll() }
         marketCache.clear()
-        invalidateReleaseRefresh()
-        backendPreferences.clearVerification()
-        networkPreferences.clearUpcomingSync()
         historySyncedAt = 0L
+        networkPreferences.clearUpcomingSync()
+        _translationError.value = null
+        publishWarning(null)
     }
 
     /** Enables the explicit plain-HTTP escape hatch for a backend address. */
@@ -204,20 +227,15 @@ class MacroRepository(
 
     suspend fun clearBackendSettings() {
         releaseCommitMutex.withLock {
-            invalidateReleaseRefresh()
-            if (dataSourceSettings.value.mode == DataSourceMode.BACKEND) {
-                pushTopicManager.unsubscribeAll(dao.followedEventIds())
-                dao.clearCache()
-                analysisDao.clearAll()
-                analysisDao.clearAllConversations()
-                analysisDao.clearAllAutoRefreshAttempts()
-                withContext(Dispatchers.IO) { aiHistoryStore.clearAll() }
-                marketCache.clear()
-                historySyncedAt = 0L
-                networkPreferences.clearUpcomingSync()
+            withContext(kotlinx.coroutines.NonCancellable) {
+                invalidateReleaseRefresh()
+                if (dataSourceSettings.value.mode == DataSourceMode.BACKEND) {
+                    pushTopicManager.unsubscribeAll(dao.followedEventIds())
+                    clearMacroSourceCache()
+                }
+                backendPreferences.clear()
+                backendPreferences.setMode(DataSourceMode.DIRECT)
             }
-            backendPreferences.clear()
-            backendPreferences.setMode(DataSourceMode.DIRECT)
         }
     }
 
@@ -302,7 +320,10 @@ class MacroRepository(
         groupingZone = { if (source.mode == DataSourceMode.BACKEND) ZoneOffset.UTC else ZoneId.systemDefault() },
     )
 
-    private fun invalidateReleaseRefresh() = releaseGate.invalidate()
+    private fun invalidateReleaseRefresh() {
+        releaseGate.invalidate()
+        aiRunGate.cancelAll()
+    }
 
     /** Owned by the Activity's STARTED lifecycle. Cancelling this also cancels in-flight requests. */
     suspend fun runForegroundReleaseRefresh() {
@@ -396,68 +417,44 @@ class MacroRepository(
     suspend fun isFollowed(id: Long): Boolean = dao.isFollowed(id)
 
     suspend fun refreshUpcoming(days: Int = 7) = upcomingMutex.withLock {
-        // Successful events are already in Room. Reopening the app inside this window should
-        // render them immediately instead of repeating the same fragile calendar request. Name
-        // enrichment still needs a retry: the previous process may have stopped after saving the
-        // rows but before its background translation lookup completed.
-        if (networkPreferences.upcomingSyncFresh(UPCOMING_CACHE_MS)) {
-            val now = Instant.now()
-            val cached = dao.cachedRange(now.toString(), now.plusSeconds(days * 86_400L).toString())
-                .map { it.asExternalModel() }
-            if (cached.isNotEmpty()) {
-                repositoryScope.launch { runCatching { enrichTranslations(cached) } }
+        val (generation, activeSource) = releaseCommitMutex.withLock { releaseGeneration.value to source }
+        // Cached reads, legacy cleanup and the freshness marker share the switching boundary.
+        val cached = releaseGate.commit(generation) {
+            if (networkPreferences.upcomingSyncFresh(UPCOMING_CACHE_MS)) {
+                val now = Instant.now()
+                dao.cachedRange(now.toString(), now.plusSeconds(days * 86_400L).toString())
+                    .map { it.asExternalModel() }
+            } else {
+                dao.deleteByProviders(LEGACY_CALENDAR_PROVIDERS)
+                null
             }
+        }
+        if (cached != null) {
+            enrichSourceTranslations(cached, generation)
             return@withLock
         }
-        // Drop rows cached by calendar providers that are no longer used so the
-        // upcoming list cannot show the same event twice after an app update.
-        dao.deleteByProviders(LEGACY_CALENDAR_PROVIDERS)
-        // Days follow the device zone so the refresh window matches the times shown on cards.
         val today = LocalDate.now()
-        val events = try {
-            val result = source.upcoming(days)
-            publishWarning(result.warning)
-            result.events
+        val result = try {
+            activeSource.upcoming(days)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            // Publish before propagating: the list falls back to the cache, and the UI needs the
-            // reason to explain why, especially when the backend is unreachable.
-            publishWarning(warningFor(error))
+            releaseGate.commit(generation) { publishWarning(warningFor(error)) }
             throw error
         }
-        val merged = dao.mergeCalendar(mergeCachedTranslations(events).map(EconomicEvent::asEntity))
-            .map { it.asExternalModel() }
-        val selected = selectedCountries.value
-        val localToday = LocalDate.now()
-        val now = Instant.now()
-        val priorityEvents = merged
-            .filter { it.country in selected }
-            .filter { event ->
-                runCatching { !Instant.parse(event.eventTime).isBefore(now) }.getOrDefault(false)
-            }
-            .sortedWith(
-                compareBy<EconomicEvent> { event ->
-                    val date = runCatching {
-                        Instant.parse(event.eventTime).atZone(ZoneId.systemDefault()).toLocalDate()
-                    }.getOrNull()
-                    if (date == localToday) 0 else 1
-                }.thenBy { it.eventTime },
+        val merged = releaseGate.commit(generation) {
+            val rows = dao.mergeCalendar(mergeCachedTranslations(result.events).map(EconomicEvent::asEntity))
+                .map { it.asExternalModel() }
+            dao.deleteOlderThan(
+                today.minusDays(HISTORY_RETENTION_DAYS)
+                    .atStartOfDay(ZoneId.systemDefault()).toInstant().toString(),
             )
-            .take(30)
-        if (merged.isNotEmpty()) {
-            // Home renders from Room, so translations may arrive after the list is shown.
-            // The server lookup is free and covers every visible name; the reader's own key
-            // is only spent on the most relevant titles (see TRANSLATION_PAID_NAME_LIMIT).
-            repositoryScope.launch { runCatching { enrichTranslations(merged) } }
+            publishWarning(result.warning)
+            // An old response cannot mark the new source fresh, even if it returned no rows.
+            networkPreferences.markUpcomingSynced()
+            rows
         }
-        dao.deleteOlderThan(
-            today.minusDays(HISTORY_RETENTION_DAYS)
-                .atStartOfDay(ZoneId.systemDefault()).toInstant().toString(),
-        )
-        // Mark only after the event rows are committed, so a crash cannot leave an empty cache
-        // advertised as fresh.
-        networkPreferences.markUpcomingSynced()
+        enrichSourceTranslations(merged, generation)
     }
 
     suspend fun calendar(
@@ -560,9 +557,9 @@ class MacroRepository(
         return if (source.mode == DataSourceMode.BACKEND) event(id) else localEvent(id)
     }
 
-    private fun aiEvidenceLoader(trace: AiExecutionTrace? = null): AiEvidenceLoader = AiEvidenceLoader(
-        directSource, backendSource, dataSourceSettings.value.baseUrl,
-        dataSourceSettings.value.mode == DataSourceMode.BACKEND, trace,
+    private fun aiEvidenceLoader(trace: AiExecutionTrace? = null, settings: BackendSettings = dataSourceSettings.value): AiEvidenceLoader = AiEvidenceLoader(
+        directSource, backendSource, settings.baseUrl,
+        settings.mode == DataSourceMode.BACKEND, trace,
     )
 
     suspend fun analysis(id: Long): AnalysisReport {
@@ -591,8 +588,14 @@ class MacroRepository(
     }
 
     suspend fun resetAiConversation(eventId: Long) {
-        analysisDao.clearConversation(eventId)
-        withContext(Dispatchers.IO) { aiHistoryStore.clear(conversationHistoryKey(eventId)) }
+        releaseCommitMutex.withLock {
+            conversationResets[eventId] = (conversationResets[eventId] ?: 0L) + 1
+            aiRunGate.cancel(conversationHistoryKey(eventId))
+            withContext(kotlinx.coroutines.NonCancellable) {
+                analysisDao.clearConversation(eventId)
+                withContext(Dispatchers.IO) { aiHistoryStore.clear(conversationHistoryKey(eventId)) }
+            }
+        }
     }
 
     suspend fun autoRefreshAttempted(eventId: Long, method: Int, language: String): Boolean =
@@ -604,8 +607,30 @@ class MacroRepository(
         )
     }
 
-    private fun analysisHistoryKey(eventId: Long, method: Int): String = "analysis|${dataSourceSettings.value.mode}|${dataSourceSettings.value.baseUrl}|$eventId|$method"
-    private fun conversationHistoryKey(eventId: Long): String = "conversation|${dataSourceSettings.value.mode}|${dataSourceSettings.value.baseUrl}|$eventId"
+    private fun analysisHistoryKey(eventId: Long, method: Int, settings: BackendSettings = dataSourceSettings.value): String = "analysis|${settings.mode}|${settings.baseUrl}|$eventId|$method"
+    private fun conversationHistoryKey(eventId: Long, settings: BackendSettings = dataSourceSettings.value): String = "conversation|${settings.mode}|${settings.baseUrl}|$eventId"
+
+    private data class AiContext(
+        val generation: Long,
+        val settings: BackendSettings,
+        val method: AnalysisMethod,
+        val conversationId: Long? = null,
+        val resetVersion: Long = 0,
+    )
+
+    private suspend fun aiContext(conversationId: Long? = null) = releaseCommitMutex.withLock {
+        AiContext(releaseGeneration.value, dataSourceSettings.value, analysisPreferences.method.value,
+            conversationId, conversationResets[conversationId] ?: 0L)
+    }
+
+    private suspend fun <T> commitAi(context: AiContext, run: AiRunGate.Run, block: suspend () -> T): T =
+        releaseGate.commit(context.generation) {
+            run.ensureActive()
+            if (context.conversationId != null && (conversationResets[context.conversationId] ?: 0L) != context.resetVersion) {
+                throw CancellationException("AI conversation reset")
+            }
+            block()
+        }
 
     suspend fun aiHistory(eventId: Long): AiHistory = withContext(Dispatchers.IO) {
         aiHistoryStore.load(analysisHistoryKey(eventId, analysisPreferences.method.value.wireValue))
@@ -617,44 +642,54 @@ class MacroRepository(
 
     suspend fun askAiFollowUp(eventId: Long, languageTag: String, question: String,
         onRequests: (List<AiRequestRecord>) -> Unit = {},
-    ): List<AiConversationMessage> = aiRunGate.run(conversationHistoryKey(eventId)) {
-        askAiFollowUpInternal(eventId, languageTag, question, onRequests)
+    ): List<AiConversationMessage> {
+        val context = aiContext(eventId)
+        return aiRunGate.run(conversationHistoryKey(eventId, context.settings)) { run ->
+            askAiFollowUpInternal(eventId, languageTag, question, onRequests, context, run)
+        }
     }
 
     private suspend fun askAiFollowUpInternal(eventId: Long, languageTag: String, question: String,
         onRequests: (List<AiRequestRecord>) -> Unit,
+        context: AiContext,
+        run: AiRunGate.Run,
     ): List<AiConversationMessage> = withContext(Dispatchers.IO) {
-        val historyKey = conversationHistoryKey(eventId)
-        var checkpoint = aiHistoryStore.begin(historyKey, appendRequests = true)
+        val historyKey = conversationHistoryKey(eventId, context.settings)
+        var checkpoint = commitAi(context, run) { aiHistoryStore.begin(historyKey, appendRequests = true) }
         val requestLog = AiRequestLog(checkpoint.requests) { records ->
             checkpoint = checkpoint.copy(requests = records)
             aiHistoryStore.save(historyKey, checkpoint)
-            onRequests(records)
+            if (run.isActive) onRequests(records)
         }
         try {
             require(translationPreferences.settings.value.configured) { "A personal AI key is required for conversation" }
             require(question.isNotBlank())
-            val local = dao.event(eventId)?.asExternalModel() ?: error("Event is not available in the local cache")
-            val evidence = aiEvidenceLoader()
+            val local = commitAi(context, run) {
+                dao.event(eventId)?.asExternalModel() ?: error("Event is not available in the local cache")
+            }
+            val evidence = aiEvidenceLoader(settings = context.settings)
             val event = evidence.event(local)
             require(hasEventTimeArrived(event.eventTime)) { "The event time has not passed yet" }
             val market = evidence.market(event)
             val report = evidence.report(event, market)
-            val history = aiConversation(eventId)
+            val history = commitAi(context, run) { aiConversation(eventId) }
             val settings = translationPreferences.settings.value
             val key = translationPreferences.apiKey() ?: error("Configure an API key in Settings first")
+            commitAi(context, run) { Unit }
             val assistant = aiAnalysisClient.converse(
                 AiAnalysisInput(event, report.macroSignal, report.rawSurprise, report.expectedReactions, report.observedReactions, languageTag, requestLog = requestLog),
                 settings, key, history, question.trim(),
-                currentBriefing = analysisDao.analysis(eventId, analysisPreferences.method.value.wireValue)?.let { cached ->
+                currentBriefing = commitAi(context, run) { analysisDao.analysis(eventId, context.method.wireValue) }?.let { cached ->
                     "Data: ${cached.dataAnalysis}\nOutlook: ${cached.marketOutlook}\nRisks: ${cached.risks.orEmpty()}"
                 },
             )
             val updated = history + AiConversationMessage("user", question.trim()) + assistant
-            analysisDao.upsertConversation(
-                AiConversationEntity(eventId, aiAnalysisClient.encodeConversation(updated), System.currentTimeMillis()),
-            )
-            aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.SUCCEEDED)
+            commitAi(context, run) {
+                analysisDao.upsertConversation(
+                    AiConversationEntity(eventId, aiAnalysisClient.encodeConversation(updated), System.currentTimeMillis()),
+                )
+                aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.SUCCEEDED)
+            }
             updated
         } catch (cancelled: CancellationException) {
             withContext(kotlinx.coroutines.NonCancellable) { aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.CANCELLED) }
@@ -672,8 +707,11 @@ class MacroRepository(
         onProgress: (List<AiExecutionStep>) -> Unit = {},
         onRequests: (List<AiRequestRecord>) -> Unit = {},
         onArticles: (List<com.macroresearch.data.remote.NewsArticle>) -> Unit = {},
-    ): AiAnalysis = aiRunGate.run(analysisHistoryKey(eventId, analysisPreferences.method.value.wireValue)) {
-        generateAiAnalysisInternal(eventId, languageTag, regenerate, onProgress, onRequests, onArticles)
+    ): AiAnalysis {
+        val context = aiContext()
+        return aiRunGate.run(analysisHistoryKey(eventId, context.method.wireValue, context.settings)) { run ->
+            generateAiAnalysisInternal(eventId, languageTag, regenerate, onProgress, onRequests, onArticles, context, run)
+        }
     }
 
     private suspend fun generateAiAnalysisInternal(
@@ -683,26 +721,29 @@ class MacroRepository(
         onProgress: (List<AiExecutionStep>) -> Unit,
         onRequests: (List<AiRequestRecord>) -> Unit,
         onArticles: (List<com.macroresearch.data.remote.NewsArticle>) -> Unit,
+        context: AiContext,
+        run: AiRunGate.Run,
     ): AiAnalysis = withContext(Dispatchers.IO) {
         check(translationSettings.value.configured) { "A personal AI key is required to generate analysis" }
-        val method = analysisPreferences.method.value
-        val cached = analysisDao.analysis(eventId, method.wireValue)
-        val historyKey = analysisHistoryKey(eventId, method.wireValue)
-        var checkpoint = aiHistoryStore.begin(historyKey)
+        val method = context.method
+        val cached = commitAi(context, run) { analysisDao.analysis(eventId, method.wireValue) }
+        val historyKey = analysisHistoryKey(eventId, method.wireValue, context.settings)
+        var checkpoint = commitAi(context, run) { aiHistoryStore.begin(historyKey) }
         val trace = AiExecutionTrace { steps ->
             checkpoint = checkpoint.copy(steps = steps)
             aiHistoryStore.save(historyKey, checkpoint)
-            onProgress(steps)
+            if (run.isActive) onProgress(steps)
         }
         val requestLog = AiRequestLog { records ->
             checkpoint = checkpoint.copy(requests = records)
             aiHistoryStore.save(historyKey, checkpoint)
-            onRequests(records)
+            if (run.isActive) onRequests(records)
         }
         try {
-            val local = dao.event(eventId)?.asExternalModel()
-                ?: error("Event is not available in the local cache")
-            val evidence = aiEvidenceLoader(trace)
+            val local = commitAi(context, run) {
+                dao.event(eventId)?.asExternalModel() ?: error("Event is not available in the local cache")
+            }
+            val evidence = aiEvidenceLoader(trace, context.settings)
             val event = evidence.event(local)
             require(hasEventTimeArrived(event.eventTime)) { "The event time has not passed yet" }
             // Evidence follows the configured backend; only the model request stays personal.
@@ -718,13 +759,14 @@ class MacroRepository(
                 newsResult?.status == "search_unavailable" -> AiStepDetail.MISSING_DATA
                 newsResult?.status == "partial_results" -> AiStepDetail.PARTIAL_NEWS
                 newsResult?.articles.isNullOrEmpty() -> AiStepDetail.NO_NEWS
-                dataSourceSettings.value.baseUrl.isNotBlank() -> AiStepDetail.INTERFACE_UNAVAILABLE
+                context.settings.baseUrl.isNotBlank() -> AiStepDetail.INTERFACE_UNAVAILABLE
                 else -> AiStepDetail.DIRECT_DATA
             }, count = newsResult?.articles?.size)
             val articles = newsResult?.articles.orEmpty()
             checkpoint = checkpoint.copy(articles = articles)
             aiHistoryStore.save(historyKey, checkpoint)
-            onArticles(articles)
+            if (run.isActive) onArticles(articles)
+            commitAi(context, run) { Unit }
             val nextRevision = (cached?.revision ?: 0) + 1
             val analysis = directSource.aiAnalysis(
                 AiAnalysisRequest(
@@ -753,9 +795,11 @@ class MacroRepository(
                     )
                 }
             val saveStep = trace.start(AiOperation.SAVE)
-            analysisDao.upsert(analysis.toEntity())
-            trace.finish(saveStep)
-            aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.SUCCEEDED)
+            commitAi(context, run) {
+                analysisDao.upsert(analysis.toEntity())
+                trace.finish(saveStep)
+                aiHistoryStore.finish(historyKey, checkpoint, AiStepStatus.SUCCEEDED)
+            }
             analysis
         } catch (cancelled: CancellationException) {
             trace.finishRunning(AiStepStatus.CANCELLED)
@@ -843,30 +887,32 @@ class MacroRepository(
         val selected = countries.distinct()
         val levels = importance?.distinct() ?: listOf(0, 1, 2, 3)
         if (selected.isEmpty() || levels.isEmpty()) return emptyList()
-        if (source.mode == DataSourceMode.BACKEND) {
-            return backendHistory(selected, category, limit, offset, importance)
+        val (generation, activeSource) = releaseCommitMutex.withLock { releaseGeneration.value to source }
+        if (activeSource.mode == DataSourceMode.BACKEND) {
+            return backendHistory(selected, category, limit, offset, importance, generation, activeSource)
         }
-        var page = dao.history(Instant.now().toString(), selected, category, limit, offset, levels)
-            .map { it.asExternalModel() }
+        var page = releaseGate.commit(generation) {
+            dao.history(Instant.now().toString(), selected, category, limit, offset, levels)
+                .map { it.asExternalModel() }
+        }
         // Room is the source of truth. Only backfill the first page when it cannot provide a full
         // page, or when the user explicitly asks to refresh. Entering History no longer blocks on
         // the same unreliable network request every time.
         if (offset == 0 && (forceRefresh || (page.size < limit && historySyncDue()))) {
             try {
-                syncRecentHistory(forceRefresh)
+                syncRecentHistory(forceRefresh, generation, activeSource)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                publishWarning(warningFor(error))
+                releaseGate.commit(generation) { publishWarning(warningFor(error)) }
             }
-            page = dao.history(Instant.now().toString(), selected, category, limit, offset, levels)
-                .map { it.asExternalModel() }
+            page = releaseGate.commit(generation) {
+                dao.history(Instant.now().toString(), selected, category, limit, offset, levels)
+                    .map { it.asExternalModel() }
+            }
         }
-        // Network failure never hides or invalidates locally stored history, including an empty
-        // database on first run. The typed warning explains the offline state without a spinner.
-        if (page.isNotEmpty()) {
-            repositoryScope.launch { runCatching { enrichTranslations(page) } }
-        }
+        // Network failure preserves this source's cache; switching is cancellation, not fallback.
+        enrichSourceTranslations(page, generation)
         return page
     }
 
@@ -880,27 +926,30 @@ class MacroRepository(
         limit: Int,
         offset: Int,
         importance: Collection<Int>?,
+        generation: Long,
+        activeSource: DataSource,
     ): List<EconomicEvent> {
         // Room may contain only pages from a narrower filter, even when it fills a page.
         // Always ask the server first, including when selecting all levels again, so offsets
         // refer to the complete filtered dataset. Room remains the offline fallback.
         val page = try {
-            source.history(countries, category, limit, offset, importance)
+            activeSource.history(countries, category, limit, offset, importance)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            publishWarning(warningFor(error))
-            return dao.history(
-                Instant.now().toString(), countries, category, limit, offset,
-                importance?.distinct() ?: listOf(0, 1, 2, 3),
-            ).map { it.asExternalModel() }
+            return releaseGate.commit(generation) {
+                publishWarning(warningFor(error))
+                dao.history(
+                    Instant.now().toString(), countries, category, limit, offset,
+                    importance?.distinct() ?: listOf(0, 1, 2, 3),
+                ).map { it.asExternalModel() }
+            }
         }
-        if (page.isNotEmpty()) {
-            dao.upsert(page.map(EconomicEvent::asEntity))
-            // A server row can predate its translation; ask the shared cache for the rest.
-            repositoryScope.launch { runCatching { enrichTranslations(page) } }
+        releaseGate.commit(generation) {
+            if (page.isNotEmpty()) dao.upsert(page.map(EconomicEvent::asEntity))
+            historySyncedAt = System.currentTimeMillis()
         }
-        historySyncedAt = System.currentTimeMillis()
+        enrichSourceTranslations(page, generation)
         return page
     }
 
@@ -932,7 +981,7 @@ class MacroRepository(
     fun observeFollowedEvents(): Flow<List<EconomicEvent>> =
         dao.observeFollowedEvents().map { rows -> rows.map { it.asExternalModel() } }
 
-    suspend fun setFollowed(id: Long, followed: Boolean) {
+    suspend fun setFollowed(id: Long, followed: Boolean) = releaseCommitMutex.withLock {
         if (followed) {
             dao.follow(FollowedEventEntity(id))
             if (dataSourceSettings.value.mode == DataSourceMode.BACKEND) {
@@ -946,7 +995,7 @@ class MacroRepository(
         }
     }
 
-    suspend fun synchronizePushTopics() {
+    suspend fun synchronizePushTopics() = releaseCommitMutex.withLock {
         if (dataSourceSettings.value.mode == DataSourceMode.BACKEND) {
             pushTopicManager.synchronize(dao.followedEventIds())
         }
@@ -963,28 +1012,38 @@ class MacroRepository(
     private fun historySyncDue(): Boolean =
         System.currentTimeMillis() - historySyncedAt >= HISTORY_CACHE_MS
 
-    private suspend fun syncRecentHistory(force: Boolean = false) = historyMutex.withLock {
-        if (!force && !historySyncDue()) return@withLock
+    private suspend fun syncRecentHistory(force: Boolean, generation: Long, activeSource: DataSource) = historyMutex.withLock {
+        if (releaseGate.commit(generation) { !force && !historySyncDue() }) return@withLock
         val today = LocalDate.now()
         // The history screen only ever displays supported countries, and the calendar API
         // accepts a country filter: fetching worldwide rows would download several MB and
         // hit the endpoint's event cap for nothing.
         val countryCodes = EconomicCalendarClient.codesFor(CountryPreferences.SUPPORTED_COUNTRIES)
         // Include today's elapsed releases too; history queries still exclude future rows.
-        val result = source.calendar(today.minusDays(30), today, countryCodes)
-        publishWarning(result.warning)
-        val merged = mergeCachedTranslations(result.events)
-        dao.mergeCalendar(merged.map(EconomicEvent::asEntity))
-        // Even a weekly fallback is a completed network sync. Observe the normal TTL instead of
-        // immediately hitting the rate-limited feed again; manual refresh can still force it.
-        historySyncedAt = System.currentTimeMillis()
+        val result = activeSource.calendar(today.minusDays(30), today, countryCodes)
+        releaseGate.commit(generation) {
+            val merged = mergeCachedTranslations(result.events)
+            dao.mergeCalendar(merged.map(EconomicEvent::asEntity))
+            publishWarning(result.warning)
+            // Partial fallback syncs still observe the TTL; old-source syncs never advance it.
+            historySyncedAt = System.currentTimeMillis()
+        }
     }
 
-    private suspend fun enrichTranslations(events: List<EconomicEvent>): List<EconomicEvent> =
+    private fun enrichSourceTranslations(events: List<EconomicEvent>, generation: Long) {
+        if (events.isNotEmpty()) repositoryScope.launch {
+            runCatching { enrichTranslations(events, generation) }
+        }
+    }
+
+    private suspend fun enrichTranslations(
+        events: List<EconomicEvent>,
+        generation: Long = releaseGeneration.value,
+    ): List<EconomicEvent> =
         translationMutex.withLock {
             // Re-read cached translations only after acquiring the lock. This prevents a
             // slower failed refresh from overwriting translations saved by another screen.
-            var merged = mergeCachedTranslations(events)
+            var merged = releaseGate.commit(generation) { mergeCachedTranslations(events) }
 
             // The server owns the shared translation cache, so ask it for every visible name.
             // The lookup is read-only and public: direct mode needs only a backend address, not
@@ -998,18 +1057,22 @@ class MacroRepository(
                             backendSource.translations(batch).entries.map { it.key to it.value }
                         }
                     }.onSuccess { fetched ->
-                        _translationError.value = null
-                        if (fetched.isNotEmpty()) {
-                            fetched.forEach { (name, pair) ->
-                                dao.updateTranslation(name, pair.first, pair.second)
+                        releaseGate.commit(generation) {
+                            _translationError.value = null
+                            if (fetched.isNotEmpty()) {
+                                fetched.forEach { (name, pair) ->
+                                    dao.updateTranslation(name, pair.first, pair.second)
+                                }
+                                _translationsUpdated.tryEmit(Unit)
+                                merged = mergeCachedTranslations(merged)
                             }
-                            _translationsUpdated.tryEmit(Unit)
-                            merged = mergeCachedTranslations(merged)
                         }
                     }.onFailure { error ->
-                        Log.w(TAG, "Server event-name translations unavailable", error)
-                        _translationError.value =
-                            error.message ?: "Server translation lookup failed"
+                        if (error is CancellationException) throw error
+                        releaseGate.commit(generation) {
+                            Log.w(TAG, "Server event-name translations unavailable", error)
+                            _translationError.value = error.message ?: "Server translation lookup failed"
+                        }
                     }
                 }
             }
@@ -1048,16 +1111,16 @@ class MacroRepository(
                 result.onSuccess { batchResult -> translated += batchResult }
                     .onFailure { error -> firstError = firstError ?: error.message ?: "Translation failed" }
             }
-            if (translated.isNotEmpty()) {
-                // Only update name columns. A slow AI response must never overwrite newly
-                // published actuals/status with the pre-release snapshot it started from.
-                translated.forEach { (name, translation) ->
-                    dao.updateTranslation(name, translation.first, translation.second)
+            releaseGate.commit(generation) {
+                if (translated.isNotEmpty()) {
+                    // Only name columns; neither late translations nor old sources may overwrite data.
+                    translated.forEach { (name, translation) ->
+                        dao.updateTranslation(name, translation.first, translation.second)
+                    }
+                    _translationsUpdated.tryEmit(Unit)
                 }
-                // Lists render before enrichment finishes; this tells them to re-read.
-                _translationsUpdated.tryEmit(Unit)
+                _translationError.value = firstError
             }
-            _translationError.value = firstError
             merged.map { event ->
                 translated[event.event]?.let { (zhCn, zhTw) ->
                     event.copy(eventZhCn = zhCn, eventZhTw = zhTw)

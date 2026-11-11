@@ -26,12 +26,13 @@ import okhttp3.WebSocketListener
  * backoff and rebuilds the URL/token on every attempt so a Settings change is picked up.
  */
 class BackendSocket(
-    private val client: OkHttpClient,
+    client: OkHttpClient,
     private val gson: Gson,
     private val urlProvider: () -> String?,
     private val tokenProvider: () -> String?,
     private val deviceIdentity: () -> com.macroresearch.data.BackendDeviceIdentity? = { null },
 ) {
+    private val client = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
     private val _events = MutableSharedFlow<SocketEvent>(
         extraBufferCapacity = 32,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,

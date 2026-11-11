@@ -11,7 +11,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.macroresearch.data.model.SocketEvent
-import java.util.Locale
 
 /**
  * Local notifications for followed events that are pushed after release.
@@ -47,10 +46,7 @@ class NotificationCenter(private val context: Context) {
         val body: String
         when (event.type) {
             "economic_event_released" -> {
-                val traditional = localized.resources.configuration.locales[0]
-                    .language == Locale.CHINESE.language &&
-                    localized.resources.configuration.locales[0].country in setOf("TW", "HK", "MO")
-                val name = event.localizedName(traditional)
+                val name = event.localizedName(localized.resources.configuration.locales[0])
                     ?: localized.getString(R.string.economic_data)
                 title = localized.getString(R.string.notification_released, name)
                 body = localized.getString(

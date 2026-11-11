@@ -196,10 +196,11 @@ data class SocketEvent(
     val consensus: String? = null,
 ) {
     /** Event name in the reader's language, falling back to the source name. */
-    fun localizedName(isTraditionalChinese: Boolean): String? = when {
-        isTraditionalChinese -> eventZhTw ?: event
-        eventZhCn != null -> eventZhCn
-        else -> event
+    fun localizedName(locale: java.util.Locale): String? {
+        val original = event?.takeIf(String::isNotBlank)
+        if (locale.language != "zh") return original
+        val traditional = locale.script == "Hant" || locale.country in setOf("TW", "HK", "MO")
+        return (if (traditional) eventZhTw else eventZhCn)?.takeIf(String::isNotBlank) ?: original
     }
 }
 

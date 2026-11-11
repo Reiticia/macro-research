@@ -143,6 +143,8 @@
     <string name="backend_token_note">Request via Telegram Bot: /request_key device or /request_key general. Administrator approval is required. Device keys bind on first authorization; reinstalling or clearing app data requires a new key. Stored encrypted and excluded from backups.</string>
     <string name="backend_token_missing">Enter the API Key issued through Telegram Bot.</string>
     <string name="backend_test">Test connection</string>
+    <string name="backend_change_title">Change backend server?</string>
+    <string name="backend_change_body">Saving the new address clears cached macro events, follows, AI briefings and conversations, and removes old event push subscriptions. This happens even if the subsequent connection test fails. Filter settings and source-isolated earnings favorites are kept.</string>
     <string name="backend_verified">Connection and authentication verified</string>
     <string name="backend_authentication_disabled">Backend authentication is disabled. Enable auth.enabled on the server to verify an API Key.</string>
     <string name="backend_protocol_mismatch">The backend API protocol is incompatible with this app.</string>

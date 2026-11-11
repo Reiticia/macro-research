@@ -142,6 +142,8 @@
     <string name="backend_token_note">通过 Telegram Bot 发送 /request_key device 或 /request_key general 申请，需管理员批准。设备密钥首次授权后绑定；卸载或清除应用数据后需重新申请。使用 Keystore 加密保存，不进入备份。</string>
     <string name="backend_token_missing">请填写 Telegram Bot 发放的 API Key。</string>
     <string name="backend_test">测试连接</string>
+    <string name="backend_change_title">更换后端服务器？</string>
+    <string name="backend_change_body">保存新地址将清空本地宏观事件、关注、AI 分析与对话，并取消旧事件的推送订阅。即使随后测试连接失败，也不会恢复旧缓存。筛选设置和按来源隔离的财报收藏保留。</string>
     <string name="backend_verified">连接与鉴权验证通过</string>
     <string name="backend_authentication_disabled">后端未启用鉴权，无法验证 API Key。请在服务器开启 auth.enabled。</string>
     <string name="backend_protocol_mismatch">后端 API 协议与此客户端不兼容。</string>

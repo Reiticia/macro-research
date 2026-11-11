@@ -37,12 +37,18 @@ internal class ReleaseRefreshGate(private val now: () -> Instant = Instant::now)
         if (fetchedAt.containsKey(key)) return@withLock ReleaseRefreshOutcome(true)
         val result = fetch()
         currentCoroutineContext().ensureActive()
-        commitMutex.withLock {
-            checkGeneration(generation)
-            commit(result)
-        }
+        commit(generation) { commit(result) }
         fetchedAt[key] = now()
         ReleaseRefreshOutcome(true)
+    }
+
+    /** Every source-derived cache write and freshness marker shares the switching boundary. */
+    suspend fun <T> commit(generation: Long, block: suspend () -> T): T {
+        currentCoroutineContext().ensureActive()
+        return commitMutex.withLock {
+            checkGeneration(generation)
+            block()
+        }
     }
 
     private fun checkGeneration(expected: Long) {

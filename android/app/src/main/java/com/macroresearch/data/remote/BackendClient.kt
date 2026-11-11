@@ -68,12 +68,15 @@ data class BackendStatus(val sources: List<BackendSourceHealth>)
  * host.
  */
 class BackendClient(
-    private val client: OkHttpClient,
+    client: OkHttpClient,
     private val gson: Gson,
     private val baseUrl: () -> String,
     private val token: () -> String?,
     private val deviceIdentity: () -> BackendDeviceIdentity? = { null },
 ) {
+    // A backend redirect must never forward device identity (or downgrade TLS) to another origin.
+    private val client = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+
     /** Uses the unsaved address without sending any saved Key or device identity. */
     suspend fun keyRequestBotUrl(address: String): String? = withContext(Dispatchers.IO) {
         val request = Request.Builder()

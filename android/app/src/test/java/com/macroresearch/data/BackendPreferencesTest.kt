@@ -91,6 +91,15 @@ class BackendPreferencesTest {
     }
 
     @Test
+    fun onlyChangingAnActiveBackendAddressResetsMacroIdentity() {
+        val backend = BackendSettings(mode = DataSourceMode.BACKEND, baseUrl = "https://a.example.com")
+        assertTrue(backend.requiresMacroCacheReset("https://b.example.com"))
+        assertTrue(!backend.requiresMacroCacheReset("https://a.example.com")) // Token-only save.
+        assertTrue(!backend.requiresMacroCacheReset(BackendPreferences.normalizeBaseUrl(" https://a.example.com/ ")))
+        assertTrue(!backend.copy(mode = DataSourceMode.DIRECT).requiresMacroCacheReset("https://b.example.com"))
+    }
+
+    @Test
     fun modeNamesRoundTripAndFallBackToDirect() {
         assertEquals(DataSourceMode.BACKEND, DataSourceMode.fromName("backend"))
         assertEquals(DataSourceMode.BACKEND, DataSourceMode.fromName("BACKEND"))

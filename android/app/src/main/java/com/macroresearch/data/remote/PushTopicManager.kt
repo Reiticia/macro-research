@@ -8,9 +8,17 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+/** Topic operations are injectable so source switching can be tested without Firebase/network. */
+interface EventPushTopics {
+    suspend fun subscribe(eventId: Long)
+    suspend fun unsubscribe(eventId: Long)
+    suspend fun synchronize(eventIds: List<Long>)
+    suspend fun unsubscribeAll(eventIds: List<Long>)
+}
+
 /** Owns the device's FCM topic subscriptions for starred backend events. */
-class PushTopicManager {
-    suspend fun subscribe(eventId: Long) {
+class PushTopicManager : EventPushTopics {
+    override suspend fun subscribe(eventId: Long) {
         val messaging = runCatching { messaging() }.getOrNull() ?: return
         try {
             await(messaging.subscribeToTopic(topicName(eventId)))
@@ -21,7 +29,7 @@ class PushTopicManager {
         }
     }
 
-    suspend fun unsubscribe(eventId: Long) {
+    override suspend fun unsubscribe(eventId: Long) {
         val messaging = runCatching { messaging() }.getOrNull() ?: return
         try {
             await(messaging.unsubscribeFromTopic(topicName(eventId)))
@@ -32,11 +40,11 @@ class PushTopicManager {
         }
     }
 
-    suspend fun synchronize(eventIds: List<Long>) {
+    override suspend fun synchronize(eventIds: List<Long>) {
         eventIds.distinct().forEach { subscribe(it) }
     }
 
-    suspend fun unsubscribeAll(eventIds: List<Long>) {
+    override suspend fun unsubscribeAll(eventIds: List<Long>) {
         eventIds.distinct().forEach { unsubscribe(it) }
     }
 

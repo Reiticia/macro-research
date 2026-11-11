@@ -38,6 +38,7 @@ import com.macroresearch.R
 import com.macroresearch.data.BackendPreferences
 import com.macroresearch.data.DataSourceMode
 import com.macroresearch.data.MacroRepository
+import com.macroresearch.data.requiresMacroCacheReset
 import com.macroresearch.data.remote.BackendAuthenticationDisabledException
 import com.macroresearch.data.remote.BackendProtocolException
 import com.macroresearch.data.remote.BackendUnauthorizedException
@@ -62,6 +63,7 @@ fun DataSourceSettings(repository: MacroRepository) {
     var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var pendingMode by remember { mutableStateOf<DataSourceMode?>(null) }
+    var confirmBackendChange by remember { mutableStateOf(false) }
     // The backend fields must be reachable *before* the mode switches, otherwise a first-time
     // user would be asked for an address they cannot enter anywhere.
     var showBackendConfig by rememberSaveable {
@@ -78,6 +80,30 @@ fun DataSourceSettings(repository: MacroRepository) {
     val botOpenFailedLabel = stringResource(R.string.backend_key_bot_open_failed)
     val addressInvalidLabel = stringResource(R.string.backend_key_address_invalid)
     val tokenLabel = stringResource(R.string.backend_token)
+    val saveAndVerify: () -> Unit = {
+        busy = true
+        status = null
+        error = null
+        scope.launch {
+            try {
+                repository.saveBackendSettings(baseUrl, token)
+                token = ""
+                repository.verifyBackend()
+                status = verifiedLabel
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                error = when (failure) {
+                    is BackendUnauthorizedException -> unauthorizedLabel
+                    is BackendAuthenticationDisabledException -> authenticationDisabledLabel
+                    is BackendProtocolException -> protocolMismatchLabel
+                    else -> failure.message ?: unreachableLabel
+                }
+            } finally {
+                busy = false
+            }
+        }
+    }
 
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -251,32 +277,35 @@ fun DataSourceSettings(repository: MacroRepository) {
                     Button(
                         enabled = !busy,
                         onClick = {
-                            busy = true
-                            status = null
-                            error = null
-                            scope.launch {
-                                try {
-                                    repository.saveBackendSettings(baseUrl, token)
-                                    repository.verifyBackend()
-                                    status = verifiedLabel
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (failure: Exception) {
-                                    error = when (failure) {
-                                        is BackendUnauthorizedException -> unauthorizedLabel
-                                        is BackendAuthenticationDisabledException -> authenticationDisabledLabel
-                                        is BackendProtocolException -> protocolMismatchLabel
-                                        else -> failure.message ?: unreachableLabel
-                                    }
-                                } finally {
-                                    busy = false
-                                }
+                            val normalized = runCatching {
+                                BackendPreferences.normalizeBaseUrl(baseUrl, settings.allowCleartext)
                             }
+                            if (normalized.isFailure) {
+                                error = addressInvalidLabel
+                            } else if (settings.requiresMacroCacheReset(normalized.getOrThrow())) {
+                                confirmBackendChange = true
+                            } else saveAndVerify()
                         },
                     ) { Text(stringResource(R.string.backend_test)) }
                 }
             }
         }
+    }
+
+    if (confirmBackendChange) {
+        AlertDialog(
+            onDismissRequest = { confirmBackendChange = false },
+            title = { Text(stringResource(R.string.backend_change_title)) },
+            text = { Text(stringResource(R.string.backend_change_body)) },
+            confirmButton = {
+                Button(onClick = { confirmBackendChange = false; saveAndVerify() }) {
+                    Text(stringResource(R.string.data_source_switch_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmBackendChange = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 
     pendingMode?.let { mode ->

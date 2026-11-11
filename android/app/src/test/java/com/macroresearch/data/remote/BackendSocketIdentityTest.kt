@@ -12,6 +12,28 @@ import org.junit.Test
 import java.util.concurrent.TimeUnit
 
 class BackendSocketIdentityTest {
+    @Test fun websocketRedirectDoesNotForwardBindingHeaders() {
+        MockWebServer().use { origin ->
+            MockWebServer().use { destination ->
+                origin.start()
+                destination.start()
+                origin.enqueue(MockResponse().setResponseCode(302).setHeader("Location", destination.url("/ws")))
+                val http = OkHttpClient()
+                val socket = BackendSocket(http, Gson(), { origin.url("/ws").toString() }, { "synthetic-key" },
+                    { BackendDeviceIdentity("synthetic-installation", "a".repeat(64)) })
+                try {
+                    socket.connect()
+                    assertNotNull(origin.takeRequest(5, TimeUnit.SECONDS))
+                    assertNull(destination.takeRequest(500, TimeUnit.MILLISECONDS))
+                } finally {
+                    socket.close()
+                    http.connectionPool.evictAll()
+                    http.dispatcher.executorService.shutdownNow()
+                }
+            }
+        }
+    }
+
     @Test fun websocketHandshakeCarriesTheSameBindingHeaders() {
         val server = MockWebServer()
         server.start()

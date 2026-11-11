@@ -65,6 +65,31 @@ class ReleaseRefreshGateTest {
         assertEquals("new", cached)
     }
 
+    @Test fun ordinaryCacheCommitsRejectOldSourcesIncludingEmptyResponseFreshnessMarkers() = runBlocking {
+        for (rows in listOf(emptyList(), listOf("old event"))) {
+            val gate = ReleaseRefreshGate()
+            val entered = CompletableDeferred<Unit>()
+            val response = CompletableDeferred<List<String>>()
+            var cache = listOf("old cache")
+            var synced = false
+            val request = async {
+                val generation = gate.generation.value
+                entered.complete(Unit)
+                val fetched = response.await()
+                runCatching { gate.commit(generation) { cache = fetched; synced = true } }
+            }
+            entered.await()
+            gate.commitMutex.withLock { gate.invalidate(); cache = emptyList(); synced = false }
+            response.complete(rows)
+            assertTrue(request.await().exceptionOrNull() is CancellationException)
+            assertTrue(cache.isEmpty())
+            assertFalse(synced)
+            gate.commit(gate.generation.value) { cache = listOf("new event"); synced = true }
+            assertEquals(listOf("new event"), cache)
+            assertTrue(synced)
+        }
+    }
+
     @Test fun failedAndCancelledResponsesNeitherCommitNorBecomeSuccessfulCooldowns() = runBlocking {
         val gate = ReleaseRefreshGate()
         var commits = 0

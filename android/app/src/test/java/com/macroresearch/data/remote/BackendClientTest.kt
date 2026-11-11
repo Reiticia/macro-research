@@ -125,6 +125,31 @@ class BackendClientTest {
     }
 
     @Test
+    fun redirectsNeverForwardCredentialsOrDeviceIdentityForRestAndImages() = runBlocking {
+        MockWebServer().use { destination ->
+            destination.start()
+            val backend = BackendClient(OkHttpClient(), gson, { server.url("/").toString() }, { token },
+                { com.macroresearch.data.BackendDeviceIdentity("synthetic-installation", "a".repeat(64)) })
+            for (code in listOf(301, 302, 303, 307, 308)) {
+                for (image in listOf(false, true)) {
+                    destination.enqueue(MockResponse().setBody("{\"sources\":[]}"))
+                    server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", destination.url("/target")))
+                    val result = runCatching { if (image) backend.companyLogo("AAPL") else backend.status() }
+                    if (!image) assertTrue("HTTP $code", result.isFailure)
+                    val request = server.takeRequest()
+                    assertEquals("Bearer $token", request.getHeader("Authorization"))
+                    assertEquals("synthetic-installation", request.getHeader("X-Installation-Id"))
+                }
+            }
+            assertEquals(0, destination.requestCount)
+            // Reject even same-origin redirects; callers must configure the actual API origin.
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", server.url("/other")))
+            assertTrue(runCatching { backend.status() }.isFailure)
+            assertEquals("/api/v1/status", server.takeRequest().path)
+        }
+    }
+
+    @Test
     fun translationCacheDoesNotRequireAnAccessToken() = runBlocking {
         server.enqueue(
             MockResponse().setBody(

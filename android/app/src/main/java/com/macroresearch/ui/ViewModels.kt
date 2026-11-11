@@ -310,6 +310,10 @@ class AnalysisViewModel(
     private var refreshJob: Job? = null
     private var refreshedRevision: Int? = null
     private var generationJob: Job? = null
+    private var conversationJob: Job? = null
+    private var conversationLoadJob: Job? = null
+    private var conversationEpoch = 0L
+    private var resettingConversation = false
 
     init {
         refresh()
@@ -323,30 +327,56 @@ class AnalysisViewModel(
         }
     }
 
-    fun loadConversation() = viewModelScope.launch {
-        val history = repository.aiConversationHistory(id)
-        _conversation.update { it.copy(messages = repository.aiConversation(id), requests = history.requests) }
-    }
-
-    fun askFollowUp(language: String, question: String) = viewModelScope.launch {
-        if (_conversation.value.loading) return@launch
-        _conversation.value = _conversation.value.copy(loading = true, error = null)
-        try {
-            val messages = repository.askAiFollowUp(id, language, question) { records ->
-                _conversation.update { it.copy(requests = records) }
-            }
-            _conversation.update { it.copy(messages = messages, loading = false) }
-        } catch (cancelled: CancellationException) {
-            _conversation.update { it.copy(loading = false) }
-            throw cancelled
-        } catch (error: Exception) {
-            _conversation.update { it.copy(loading = false, error = error.message) }
+    fun loadConversation() {
+        conversationLoadJob?.cancel()
+        if (resettingConversation) return
+        val epoch = conversationEpoch
+        conversationLoadJob = viewModelScope.launch {
+            val history = repository.aiConversationHistory(id)
+            val messages = repository.aiConversation(id)
+            if (epoch == conversationEpoch) _conversation.update { it.copy(messages = messages, requests = history.requests) }
         }
     }
 
-    fun resetConversation() = viewModelScope.launch {
-        repository.resetAiConversation(id)
-        _conversation.value = AiConversationState()
+    fun askFollowUp(language: String, question: String) {
+        if (_conversation.value.loading || resettingConversation) return
+        val epoch = conversationEpoch
+        _conversation.value = _conversation.value.copy(loading = true, error = null)
+        conversationJob = viewModelScope.launch {
+            try {
+                val messages = repository.askAiFollowUp(id, language, question) { records ->
+                    if (epoch == conversationEpoch) _conversation.update { it.copy(requests = records) }
+                }
+                if (epoch == conversationEpoch) _conversation.update { it.copy(messages = messages, loading = false) }
+            } catch (cancelled: CancellationException) {
+                if (epoch == conversationEpoch) _conversation.update { it.copy(loading = false) }
+                throw cancelled
+            } catch (error: Exception) {
+                if (epoch == conversationEpoch) _conversation.update { it.copy(loading = false, error = error.message) }
+            }
+        }
+    }
+
+    fun resetConversation() {
+        if (resettingConversation) return
+        resettingConversation = true
+        conversationEpoch++
+        conversationJob?.cancel()
+        conversationLoadJob?.cancel()
+        _conversation.value = AiConversationState(loading = true)
+        viewModelScope.launch {
+            try {
+                repository.resetAiConversation(id)
+                _conversation.value = AiConversationState()
+            } catch (cancelled: CancellationException) {
+                _conversation.update { it.copy(loading = false) }
+                throw cancelled
+            } catch (error: Exception) {
+                _conversation.value = AiConversationState(error = error.message)
+            } finally {
+                resettingConversation = false
+            }
+        }
     }
 
     fun scheduleWindowEndRefresh(language: String, active: Boolean) {
