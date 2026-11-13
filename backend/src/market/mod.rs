@@ -57,6 +57,15 @@ struct CachedLiveQuote {
     fetched_at: Instant,
 }
 
+fn quote_timestamp_stale(quote: &LiveQuote, ttl: Duration) -> bool {
+    let now = chrono::Utc::now();
+    quote.timestamp > now
+        || now
+            .signed_duration_since(quote.timestamp)
+            .to_std()
+            .map_or(true, |age| age > ttl)
+}
+
 impl MarketService {
     pub fn new(
         yahoo: Arc<dyn MarketDataProvider>,
@@ -245,9 +254,9 @@ impl MarketService {
             .filter(|cached| cached.fetched_at.elapsed() <= self.live_quote_stale_ttl)
             .map(|cached| {
                 let mut quote = cached.quote.clone();
-                if cached.fetched_at.elapsed() > self.live_quote_refresh_interval {
-                    quote.stale = true;
-                }
+                quote.stale = quote.stale
+                    || cached.fetched_at.elapsed() > self.live_quote_refresh_interval
+                    || quote_timestamp_stale(&quote, self.live_quote_stale_ttl);
                 quote
             })
     }
@@ -275,12 +284,13 @@ impl MarketService {
         if !force && let Some(quote) = self.fresh_cached_live_quote(symbol).await {
             return Ok(quote);
         }
-        let quote = self
+        let mut quote = self
             .providers
             .get(&symbol)
             .ok_or_else(|| AppError::Provider(format!("no provider for {symbol}")))?
             .live_quote(symbol)
             .await?;
+        quote.stale = quote.stale || quote_timestamp_stale(&quote, self.live_quote_stale_ttl);
         self.live_quote_cache.write().await.insert(
             symbol,
             CachedLiveQuote {

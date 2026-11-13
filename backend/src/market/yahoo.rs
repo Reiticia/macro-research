@@ -25,6 +25,7 @@ struct YahooRequestGate {
 
 const MIN_REQUEST_INTERVAL: Duration = Duration::from_millis(750);
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(60);
+const MACRO_QUOTE_MAX_AGE_SECONDS: i64 = 300;
 
 impl YahooProvider {
     pub fn new(client: reqwest::Client, base_url: impl Into<String>) -> Self {
@@ -150,12 +151,26 @@ impl MarketDataProvider for YahooProvider {
                     .first()
                     .and_then(|quotes| quotes.close.iter().rev().flatten().next().copied())
             })
+            .filter(|price| price.is_finite() && *price > 0.0)
             .ok_or_else(|| AppError::Provider(format!("Yahoo returned no price for {symbol}")))?;
         let timestamp = result
             .meta
             .regular_market_time
             .and_then(|timestamp| Utc.timestamp_opt(timestamp, 0).single())
-            .unwrap_or_else(Utc::now);
+            .ok_or_else(|| {
+                AppError::Provider(format!("Yahoo returned no quote timestamp for {symbol}"))
+            })?;
+        let now = Utc::now();
+        if timestamp > now {
+            return Err(AppError::Provider(format!(
+                "Yahoo returned a future quote for {symbol}"
+            )));
+        }
+        if now.signed_duration_since(timestamp).num_seconds() > MACRO_QUOTE_MAX_AGE_SECONDS {
+            return Err(AppError::Provider(format!(
+                "Yahoo returned a stale quote for {symbol}"
+            )));
+        }
         Ok(Quote {
             symbol,
             timestamp,
@@ -180,12 +195,21 @@ impl MarketDataProvider for YahooProvider {
                     .first()
                     .and_then(|quotes| quotes.close.iter().rev().flatten().next().copied())
             })
+            .filter(|price| price.is_finite() && *price > 0.0)
             .ok_or_else(|| AppError::Provider(format!("Yahoo returned no price for {symbol}")))?;
         let timestamp = result
             .meta
             .regular_market_time
             .and_then(|timestamp| Utc.timestamp_opt(timestamp, 0).single())
-            .unwrap_or_else(Utc::now);
+            .ok_or_else(|| {
+                AppError::Provider(format!("Yahoo returned no quote timestamp for {symbol}"))
+            })?;
+        let now = Utc::now();
+        if timestamp > now {
+            return Err(AppError::Provider(format!(
+                "Yahoo returned a future quote for {symbol}"
+            )));
+        }
         let change_percent = result.meta.chart_previous_close.and_then(|previous| {
             (previous.is_finite() && previous > 0.0)
                 .then_some((price - previous) / previous * 100.0)
@@ -202,7 +226,7 @@ impl MarketDataProvider for YahooProvider {
                 .meta
                 .market_state
                 .map(|value| value.to_ascii_lowercase()),
-            stale: false,
+            stale: (now - timestamp).num_seconds() > MACRO_QUOTE_MAX_AGE_SECONDS,
         })
     }
 

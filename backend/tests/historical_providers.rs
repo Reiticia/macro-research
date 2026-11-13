@@ -160,6 +160,50 @@ async fn biquote_parses_quote_freshness_and_closed_candles() {
 }
 
 #[tokio::test]
+async fn yahoo_quote_requires_timestamp_and_marks_old_live_quotes_stale() {
+    let old = Utc::now() - Duration::days(2);
+    let router = Router::new().route(
+        "/{symbol}",
+        get(move || async move {
+            Json(serde_json::json!({
+                "chart": {"result": [{
+                    "meta": {
+                        "regularMarketPrice": 100.0,
+                        "regularMarketTime": old.timestamp(),
+                        "marketState": "CLOSED"
+                    },
+                    "timestamp": [],
+                    "indicators": {"quote": [{"close": []}]}
+                }]}
+            }))
+        }),
+    );
+    let (url, task) = serve(router).await;
+    let provider = YahooProvider::new(reqwest::Client::new(), url);
+    let live = provider.live_quote(MarketSymbol::Gold).await.unwrap();
+    assert!(live.stale);
+    assert!(provider.quote(MarketSymbol::Gold).await.is_err());
+    task.abort();
+
+    let router = Router::new().route(
+        "/{symbol}",
+        get(|| async {
+            Json(serde_json::json!({
+                "chart": {"result": [{
+                    "meta": {"regularMarketPrice": 100.0},
+                    "timestamp": [],
+                    "indicators": {"quote": [{"close": []}]}
+                }]}
+            }))
+        }),
+    );
+    let (url, task) = serve(router).await;
+    let provider = YahooProvider::new(reqwest::Client::new(), url);
+    assert!(provider.live_quote(MarketSymbol::Gold).await.is_err());
+    task.abort();
+}
+
+#[tokio::test]
 async fn yahoo_rate_limit_is_shared_across_symbols() {
     let calls = Arc::new(AtomicUsize::new(0));
     let router = Router::new()

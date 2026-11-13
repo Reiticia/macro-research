@@ -18,8 +18,15 @@ pub fn calculate_reactions(
         .into_iter()
         .filter_map(|(symbol, mut values)| {
             values.sort_by_key(|snapshot| snapshot.timestamp);
-            let baseline = nearest(&values, event_time - Duration::minutes(1), 180)?;
-            if baseline.price == 0.0 {
+            // The baseline must be an actually observed pre-release quote. Never use a
+            // post-release sample merely because it is closest to T-1m.
+            let baseline = values
+                .iter()
+                .copied()
+                .filter(|snapshot| snapshot.timestamp < event_time)
+                .filter(|snapshot| snapshot.timestamp >= event_time - Duration::seconds(180))
+                .max_by_key(|snapshot| snapshot.timestamp)?;
+            if !baseline.price.is_finite() || baseline.price <= 0.0 {
                 return None;
             }
             let is_yield = matches!(symbol, MarketSymbol::Us2y | MarketSymbol::Us10y);
@@ -29,13 +36,27 @@ pub fn calculate_reactions(
                 ReactionUnit::Percent
             };
             let change = |minutes| {
-                nearest(&values, event_time + Duration::minutes(minutes), 180).map(|snapshot| {
-                    if is_yield {
-                        (snapshot.price - baseline.price) * 100.0
-                    } else {
-                        (snapshot.price - baseline.price) / baseline.price * 100.0
-                    }
-                })
+                let target = event_time + Duration::minutes(minutes);
+                // Do not look forward from a reaction horizon. A sample must be after the
+                // release and no more than 60 seconds before the requested target.
+                values
+                    .iter()
+                    .copied()
+                    .filter(|snapshot| {
+                        snapshot.timestamp > event_time
+                            && snapshot.timestamp <= target
+                            && snapshot.timestamp > target - Duration::minutes(1)
+                            && snapshot.price.is_finite()
+                            && snapshot.price > 0.0
+                    })
+                    .max_by_key(|snapshot| snapshot.timestamp)
+                    .map(|snapshot| {
+                        if is_yield {
+                            (snapshot.price - baseline.price) * 100.0
+                        } else {
+                            (snapshot.price - baseline.price) / baseline.price * 100.0
+                        }
+                    })
             };
             Some(MarketReaction {
                 event_id,
@@ -50,18 +71,6 @@ pub fn calculate_reactions(
             })
         })
         .collect()
-}
-
-fn nearest<'a>(
-    snapshots: &[&'a MarketSnapshot],
-    target: DateTime<Utc>,
-    tolerance_seconds: i64,
-) -> Option<&'a MarketSnapshot> {
-    snapshots
-        .iter()
-        .copied()
-        .min_by_key(|snapshot| (snapshot.timestamp - target).num_milliseconds().abs())
-        .filter(|snapshot| (snapshot.timestamp - target).num_seconds().abs() <= tolerance_seconds)
 }
 
 #[cfg(test)]
@@ -83,6 +92,21 @@ mod tests {
             close: Some(price),
             volume: None,
         }
+    }
+
+    #[test]
+    fn missing_pre_release_sample_never_uses_post_release_price() {
+        let time = Utc.with_ymd_and_hms(2026, 9, 10, 12, 30, 0).unwrap();
+        let values = vec![snapshot(1, 30, 100.0), snapshot(1, 32, 120.0)];
+        assert!(calculate_reactions(1, time, &values).is_empty());
+    }
+
+    #[test]
+    fn missing_horizon_sample_never_uses_a_later_price() {
+        let time = Utc.with_ymd_and_hms(2026, 9, 10, 12, 30, 0).unwrap();
+        let values = vec![snapshot(1, 29, 100.0), snapshot(1, 32, 120.0)];
+        let result = calculate_reactions(1, time, &values).pop().unwrap();
+        assert_eq!(result.change_1m, None);
     }
 
     #[test]

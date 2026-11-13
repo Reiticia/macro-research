@@ -87,6 +87,11 @@ impl CnbcProvider {
 impl MarketDataProvider for CnbcProvider {
     async fn quote(&self, symbol: MarketSymbol) -> Result<Quote, AppError> {
         let live = self.live_quote(symbol).await?;
+        if live.stale {
+            return Err(AppError::Provider(format!(
+                "CNBC returned a stale quote for {symbol}"
+            )));
+        }
         Ok(Quote {
             symbol: live.symbol,
             timestamp: live.timestamp,
@@ -103,7 +108,7 @@ impl MarketDataProvider for CnbcProvider {
     async fn candles(
         &self,
         symbol: MarketSymbol,
-        _start: DateTime<Utc>,
+        start: DateTime<Utc>,
         end: DateTime<Utc>,
         interval: Interval,
     ) -> Result<Vec<Candle>, AppError> {
@@ -114,7 +119,7 @@ impl MarketDataProvider for CnbcProvider {
         }
         let ticker = Self::ticker(symbol)?;
         let body = self.chart_body(ticker).await?;
-        Ok(parse_candles(symbol, &body, end))
+        Ok(parse_candles(symbol, &body, start, end))
     }
 }
 
@@ -134,17 +139,27 @@ pub fn parse_quote(symbol: MarketSymbol, body: &str) -> Result<LiveQuote, AppErr
             .and_then(|value| value.trim_end_matches('%').parse::<f64>().ok())
     };
     let price = number("last")
+        .filter(|price| price.is_finite() && *price > 0.0)
         .ok_or_else(|| AppError::Provider(format!("CNBC returned no price for {symbol}")))?;
     // CNBC's own change_pct disagrees with its change field, so derive the move from the
     // previous session close, exactly like the other providers.
     let previous = number("previous_day_closing").or_else(|| number("open"));
+    let timestamp = quote
+        .get("last_time")
+        .and_then(scalar_text)
+        .and_then(|value| parse_cnbc_instant(&value))
+        .ok_or_else(|| {
+            AppError::Provider(format!("CNBC returned no quote timestamp for {symbol}"))
+        })?;
+    let now = Utc::now();
+    if timestamp > now {
+        return Err(AppError::Provider(format!(
+            "CNBC returned a future quote for {symbol}"
+        )));
+    }
     Ok(LiveQuote {
         symbol,
-        timestamp: quote
-            .get("last_time")
-            .and_then(scalar_text)
-            .and_then(|value| parse_cnbc_instant(&value))
-            .unwrap_or_else(Utc::now),
+        timestamp,
         price,
         provider: "cnbc".to_owned(),
         change_percent: previous
@@ -156,11 +171,16 @@ pub fn parse_quote(symbol: MarketSymbol, body: &str) -> Result<LiveQuote, AppErr
             .get("curmktstatus")
             .and_then(scalar_text)
             .map(|value| value.to_lowercase()),
-        stale: false,
+        stale: (now - timestamp).num_seconds() > 300,
     })
 }
 
-pub fn parse_candles(symbol: MarketSymbol, body: &str, end: DateTime<Utc>) -> Vec<Candle> {
+pub fn parse_candles(
+    symbol: MarketSymbol,
+    body: &str,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> Vec<Candle> {
     let Ok(root) = serde_json::from_str::<Value>(body) else {
         return Vec::new();
     };
@@ -184,7 +204,7 @@ pub fn parse_candles(symbol: MarketSymbol, body: &str, end: DateTime<Utc>) -> Ve
             Some(value) => value,
             None => continue,
         };
-        if timestamp > end + chrono::Duration::seconds(60) {
+        if timestamp < start || timestamp > end + chrono::Duration::seconds(60) {
             continue;
         }
         let Some(close) = bar
@@ -250,14 +270,25 @@ mod tests {
     }
 
     #[test]
-    fn parses_one_minute_bars_and_filters_the_future() {
+    fn missing_quote_timestamp_is_rejected() {
+        let body = r#"{"FormattedQuoteResult":{"FormattedQuote":[{"last":"4.123%"}]}}"#;
+        assert!(parse_quote(MarketSymbol::Us10y, body).is_err());
+    }
+
+    #[test]
+    fn parses_one_minute_bars_and_filters_the_range() {
         let end = DateTime::parse_from_rfc3339("2026-09-11T15:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
         let body = r#"{"barData":{"priceBars":[
-            {"tradeTimeinMills":"1789000000000","open":"4.1","high":"4.2","low":"4.0","close":"4.15"},
+            {"tradeTimeinMills":"1789137000000","open":"4.1","high":"4.2","low":"4.0","close":"4.15"},
             {"tradeTimeinMills":"99999999999999","open":"4.1","high":"4.2","low":"4.0","close":"4.15"}]}}"#;
-        let candles = parse_candles(MarketSymbol::Us10y, body, end);
+        let candles = parse_candles(
+            MarketSymbol::Us10y,
+            body,
+            end - chrono::Duration::hours(1),
+            end,
+        );
         assert_eq!(candles.len(), 1);
         assert!((candles[0].close - 4.15).abs() < 1e-9);
     }
