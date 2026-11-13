@@ -144,6 +144,7 @@ fun MacroApp(
                     padding = padding,
                     onEvent = { navController.navigate("event/$it") },
                     onFollowedEvents = { navController.navigate("followed") },
+                    onCalendar = { navController.navigate("calendar") { launchSingleTop = true } },
                 )
             }
             composable("calendar") {

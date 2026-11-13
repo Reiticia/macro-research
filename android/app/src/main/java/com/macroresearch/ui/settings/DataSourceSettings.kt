@@ -64,6 +64,7 @@ fun DataSourceSettings(repository: MacroRepository) {
     var busy by remember { mutableStateOf(false) }
     var pendingMode by remember { mutableStateOf<DataSourceMode?>(null) }
     var confirmBackendChange by remember { mutableStateOf(false) }
+    var confirmClear by remember { mutableStateOf(false) }
     // The backend fields must be reachable *before* the mode switches, otherwise a first-time
     // user would be asked for an address they cannot enter anywhere.
     var showBackendConfig by rememberSaveable {
@@ -261,18 +262,11 @@ fun DataSourceSettings(repository: MacroRepository) {
                         )
                     }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                Text(stringResource(R.string.backend_save_explanation), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(
                         enabled = !busy,
-                        onClick = {
-                            scope.launch {
-                                repository.clearBackendSettings()
-                                baseUrl = ""
-                                token = ""
-                                status = null
-                                error = null
-                            }
-                        },
+                        onClick = { confirmClear = true },
                     ) { Text(stringResource(R.string.backend_clear)) }
                     Button(
                         enabled = !busy,
@@ -292,6 +286,28 @@ fun DataSourceSettings(repository: MacroRepository) {
         }
     }
 
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text(stringResource(R.string.backend_clear)) },
+            text = { Text(stringResource(if (settings.mode == DataSourceMode.BACKEND) R.string.backend_remove_warning else R.string.backend_remove_direct_warning)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    busy = true
+                    scope.launch {
+                        try {
+                            repository.clearBackendSettings()
+                            baseUrl = ""; token = ""; status = null; error = null
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { error = unreachableLabel }
+                        finally { busy = false }
+                    }
+                }) { Text(stringResource(R.string.backend_clear)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
     if (confirmBackendChange) {
         AlertDialog(
             onDismissRequest = { confirmBackendChange = false },
@@ -319,7 +335,13 @@ fun DataSourceSettings(repository: MacroRepository) {
                     pendingMode = null
                     // Leaving the backend collapses its configuration block again.
                     if (target == DataSourceMode.DIRECT) showBackendConfig = false
-                    scope.launch { repository.setDataSourceMode(target) }
+                    busy = true
+                    scope.launch {
+                        try { repository.setDataSourceMode(target) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { error = unreachableLabel }
+                        finally { busy = false }
+                    }
                 }) { Text(stringResource(R.string.data_source_switch_confirm)) }
             },
             dismissButton = {

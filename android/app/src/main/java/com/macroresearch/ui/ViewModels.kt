@@ -19,6 +19,9 @@ import com.macroresearch.ui.common.toggleImportanceSelection
 import com.macroresearch.ui.history.HistoryDataSource
 import com.macroresearch.ui.history.RepositoryHistoryDataSource
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import com.macroresearch.ui.market.asStale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,27 +51,58 @@ class HomeViewModel(private val repository: MacroRepository) : ViewModel() {
     val refresh = _refresh.asStateFlow()
     private val _liveMarket = MutableStateFlow<MarketQuotesResponse?>(null)
     val liveMarket = _liveMarket.asStateFlow()
+    private val _marketFailed = MutableStateFlow(false)
+    val marketFailed = _marketFailed.asStateFlow()
     private var liveMarketRequest: Job? = null
+    private var refreshRequest: Job? = null
 
-    init { refresh() }
-
-    fun refresh() = viewModelScope.launch {
-        _refresh.value = LoadState(loading = true)
-        runCatching { repository.refreshUpcoming() }
-            .onSuccess { _refresh.value = LoadState(Unit, loading = false) }
-            .onFailure { _refresh.value = LoadState(loading = false, error = it.message) }
-    }
-
-    fun loadLiveMarket(symbols: List<String>) {
-        if (symbols.isEmpty() || liveMarketRequest?.isActive == true) return
-        liveMarketRequest = viewModelScope.launch {
-            runCatching { repository.marketQuotes(symbols) }
-                .onSuccess { _liveMarket.value = it }
+    fun refresh(force: Boolean = false) {
+        if (refreshRequest?.isActive == true) return
+        refreshRequest = viewModelScope.launch {
+            _refresh.value = LoadState(loading = true)
+            try {
+                repository.refreshUpcoming(force = force)
+                _refresh.value = LoadState(Unit, loading = false)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { _refresh.value = LoadState(loading = false, error = error.message) }
+            finally {
+                if (kotlinx.coroutines.currentCoroutineContext().isActive) _refresh.value = _refresh.value.copy(loading = false)
+            }
         }
     }
 
+    fun resetSource() {
+        stopRefreshing()
+        _liveMarket.value = null
+        _marketFailed.value = false
+        _refresh.value = LoadState(loading = false)
+    }
+
+    fun stopRefreshing() {
+        liveMarketRequest?.cancel(); liveMarketRequest = null
+        refreshRequest?.cancel(); refreshRequest = null
+        _refresh.value = _refresh.value.copy(loading = false)
+    }
+
     suspend fun loadLiveMarketAndWait(symbols: List<String>) {
-        loadLiveMarket(symbols)
+        if (symbols.isEmpty()) return
+        if (liveMarketRequest?.isActive != true) liveMarketRequest = viewModelScope.launch {
+            val context = repository.dataSourceSettings.value
+            try {
+                val result = repository.marketQuotes(symbols)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (repository.dataSourceSettings.value != context) return@launch
+                _liveMarket.value = com.macroresearch.ui.market.mergeQuoteRefresh(
+                    _liveMarket.value?.let { it.copy(quotes = it.quotes.filter { quote -> quote.symbol in symbols }) }, result)
+                _marketFailed.value = result.unavailable.isNotEmpty()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (repository.dataSourceSettings.value == context) {
+                    _liveMarket.value = _liveMarket.value?.asStale()
+                    _marketFailed.value = true
+                }
+            }
+        }
         liveMarketRequest?.join()
     }
 }
@@ -82,24 +116,36 @@ class MarketViewModel(private val repository: MacroRepository) : ViewModel() {
     val state = _state.asStateFlow()
     private var request: Job? = null
 
-    init {
-        refresh()
+    fun resetSource() {
+        stopRefreshing()
+        _state.value = LoadState(loading = false)
+    }
+
+    fun stopRefreshing() {
+        request?.cancel(); request = null
+        _state.value = _state.value.copy(loading = false)
     }
 
     fun refresh() {
         if (request?.isActive == true) return
         request = viewModelScope.launch {
+            val context = repository.dataSourceSettings.value
             val previous = _state.value.value
             _state.value = LoadState(value = previous, loading = true)
-            runCatching { repository.marketQuotes(symbols) }
-                .onSuccess { _state.value = LoadState(value = it, loading = false) }
-                .onFailure {
-                    _state.value = LoadState(
-                        value = previous,
-                        loading = false,
-                        error = it.message,
-                    )
+            try {
+                val result = repository.marketQuotes(symbols)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (repository.dataSourceSettings.value == context) {
+                    _state.value = LoadState(value = com.macroresearch.ui.market.mergeQuoteRefresh(previous, result), loading = false)
                 }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) {
+                if (repository.dataSourceSettings.value == context) {
+                    _state.value = LoadState(value = previous?.asStale(), loading = false, error = error.message ?: "unavailable")
+                }
+            } finally {
+                if (kotlinx.coroutines.currentCoroutineContext().isActive) _state.value = _state.value.copy(loading = false)
+            }
         }
     }
 

@@ -416,11 +416,11 @@ class MacroRepository(
 
     suspend fun isFollowed(id: Long): Boolean = dao.isFollowed(id)
 
-    suspend fun refreshUpcoming(days: Int = 7) = upcomingMutex.withLock {
+    suspend fun refreshUpcoming(days: Int = 7, force: Boolean = false) = upcomingMutex.withLock {
         val (generation, activeSource) = releaseCommitMutex.withLock { releaseGeneration.value to source }
         // Cached reads, legacy cleanup and the freshness marker share the switching boundary.
         val cached = releaseGate.commit(generation) {
-            if (networkPreferences.upcomingSyncFresh(UPCOMING_CACHE_MS)) {
+            if (!force && networkPreferences.upcomingSyncFresh(UPCOMING_CACHE_MS)) {
                 val now = Instant.now()
                 dao.cachedRange(now.toString(), now.plusSeconds(days * 86_400L).toString())
                     .map { it.asExternalModel() }

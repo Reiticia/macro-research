@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
@@ -19,6 +20,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,10 +62,14 @@ fun MarketScreen(repository: MacroRepository, padding: PaddingValues, onNews: ()
     val quotes = state.value?.quotes.orEmpty().associateBy { it.symbol }
     val unavailable = state.value?.unavailable.orEmpty().toSet()
 
-    LaunchedEffect(vm) {
-        while (true) {
-            vm.refreshAndWait()
-            delay(5_000)
+    val source by repository.dataSourceSettings.collectAsStateWithLifecycle()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(vm, source, lifecycle) {
+        vm.resetSource()
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            try {
+                while (true) { vm.refreshAndWait(); delay(5_000) }
+            } finally { vm.stopRefreshing() }
         }
     }
 
@@ -70,16 +78,6 @@ fun MarketScreen(repository: MacroRepository, padding: PaddingValues, onNews: ()
         contentPadding = PaddingValues(ResearchLayout.pagePadding),
         verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
     ) {
-        item {
-            Card(onClick = onNews, colors = androidx.compose.material3.CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-            )) {
-                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(stringResource(R.string.news_entry), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(stringResource(R.string.news_entry_note), style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -97,12 +95,25 @@ fun MarketScreen(repository: MacroRepository, padding: PaddingValues, onNews: ()
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (state.loading && quotes.isNotEmpty()) {
-                    CircularProgressIndicator(modifier = Modifier.padding(12.dp))
-                } else {
-                    IconButton(onClick = vm::refresh) {
+                IconButton(onClick = vm::refresh, enabled = !state.loading) {
+                    if (state.loading && quotes.isNotEmpty()) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
                         Icon(Icons.Outlined.Refresh, stringResource(R.string.refresh_quotes))
                     }
+                }
+            }
+        }
+        item {
+            Card(onClick = onNews, colors = androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+            )) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(stringResource(R.string.news_entry), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.news_entry_note), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -121,7 +132,7 @@ fun MarketScreen(repository: MacroRepository, padding: PaddingValues, onNews: ()
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        stringResource(R.string.load_failed, error),
+                        stringResource(R.string.quotes_refresh_failed),
                         modifier = Modifier.weight(1f),
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -160,6 +171,7 @@ fun MarketScreen(repository: MacroRepository, padding: PaddingValues, onNews: ()
 @Composable
 private fun MarketQuoteCard(symbol: String, quote: LiveMarketQuote?, unavailable: Boolean) {
     val locale = LocalConfiguration.current.locales[0]
+    val basisPointsLabel = stringResource(R.string.basis_points)
     val marketClosed = quote?.marketState.equals("closed", ignoreCase = true)
     Card {
         Row(
@@ -186,12 +198,17 @@ private fun MarketQuoteCard(symbol: String, quote: LiveMarketQuote?, unavailable
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                         )
+                        Text(
+                            stringResource(R.string.quote_observed_at, quoteTimeLabel(quote.timestamp, locale) ?: "—"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         if (quote.low != null && quote.high != null) {
                             Text(
                                 stringResource(
                                     R.string.market_day_range,
-                                    formatMarketPrice(quote.low, locale),
-                                    formatMarketPrice(quote.high, locale),
+                                    formatMarketQuoteValue(symbol, quote.low, locale),
+                                    formatMarketQuoteValue(symbol, quote.high, locale),
                                 ),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.labelSmall,
@@ -212,18 +229,22 @@ private fun MarketQuoteCard(symbol: String, quote: LiveMarketQuote?, unavailable
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    quote?.price?.let { formatMarketPrice(it, locale) } ?: "--",
+                    quote?.price?.let { formatMarketQuoteValue(symbol, it, locale) } ?: "--",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.End,
                 )
-                quote?.changePercent?.takeIf { !quote.stale && !marketClosed }?.let { change ->
-                    Text(
-                        "%+.2f%%".format(locale, change),
-                        color = if (change >= 0) AssetUp else AssetDown,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                    )
+                if (quote != null && !quote.stale && !marketClosed) {
+                    val changeText = formatMarketQuoteChange(quote, locale, basisPointsLabel)
+                    val change = quote.changePercent
+                    if (changeText != null && change != null) {
+                        Text(
+                            changeText,
+                            color = if (change >= 0) AssetUp else AssetDown,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
             }
         }
@@ -233,6 +254,8 @@ private fun MarketQuoteCard(symbol: String, quote: LiveMarketQuote?, unavailable
 private fun providerLabel(provider: String): String = when (provider.lowercase(Locale.ROOT)) {
     "binance" -> "Binance"
     "biquote" -> "BiQuote"
+    "cnbc" -> "CNBC"
+    "treasury" -> "U.S. Treasury"
     "yahoo" -> "Yahoo Finance"
     else -> provider
 }

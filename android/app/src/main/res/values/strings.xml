@@ -44,7 +44,7 @@
     <string name="follow">Follow</string>
     <string name="event_load_failed">Unable to load event</string>
     <string name="view_analysis">View full analysis</string>
-    <string name="view_analysis_progress">View analysis progress</string>
+    <string name="view_analysis_progress">Open analysis</string>
     <string name="view_history">View historical reactions</string>
     <string name="release_countdown">Time until release</string>
     <string name="data_status">Data status</string>
@@ -52,7 +52,7 @@
     <string name="event_intro">About this event</string>
     <string name="event_intro_body">%1$s · %2$s. Compare the actual value with consensus. Interpret the macro signal in the context of the indicator; above consensus does not necessarily mean a positive market impact.</string>
     <string name="event_intro_nonnumeric">%1$s · %2$s. This event has no standardized actual value or market consensus. Focus on its release time, content, and immediate market impact.</string>
-    <string name="market_tracking">Market watch</string>
+    <string name="market_tracking">Home market overview</string>
     <string name="market_data_unavailable">No market data was collected around this release.</string>
     <string name="market_selection_note">Choose 2–4 assets for the Home overview · %1$d selected</string>
     <string name="analysis_progress">Analysis progress</string>
@@ -142,7 +142,7 @@
     <string name="backend_key_address_invalid">Enter a valid backend address; enable plain-HTTP access first if needed.</string>
     <string name="backend_token_note">Request via Telegram Bot: /request_key device or /request_key general. Administrator approval is required. Device keys bind on first authorization; reinstalling or clearing app data requires a new key. Stored encrypted and excluded from backups.</string>
     <string name="backend_token_missing">Enter the API Key issued through Telegram Bot.</string>
-    <string name="backend_test">Test connection</string>
+    <string name="backend_test">Save and verify</string>
     <string name="backend_change_title">Change backend server?</string>
     <string name="backend_change_body">Saving the new address clears cached macro events, follows, AI briefings and conversations, and removes old event push subscriptions. This happens even if the subsequent connection test fails. Filter settings and source-isolated earnings favorites are kept.</string>
     <string name="backend_verified">Connection and authentication verified</string>
@@ -153,7 +153,7 @@
     <string name="backend_unreachable">The backend could not be reached.</string>
     <string name="backend_allow_cleartext">Allow plain HTTP (unsafe)</string>
     <string name="backend_cleartext_warning">The access token will travel unencrypted. Only use this when you trust the network.</string>
-    <string name="backend_clear">Clear</string>
+    <string name="backend_clear">Remove backend configuration</string>
     <string name="backend_setup_hint">Fill in the backend address and access token, tap Test connection, then tap Backend to switch.</string>
     <string name="data_source_incomplete">Fill in the backend address and access token first.</string>
     <string name="data_source_switch_title">Switch data source?</string>
@@ -485,4 +485,12 @@
     <string name="news_title_translated">Server machine-translated headline</string>
     <string name="news_title_show_original">Show original headline</string>
     <string name="news_title_show_translation">Show translated headline</string>
+    <string name="home_refresh">Refresh events</string>
+    <string name="home_empty_title">No events today</string>
+    <string name="home_empty_body">No events match your selected countries today. Browse the calendar for another date.</string>
+    <string name="quotes_refresh_failed">Some quotes could not refresh. Available previous prices are marked stale.</string>
+    <string name="quote_observed_at">Quote time · %1$s</string>
+    <string name="backend_remove_warning">Switch to direct mode and remove the backend address and key? Local macro events, follows, AI briefings and conversations will be cleared. Display preferences and source-isolated earnings favorites are kept.</string>
+    <string name="backend_remove_direct_warning">Remove the saved backend address and key? Direct-mode events and follows will be kept.</string>
+    <string name="backend_save_explanation">Saves this configuration before checking the connection. A failed check does not restore the previous configuration. A device key may bind to this installation.</string>
 </resources>

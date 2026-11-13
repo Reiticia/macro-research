@@ -43,7 +43,7 @@
     <string name="follow">关注</string>
     <string name="event_load_failed">无法加载事件</string>
     <string name="view_analysis">查看完整分析</string>
-    <string name="view_analysis_progress">查看分析进度</string>
+    <string name="view_analysis_progress">进入分析</string>
     <string name="view_history">查看历史反应</string>
     <string name="release_countdown">距离数据公布还有</string>
     <string name="data_status">数据状态</string>
@@ -51,7 +51,7 @@
     <string name="event_intro">事件简介</string>
     <string name="event_intro_body">%1$s · %2$s。重点比较实际值与市场预期；宏观方向需结合指标类型判断，不能把高于预期简单理解为利好。</string>
     <string name="event_intro_nonnumeric">%1$s · %2$s。此事件没有标准化的实际值或市场预期，重点关注公布时间、事件内容及其对市场的即时影响。</string>
-    <string name="market_tracking">市场关注</string>
+    <string name="market_tracking">首页行情标的</string>
     <string name="market_data_unavailable">该事件公布前后未采集到市场数据。</string>
     <string name="market_selection_note">选择 2–4 个首页概览标的 · 已选 %1$d 个</string>
     <string name="analysis_progress">分析进度</string>
@@ -141,7 +141,7 @@
     <string name="backend_key_address_invalid">请填写有效的后端地址；如需 HTTP，请先开启明文访问。</string>
     <string name="backend_token_note">通过 Telegram Bot 发送 /request_key device 或 /request_key general 申请，需管理员批准。设备密钥首次授权后绑定；卸载或清除应用数据后需重新申请。使用 Keystore 加密保存，不进入备份。</string>
     <string name="backend_token_missing">请填写 Telegram Bot 发放的 API Key。</string>
-    <string name="backend_test">测试连接</string>
+    <string name="backend_test">保存并验证</string>
     <string name="backend_change_title">更换后端服务器？</string>
     <string name="backend_change_body">保存新地址将清空本地宏观事件、关注、AI 分析与对话，并取消旧事件的推送订阅。即使随后测试连接失败，也不会恢复旧缓存。筛选设置和按来源隔离的财报收藏保留。</string>
     <string name="backend_verified">连接与鉴权验证通过</string>
@@ -152,7 +152,7 @@
     <string name="backend_unreachable">无法连接后端。</string>
     <string name="backend_allow_cleartext">允许明文 HTTP（不安全）</string>
     <string name="backend_cleartext_warning">访问令牌会以明文传输。请仅在你信任的网络中使用。</string>
-    <string name="backend_clear">清除</string>
+    <string name="backend_clear">移除后端配置</string>
     <string name="backend_setup_hint">填写后端地址与访问令牌，点「测试连接」确认可用后，再点「后端」完成切换。</string>
     <string name="data_source_incomplete">请先填写后端地址与访问令牌。</string>
     <string name="data_source_switch_title">切换数据来源？</string>
@@ -484,4 +484,12 @@
     <string name="news_title_translated">服务端机器翻译标题</string>
     <string name="news_title_show_original">显示原标题</string>
     <string name="news_title_show_translation">显示翻译标题</string>
+    <string name="home_refresh">刷新事件</string>
+    <string name="home_empty_title">今天暂无事件</string>
+    <string name="home_empty_body">所选国家今天没有符合条件的事件，可以前往日历查看其他日期。</string>
+    <string name="quotes_refresh_failed">部分行情刷新失败，保留的历史报价已标记为旧值。</string>
+    <string name="quote_observed_at">报价时间 · %1$s</string>
+    <string name="backend_remove_warning">移除后端地址与 Key，并切回直连模式？本地宏观事件、关注、AI 简报和追问将被清空。显示偏好和按来源隔离的财报收藏保留。</string>
+    <string name="backend_remove_direct_warning">移除已保存的后端地址与 Key？直连事件和关注将保留。</string>
+    <string name="backend_save_explanation">先保存配置，再验证连接。验证失败不会恢复旧配置；设备 Key 可能在验证时绑定本次安装。</string>
 </resources>

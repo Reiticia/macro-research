@@ -13,11 +13,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.TextButton
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,7 +63,10 @@ import com.macroresearch.ui.common.localizedDate as localDate
 import com.macroresearch.ui.common.EventTimes
 import com.macroresearch.ui.common.localizedName
 import com.macroresearch.ui.common.localizedValue as value
-import com.macroresearch.ui.market.formatMarketPrice
+import com.macroresearch.ui.market.formatMarketQuoteChange
+import com.macroresearch.ui.market.formatMarketQuoteValue
+import com.macroresearch.ui.theme.AssetDown
+import com.macroresearch.ui.theme.AssetUp
 import com.macroresearch.ui.theme.Upcoming
 import com.macroresearch.ui.theme.ResearchLayout
 import com.macroresearch.ui.viewModelFactory
@@ -72,6 +81,7 @@ fun HomeScreen(
     padding: PaddingValues,
     onEvent: (Long) -> Unit,
     onFollowedEvents: () -> Unit,
+    onCalendar: () -> Unit = {},
 ) {
     val vm: HomeViewModel = viewModel(factory = viewModelFactory { HomeViewModel(repository) })
     val events by vm.events.collectAsStateWithLifecycle()
@@ -83,71 +93,95 @@ fun HomeScreen(
         ?: if (refresh.error != null) stringResource(R.string.calendar_warning_offline) else null
     val liveMarket by vm.liveMarket.collectAsStateWithLifecycle()
     val selectedMarkets by repository.selectedMarkets.collectAsStateWithLifecycle()
-    val now = Instant.now()
-    val next = events.firstOrNull { it.importance == 3 && runCatching { Instant.parse(it.eventTime) > now }.getOrDefault(false) }
-        ?: events.firstOrNull { runCatching { Instant.parse(it.eventTime) > now }.getOrDefault(false) }
+    val failed by vm.marketFailed.collectAsStateWithLifecycle()
+    val source by repository.dataSourceSettings.collectAsStateWithLifecycle()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var now by remember { mutableStateOf(Instant.now()) }
+    val next = events.firstOrNull { it.timeExact && it.importance == 3 && runCatching { Instant.parse(it.eventTime) > now }.getOrDefault(false) }
+        ?: events.firstOrNull { it.timeExact && runCatching { Instant.parse(it.eventTime) > now }.getOrDefault(false) }
+    val todayDate = now.atZone(ZoneId.systemDefault()).toLocalDate()
     val today = events.filter {
-        runCatching { Instant.parse(it.eventTime).atZone(ZoneId.systemDefault()).toLocalDate() == LocalDate.now() }
-            .getOrDefault(false)
+        runCatching { Instant.parse(it.eventTime).atZone(ZoneId.systemDefault()).toLocalDate() == todayDate }.getOrDefault(false)
     }
-    LaunchedEffect(selectedMarkets) {
-        while (true) {
-            vm.loadLiveMarketAndWait(selectedMarkets)
-            delay(5_000)
+    LaunchedEffect(source, selectedMarkets, lifecycle) {
+        vm.resetSource()
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            try {
+                vm.refresh()
+                while (true) {
+                    now = Instant.now()
+                    vm.loadLiveMarketAndWait(selectedMarkets)
+                    delay(5_000)
+                }
+            } finally { vm.stopRefreshing() }
         }
     }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding)
-            .padding(horizontal = ResearchLayout.pagePadding, vertical = ResearchLayout.gap),
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(padding),
+        contentPadding = PaddingValues(ResearchLayout.pagePadding),
         verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column {
-                Text(
-                    buildAnnotatedString {
-                        append("Mac")
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) { append("ro") }
-                    },
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(next?.localDate() ?: stringResource(R.string.research_tagline), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            IconButton(onClick = onFollowedEvents) {
-                Icon(
-                    Icons.Outlined.Notifications,
-                    stringResource(R.string.followed_events),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        item(key = "header") {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Macro", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Text(com.macroresearch.ui.common.dateLabel(todayDate), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { vm.refresh(force = true) }, enabled = !refresh.loading) {
+                    if (refresh.loading && events.isNotEmpty()) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(Icons.Outlined.Refresh, stringResource(R.string.home_refresh))
+                    }
+                }
+                IconButton(onClick = onFollowedEvents) {
+                    Icon(Icons.Outlined.Notifications, stringResource(R.string.followed_events))
+                }
             }
         }
-
-        if (next != null) NextEventCard(next) { onEvent(next.id) }
-        MarketOverview(
-            liveMarket?.quotes.orEmpty(),
-            selectedMarkets,
-        )
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(stringResource(R.string.today_events), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(stringResource(R.string.event_count, today.size), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        item(key = "source") {
+            Text(
+                stringResource(if (source.mode == com.macroresearch.data.DataSourceMode.BACKEND) R.string.data_source_backend else R.string.data_source_direct),
+                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+            )
         }
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(ResearchLayout.gap),
-            contentPadding = PaddingValues(bottom = 4.dp),
-        ) {
-            if (refresh.loading && events.isEmpty()) item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator() }
+        if (refresh.loading && events.isEmpty()) item(key = "loading") {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                CircularProgressIndicator()
             }
-            // The repository publishes a typed reason; the raw provider error stays in the log.
-            // A failure without one is not calendar-related, so fall back to the generic wording.
-            notice?.let { item { Text(it, color = Upcoming) } }
-            items(today, key = { it.id }) { event -> EventCard(event, { onEvent(event.id) }) }
         }
+        notice?.let { item(key = "notice") {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Column(Modifier.padding(ResearchLayout.cardPadding)) {
+                    Text(it, color = MaterialTheme.colorScheme.onErrorContainer)
+                    TextButton(onClick = { vm.refresh(force = true) }, enabled = !refresh.loading) { Text(stringResource(R.string.retry)) }
+                }
+            }
+        } }
+        if (next != null) item(key = "next") { NextEventCard(next) { onEvent(next.id) } }
+        item(key = "markets") {
+            MarketOverview(liveMarket?.quotes.orEmpty(), selectedMarkets)
+            if (failed) Text(stringResource(R.string.quotes_refresh_failed), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+        item(key = "today") {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(stringResource(R.string.today_events), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.event_count, today.size), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (today.isEmpty() && !refresh.loading && notice == null) item(key = "empty") {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(ResearchLayout.cardPadding), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.home_empty_title), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.home_empty_body), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = onCalendar) { Text(stringResource(R.string.nav_calendar)) }
+                }
+            }
+        }
+        items(today, key = { it.id }) { event -> EventCard(event, { onEvent(event.id) }) }
     }
 }
 
@@ -157,7 +191,7 @@ private fun MarketOverview(
     selectedMarkets: List<String>,
 ) {
     val live = liveQuotes.associateBy { it.symbol }
-    val rows = marketOverviewRows(selectedMarkets)
+    val rows = if (ResearchLayout.stackMetadata) selectedMarkets.chunked(1) else marketOverviewRows(selectedMarkets)
     // Glanceable strip: compact header and one dense row per market line, so the event list below
     // keeps most of the screen.
     Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
@@ -167,6 +201,7 @@ private fun MarketOverview(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
                     rowMarkets.forEach { symbol ->
                         MarketMiniCard(
+                            symbol = symbol,
                             label = assetLabel(symbol),
                             liveQuote = live[symbol],
                             modifier = Modifier.weight(1f),
@@ -188,8 +223,11 @@ internal fun marketOverviewRows(selectedMarkets: List<String>): List<List<String
 internal fun NextEventCard(event: EconomicEvent, onClick: () -> Unit) {
     var now by remember { mutableStateOf(Instant.now()) }
     val locale = LocalConfiguration.current.locales[0]
-    LaunchedEffect(event.id) {
-        while (true) { now = Instant.now(); delay(1_000) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(event.id, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) { now = Instant.now(); delay(1_000) }
+        }
     }
     Card(
         onClick = onClick,
@@ -262,49 +300,54 @@ private fun InlineValue(label: String, value: String) = Row(verticalAlignment = 
 
 @Composable
 private fun MarketMiniCard(
+    symbol: String,
     label: String,
     liveQuote: LiveMarketQuote?,
     modifier: Modifier = Modifier,
 ) {
     val locale = LocalConfiguration.current.locales[0]
+    val basisPointsLabel = stringResource(R.string.basis_points)
+    val marketClosed = liveQuote?.marketState.equals("closed", ignoreCase = true)
     val price = liveQuote?.price
     Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-        Row(
-            modifier = Modifier.padding(
-                horizontal = ResearchLayout.miniCardPadding,
-                vertical = ResearchLayout.denseGap,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(ResearchLayout.miniCardPadding),
+            verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    stringResource(
-                        when {
-                            price == null -> R.string.waiting_quotes
-                            liveQuote?.stale == true -> R.string.market_stale
-                            else -> R.string.live_snapshot
-                        },
-                    ),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            Text(label, style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
+                overflow = TextOverflow.Ellipsis)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Text(price?.let { formatMarketQuoteValue(symbol, it, locale) } ?: "—",
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (liveQuote != null && !liveQuote.stale && !marketClosed) {
+                    val changeText = formatMarketQuoteChange(liveQuote, locale, basisPointsLabel)
+                    val change = liveQuote.changePercent
+                    if (changeText != null && change != null) {
+                        Text(
+                            changeText,
+                            color = if (change >= 0) AssetUp else AssetDown,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
             }
-            Text(
-                price?.let { formatMarketPrice(it, locale) } ?: "--",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-            )
+            Text(stringResource(when {
+                price == null -> R.string.waiting_quotes
+                liveQuote.stale -> R.string.market_stale
+                marketClosed -> R.string.market_closed
+                else -> R.string.live_snapshot
+            }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+            liveQuote?.let { quote ->
+                com.macroresearch.ui.market.quoteTimeLabel(quote.timestamp, locale)?.let { time ->
+                    Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
     }
 }
