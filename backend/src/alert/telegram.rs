@@ -122,6 +122,7 @@ impl TelegramClient {
             {"command": "test_ai", "description": "测试 AI 接口可用性"},
             {"command": "test_api", "description": "按钮选择行情、宏观日历、财报或 Logo API 测试"},
             {"command": "translation_failed", "description": "查询翻译失败事件名"},
+            {"command": "translation_audit", "description": "查询审校记录与人工复核"},
             {"command": "help", "description": "查看管理员帮助"},
             {"command": "start", "description": "打开管理员菜单"}
         ]);

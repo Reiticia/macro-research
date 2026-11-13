@@ -42,6 +42,8 @@ pub struct TranslationRevision {
 pub struct TranslationVerdict {
     pub source: String,
     pub approved: bool,
+    pub confidence: Option<f64>,
+    pub threshold: Option<f64>,
     pub reason: Option<String>,
 }
 
@@ -549,6 +551,8 @@ impl EventNameTranslator for OpenAiEventNameTranslator {
                 TranslationVerdict {
                     source: row.source.clone(),
                     approved: verdict.as_ref().is_some_and(|row| row.ok),
+                    confidence: None,
+                    threshold: None,
                     reason: verdict.and_then(|row| row.reason),
                 }
             })
@@ -648,11 +652,13 @@ impl TranslationService {
                     .collect();
                 self.events.save_event_name_translations(&rows).await?;
             }
-            let missing: Vec<String> = names
-                .iter()
-                .filter(|name| !cached.contains_key(*name))
-                .cloned()
-                .collect();
+            let audit = crate::translation_review::ReviewAudit::new(self.events.pool().clone());
+            let mut missing = Vec::new();
+            for name in names {
+                if !cached.contains_key(name) && !audit.blocked(name).await? {
+                    missing.push(name.clone());
+                }
+            }
             (cached, missing)
         };
 
@@ -666,17 +672,25 @@ impl TranslationService {
             let _guard = self.lock.lock().await;
             let existing = self.events.cached_event_name_translations(batch).await?;
             cached.extend(existing);
-            let fresh: HashMap<_, _> = approved
-                .into_iter()
-                .filter(|(source, _)| !cached.contains_key(source))
-                .collect();
+            let mut fresh = HashMap::new();
+            let audit = crate::translation_review::ReviewAudit::new(self.events.pool().clone());
+            for (source, translation) in approved {
+                if !cached.contains_key(&source) && !audit.blocked(&source).await? {
+                    fresh.insert(source, translation);
+                }
+            }
             if !fresh.is_empty() {
                 let rows: Vec<_> = fresh
                     .iter()
                     .map(|(source, (zh_cn, zh_tw))| (source.clone(), zh_cn.clone(), zh_tw.clone()))
                     .collect();
                 self.events.save_event_name_translations(&rows).await?;
-                cached.extend(fresh);
+                // A concurrent manual rejection may veto publication inside the SQL transaction.
+                cached.extend(
+                    self.events
+                        .cached_event_name_translations(&fresh.keys().cloned().collect::<Vec<_>>())
+                        .await?,
+                );
             }
         }
         Ok(cached)
@@ -686,8 +700,8 @@ impl TranslationService {
     ///
     /// Every attempt is proofread by a second model call. Rejected names are translated again
     /// with the reviewer's note and the rejected wording as context, for up to `max_rounds`
-    /// rounds. Nothing unverified is cached, so a name that keeps failing is retried by the next
-    /// sync instead of being published as a bad translation.
+    /// rounds. Final rejections and unavailable reviews enter a durable human-review queue;
+    /// unverified drafts are never published. Pending/rejected names are not regenerated hourly.
     async fn translate_verified(
         &self,
         names: &[String],
@@ -718,31 +732,64 @@ impl TranslationService {
             };
             let verdicts = match verification {
                 Ok(verdicts) => verdicts,
-                // A reviewer that cannot answer must not block usable translations: keep this
-                // attempt and let the next sync review it again.
                 Err(error) => {
-                    if let Some(health) = &self.health {
-                        health
-                            .record_ai_failure(RELAY_HEALTH_KEY, error.to_string())
-                            .await;
+                    // TypeSafe already reports its final failure; do not emit a second relay alarm.
+                    if self.verifier.is_none() {
+                        if let Some(health) = &self.health {
+                            health
+                                .record_ai_failure(RELAY_HEALTH_KEY, error.to_string())
+                                .await;
+                        }
+                    }
+                    let audit =
+                        crate::translation_review::ReviewAudit::new(self.events.pool().clone());
+                    for row in &translated {
+                        audit
+                            .record(
+                                row,
+                                None,
+                                if self.verifier.is_some() {
+                                    "typesafe"
+                                } else {
+                                    "translation_model"
+                                },
+                                true,
+                            )
+                            .await?;
                     }
                     tracing::warn!(
-                        %error,
-                        "translation review unavailable; accepting this attempt for now"
-                    );
-                    approved.extend(
-                        translated
-                            .into_iter()
-                            .map(|row| (row.source, (row.zh_cn, row.zh_tw))),
+                        count = translated.len(),
+                        "translation review unavailable; queued for human confirmation"
                     );
                     break;
                 }
             };
             let mut rejected: Vec<TranslationRevision> = Vec::new();
-            for (row, verdict) in translated.iter().zip(verdicts.iter()) {
-                if verdict.approved {
-                    approved.insert(row.source.clone(), (row.zh_cn.clone(), row.zh_tw.clone()));
+            let audit = crate::translation_review::ReviewAudit::new(self.events.pool().clone());
+            for row in &translated {
+                // Match by identity, never positional zip; missing/duplicate verdicts fail closed.
+                let matching: Vec<_> = verdicts.iter().filter(|v| v.source == row.source).collect();
+                let verdict = if matching.len() == 1 {
+                    Some(matching[0])
                 } else {
+                    None
+                };
+                let passed = verdict.is_some_and(|v| v.approved);
+                audit
+                    .record(
+                        row,
+                        verdict,
+                        if self.verifier.is_some() {
+                            "typesafe"
+                        } else {
+                            "translation_model"
+                        },
+                        !passed && (round == self.max_rounds || verdict.is_none()),
+                    )
+                    .await?;
+                if passed {
+                    approved.insert(row.source.clone(), (row.zh_cn.clone(), row.zh_tw.clone()));
+                } else if let Some(verdict) = verdict {
                     rejected.push(TranslationRevision {
                         source: row.source.clone(),
                         previous_zh_cn: row.zh_cn.clone(),
@@ -760,7 +807,7 @@ impl TranslationService {
                 tracing::warn!(
                     count = rejected.len(),
                     rounds = round,
-                    "translations still failing review; left untranslated for the next sync"
+                    "translations still failing review; queued for human confirmation"
                 );
                 break;
             }

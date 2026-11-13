@@ -509,13 +509,15 @@ impl EventRepository {
         for (source, zh_cn, zh_tw) in translations {
             sqlx::query(
                 r#"INSERT INTO event_name_translation (source_text, zh_cn, zh_tw, updated_at)
-                   VALUES (?, ?, ?, ?)
+                   SELECT ?, ?, ?, ?
+                   WHERE NOT EXISTS (SELECT 1 FROM translation_review_audit WHERE source = ? AND status IN ('pending','rejected'))
                    ON CONFLICT(source_text) DO NOTHING"#,
             )
             .bind(source)
             .bind(zh_cn)
             .bind(zh_tw)
             .bind(Utc::now().to_rfc3339())
+            .bind(source)
             .execute(&mut *transaction)
             .await?;
             sqlx::query(
@@ -523,7 +525,8 @@ impl EventRepository {
                    SET event_zh_cn = (SELECT zh_cn FROM event_name_translation WHERE source_text = ?),
                        event_zh_tw = (SELECT zh_tw FROM event_name_translation WHERE source_text = ?),
                        updated_at = ?
-                   WHERE event = ? AND (event_zh_cn IS NULL OR event_zh_tw IS NULL)"#,
+                   WHERE event = ? AND (event_zh_cn IS NULL OR event_zh_tw IS NULL)
+                     AND EXISTS (SELECT 1 FROM event_name_translation WHERE source_text = economic_event.event)"#,
             )
             .bind(source)
             .bind(source)

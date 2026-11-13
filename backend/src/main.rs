@@ -264,6 +264,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ) {
                             Ok(verifier) => Some(Arc::new(
                                 verifier
+                                    .with_review_audit(pool.clone())
                                     .with_audit_opt(llm_usage.clone())
                                     .with_health(health.clone()),
                             )),
@@ -630,6 +631,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.alerts.clone(),
         ));
         if let Some(telegram) = telegram.clone() {
+            tokio::spawn(
+                market_event_analyzer::alert::translation_review::delivery_loop(
+                    pool.clone(),
+                    telegram.clone(),
+                    config.telegram.admin_chat_ids(),
+                ),
+            );
             tokio::spawn(bot_loop(BotState {
                 started_at,
                 started_instant,

@@ -27,6 +27,7 @@ pub struct TypeSafeVerifier {
     threshold: f64,
     audit: Option<Arc<LlmUsageRepository>>,
     health: Option<Arc<HealthRegistry>>,
+    review_audit: Option<crate::translation_review::ReviewAudit>,
 }
 
 pub const HEALTH_KEY: &str = "translation.typesafe";
@@ -105,8 +106,16 @@ pub(crate) async fn system_one_request(
                 "TypeSafe transient upstream failure; retrying")
             }
             Err(error) => {
-                tracing::warn!(attempt, error = ?error, delay_ms = delay.as_millis() as u64,
-                "TypeSafe transport failure; retrying")
+                tracing::warn!(
+                    attempt,
+                    error_kind = if error.is_timeout() {
+                        "timeout"
+                    } else {
+                        "transport"
+                    },
+                    delay_ms = delay.as_millis() as u64,
+                    "TypeSafe transport failure; retrying"
+                )
             }
         }
         tokio::time::sleep(delay).await;
@@ -145,11 +154,17 @@ impl TypeSafeVerifier {
             threshold,
             audit: None,
             health: None,
+            review_audit: None,
         })
     }
 
     pub fn with_audit_opt(mut self, audit: Option<Arc<LlmUsageRepository>>) -> Self {
         self.audit = audit;
+        self
+    }
+
+    pub fn with_review_audit(mut self, pool: sqlx::SqlitePool) -> Self {
+        self.review_audit = Some(crate::translation_review::ReviewAudit::new(pool));
         self
     }
 
@@ -185,7 +200,7 @@ impl TypeSafeVerifier {
         let (status, text) =
             system_one_request(&self.client, &self.endpoint, &self.api_key, payload).await?;
         if !status.is_success() {
-            tracing::error!(%status, body = %text, "TypeSafe AI returned an error response");
+            tracing::error!(%status, "TypeSafe AI returned a final error response");
             return Err(AppError::Relay {
                 status: status.as_u16(),
                 detail: crate::openai_compat::error_detail(status, &text),
@@ -226,6 +241,18 @@ impl TypeSafeVerifier {
                         }
                     }
                 }
+                if let Some(audit) = &self.review_audit {
+                    for (index, row) in translations.iter().enumerate() {
+                        audit
+                            .record(
+                                row,
+                                parsed.as_ref().ok().and_then(|v| v.get(index)),
+                                "typesafe",
+                                false,
+                            )
+                            .await?;
+                    }
+                }
                 match &parsed {
                     Ok(_) => self.audit_call(started, usage, Ok(())).await,
                     Err(error) => self.audit_call(started, usage, Err(error)).await,
@@ -233,6 +260,11 @@ impl TypeSafeVerifier {
                 parsed
             }
             Err(error) => {
+                if let Some(audit) = &self.review_audit {
+                    for row in translations {
+                        audit.record(row, None, "typesafe", false).await?;
+                    }
+                }
                 self.audit_call(started, TokenUsage::default(), Err(&error))
                     .await;
                 Err(error)
@@ -374,7 +406,7 @@ fn parse_verdicts(
                 .get(&format!("item_{id}"))
                 .and_then(|answer| answer.get("noul"))
                 .and_then(Value::as_f64)
-                .filter(|value| value.is_finite())
+                .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
                 .ok_or_else(|| {
                     AppError::Provider(format!(
                         "TypeSafe response is missing Noul answer for item {id}"
@@ -384,6 +416,8 @@ fn parse_verdicts(
             Ok(TranslationVerdict {
                 source: row.source.clone(),
                 approved,
+                confidence: Some(probability),
+                threshold: Some(threshold),
                 reason: (!approved).then(|| {
                     format!(
                         "TypeSafe review probability {probability:.3} is below threshold {threshold:.3}"
@@ -435,6 +469,85 @@ mod tests {
 
     fn direct_client() -> Client {
         Client::builder().no_proxy().build().unwrap()
+    }
+
+    #[tokio::test]
+    async fn only_final_failures_notify_and_service_does_not_duplicate_typesafe_alarm() {
+        use crate::alert::{
+            AlertService,
+            test_support::{TelegramMock, test_pool},
+        };
+        use crate::translation::{EventNameTranslator, TranslationRevision, TranslationService};
+        struct Translator;
+        #[async_trait]
+        impl EventNameTranslator for Translator {
+            async fn translate(
+                &self,
+                _: &[String],
+                _: &[TranslationRevision],
+            ) -> Result<Vec<EventNameTranslation>, AppError> {
+                Ok(vec![translation()])
+            }
+            async fn verify(
+                &self,
+                _: &[EventNameTranslation],
+            ) -> Result<Vec<TranslationVerdict>, AppError> {
+                panic!("must use TypeSafe")
+            }
+        }
+        for (statuses, body, attempts, errors) in [
+            (
+                vec![503, 503, 200],
+                r#"{"answers":{"item_0":{"noul":0.95}}}"#,
+                3,
+                0,
+            ),
+            (vec![503], "unavailable", 3, 1),
+            (vec![401], "unauthorized", 1, 1),
+            (vec![200], "invalid JSON", 1, 1),
+        ] {
+            let mock = TelegramMock::start().await;
+            let pool = test_pool().await;
+            let alerts = Arc::new(AlertService::new(
+                Some(mock.client.clone()),
+                vec![42],
+                pool.clone(),
+                crate::config::AlertConfig::default(),
+            ));
+            let health = Arc::new(HealthRegistry::new(pool.clone(), Some(alerts), 3, 3600));
+            let (endpoint, calls, server) = mock_responses(statuses, None, body).await;
+            let verifier = TypeSafeVerifier::new(direct_client(), &endpoint, "key", "jev", 0.85)
+                .unwrap()
+                .with_health(health.clone())
+                .with_review_audit(pool.clone());
+            let service = TranslationService::new(
+                crate::repository::EventRepository::new(pool.clone()),
+                Arc::new(Translator),
+                5,
+            )
+            .with_verifier(Arc::new(verifier))
+            .with_health(health);
+            // Seed only the untranslated name; backfill exercises the full service failure path.
+            sqlx::query("INSERT INTO economic_event(provider,provider_id,country,category,event,event_time,importance) VALUES('test','review','US','employment','Nonfarm Payrolls','2026-11-13T00:00:00Z',3)").execute(&pool).await.unwrap();
+            service.backfill_existing().await.unwrap();
+            assert_eq!(calls.load(Ordering::SeqCst), attempts);
+            let count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM alert_event WHERE status='ai_failure'")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(count, errors);
+            assert_eq!(
+                mock.requests
+                    .lock()
+                    .await
+                    .iter()
+                    .filter(|(_, b)| b["text"].as_str().unwrap_or("").contains("AI 调用失败"))
+                    .count(),
+                errors as usize
+            );
+            server.abort();
+        }
     }
 
     #[tokio::test]

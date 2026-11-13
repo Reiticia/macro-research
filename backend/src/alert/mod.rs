@@ -7,6 +7,7 @@ pub mod preferences;
 pub mod service;
 pub mod state;
 pub mod telegram;
+pub mod translation_review;
 
 #[cfg(test)]
 mod telegram_tests;

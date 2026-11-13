@@ -25,6 +25,7 @@ pub mod quota;
 pub mod repository;
 pub mod scheduler;
 pub mod translation;
+pub mod translation_review;
 pub mod typesafe;
 
 use std::sync::Arc;

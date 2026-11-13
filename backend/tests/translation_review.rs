@@ -98,6 +98,8 @@ impl EventNameTranslator for RetryOnceTranslator {
                 TranslationVerdict {
                     source: row.source.clone(),
                     approved: !draft,
+                    confidence: None,
+                    threshold: None,
                     reason: draft.then(|| "use the standard term".to_owned()),
                 }
             })
@@ -186,6 +188,8 @@ impl EventNameTranslator for RejectingTranslator {
             .map(|row| TranslationVerdict {
                 source: row.source.clone(),
                 approved: false,
+                confidence: None,
+                threshold: None,
                 reason: Some("still wrong".into()),
             })
             .collect())
@@ -217,7 +221,7 @@ async fn names_that_never_pass_review_stay_untranslated_and_the_loop_is_bounded(
     );
 }
 
-/// A reviewer that cannot answer (endpoint error) must not block usable translations.
+/// An unavailable reviewer must queue the draft, never publish unverified translations.
 struct UnavailableReviewer {
     translates: AtomicUsize,
 }
@@ -257,7 +261,7 @@ impl EventNameTranslator for UnavailableReviewer {
 }
 
 #[tokio::test]
-async fn an_unavailable_reviewer_keeps_the_translation_instead_of_failing_the_sync() {
+async fn an_unavailable_reviewer_queues_manual_review_without_failing_the_sync() {
     let repository = repository().await;
     let translator = Arc::new(UnavailableReviewer::default());
     let service = TranslationService::new(repository.clone(), translator.clone(), 10);
@@ -266,13 +270,19 @@ async fn an_unavailable_reviewer_keeps_the_translation_instead_of_failing_the_sy
     service.enrich(&mut events).await.unwrap();
 
     assert_eq!(translator.translates.load(Ordering::SeqCst), 1);
-    assert_eq!(events[0].event_zh_cn.as_deref(), Some("消费者价格指数年率"));
+    assert!(events[0].event_zh_cn.is_none());
     assert_eq!(
         repository
             .cached_event_name_translations(&["CPI y/y".into()])
             .await
             .unwrap()
             .len(),
-        1
+        0
     );
+    let audit =
+        market_event_analyzer::translation_review::ReviewAudit::new(repository.pool().clone());
+    assert!(audit.blocked("CPI y/y").await.unwrap());
+    service.enrich(&mut events).await.unwrap();
+    assert_eq!(translator.translates.load(Ordering::SeqCst), 1);
+    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM translation_review_audit WHERE confidence IS NULL AND status='pending'").fetch_one(repository.pool()).await.unwrap(), 1);
 }

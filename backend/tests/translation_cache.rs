@@ -49,6 +49,8 @@ impl EventNameTranslator for CountingTranslator {
             .map(|row| TranslationVerdict {
                 source: row.source.clone(),
                 approved: true,
+                confidence: None,
+                threshold: None,
                 reason: None,
             })
             .collect())

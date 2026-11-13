@@ -100,7 +100,8 @@ async fn handle_update(state: &BotState, update: &Value) -> Result<(), crate::er
 }
 
 async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate::error::AppError> {
-    if super::key_commands::callback(state, callback).await?
+    if super::translation_review::callback(state, callback).await?
+        || super::key_commands::callback(state, callback).await?
         || super::api_test_commands::callback(state, callback).await?
         || super::earnings_commands::callback(state, callback).await?
     {
@@ -330,7 +331,8 @@ async fn handle_callback(state: &BotState, callback: &Value) -> Result<(), crate
 }
 
 async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::error::AppError> {
-    if super::key_commands::message(state, message).await?
+    if super::translation_review::message(state, message).await?
+        || super::key_commands::message(state, message).await?
         || super::api_test_commands::message(state, message).await?
     {
         return Ok(());
@@ -387,7 +389,7 @@ async fn handle_message(state: &BotState, message: &Value) -> Result<(), crate::
             return Ok(());
         }
         "/help" | "/start" => {
-            "可用命令：\n/version — 查看部署提交、启动时间和运行时长\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/events [关键词] — 查询事件 ID、名称和公布时间\n/test_fcm [事件ID] — 验证 FCM；指定 ID 向关注者发送测试通知\n/test_ai — 测试 AI 接口可用性\n/test_api [日期] [股票代码] — 按钮选择行情、宏观日历、财报或 Logo API\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
+            "可用命令：\n/version — 查看部署提交、启动时间和运行时长\n/status — 查看数据源健康状态\n/usage — 查看近24小时模型用量\n/notifications — 用按钮独立开启/关闭两类通知\n/events [关键词] — 查询事件 ID、名称和公布时间\n/test_fcm [事件ID] — 验证 FCM；指定 ID 向关注者发送测试通知\n/test_ai — 测试 AI 接口可用性\n/test_api [日期] [股票代码] — 按钮选择行情、宏观日历、财报或 Logo API\n/translation_audit [状态] [页码] — 查询审校置信度及人工确认记录\n/translation_failed — 查询失败事件名并选择是否重译\n/request_key device|general — 申请 API Key\n/key_requests [页码] — 审批申请\n/keys [页码] — 查看分发记录（遮罩）\n/my_keys [页码] — 查看自己的密钥记录\n/revoke_key 编号 — 撤销密钥\n/help — 查看管理员帮助\n/start — 打开管理员菜单".to_owned()
         }
         _ => return Ok(()),
     };
@@ -771,6 +773,9 @@ async fn usage_text(state: &BotState) -> Result<String, crate::error::AppError> 
 #[cfg(test)]
 #[path = "bot_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "translation_review_tests.rs"]
+mod translation_review_tests;
 
 #[cfg(test)]
 #[path = "bot_fcm_tests.rs"]
