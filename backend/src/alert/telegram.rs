@@ -8,6 +8,12 @@ use tokio::sync::Mutex;
 
 use crate::error::AppError;
 
+/// Bot API URLs contain credentials in their path. Strip the URL before an error can reach
+/// callers, logs or source-chain formatting, while preserving transport/decode diagnostics.
+fn http_error(error: reqwest::Error) -> AppError {
+    AppError::Http(error.without_url())
+}
+
 struct CachedBotLink {
     checked_at: Instant,
     url: Option<String>,
@@ -128,8 +134,9 @@ impl TelegramClient {
                     "scope": {"type": "chat", "chat_id": chat_id}
                 }))
                 .send()
-                .await?;
-            let body: Value = response.json().await?;
+                .await
+                .map_err(http_error)?;
+            let body: Value = response.json().await.map_err(http_error)?;
             if body.get("ok").and_then(Value::as_bool) != Some(true) {
                 return Err(AppError::Provider(format!(
                     "Telegram setMyCommands failed: {}",
@@ -152,11 +159,8 @@ impl TelegramClient {
             }))
             .send()
             .await
-            .map_err(|error| AppError::Http(error.without_url()))?;
-        let body: Value = response
-            .json()
-            .await
-            .map_err(|error| AppError::Http(error.without_url()))?;
+            .map_err(http_error)?;
+        let body: Value = response.json().await.map_err(http_error)?;
         if body.get("ok").and_then(Value::as_bool) != Some(true) {
             return Err(AppError::Provider(
                 "Telegram public command registration failed".into(),
@@ -174,11 +178,8 @@ impl TelegramClient {
         }
         let response = self.client.post(self.url("sendMessage"))
             .json(&json!({"chat_id":chat_id, "text":text, "parse_mode":"HTML", "disable_web_page_preview":true}))
-            .send().await.map_err(|error| AppError::Http(error.without_url()))?;
-        let body: Value = response
-            .json()
-            .await
-            .map_err(|error| AppError::Http(error.without_url()))?;
+            .send().await.map_err(http_error)?;
+        let body: Value = response.json().await.map_err(http_error)?;
         if body.get("ok").and_then(Value::as_bool) != Some(true) {
             return Err(AppError::Provider(
                 "Telegram private key delivery failed".into(),
@@ -218,8 +219,9 @@ impl TelegramClient {
             .post(self.url("sendMessage"))
             .json(&payload)
             .send()
-            .await?;
-        let body: Value = response.json().await?;
+            .await
+            .map_err(http_error)?;
+        let body: Value = response.json().await.map_err(http_error)?;
         if body.get("ok").and_then(Value::as_bool) != Some(true) {
             return Err(AppError::Provider(format!(
                 "Telegram sendMessage failed: {}",
@@ -264,8 +266,9 @@ impl TelegramClient {
             .post(self.url("editMessageText"))
             .json(&payload)
             .send()
-            .await?;
-        let body: Value = response.json().await?;
+            .await
+            .map_err(http_error)?;
+        let body: Value = response.json().await.map_err(http_error)?;
         if body.get("ok").and_then(Value::as_bool) != Some(true) {
             let description = body
                 .get("description")
@@ -299,7 +302,8 @@ impl TelegramClient {
             .post(self.url("editMessageReplyMarkup"))
             .json(&payload)
             .send()
-            .await?;
+            .await
+            .map_err(http_error)?;
         if !response.status().is_success() {
             tracing::debug!(text, "Telegram keyboard edit failed");
         }
@@ -313,7 +317,8 @@ impl TelegramClient {
             .post(self.url("answerCallbackQuery"))
             .json(&payload)
             .send()
-            .await?;
+            .await
+            .map_err(http_error)?;
         Ok(())
     }
 
@@ -333,8 +338,9 @@ impl TelegramClient {
             .post(self.url("getUpdates"))
             .json(&payload)
             .send()
-            .await?;
-        let body: Value = response.json().await?;
+            .await
+            .map_err(http_error)?;
+        let body: Value = response.json().await.map_err(http_error)?;
         if body.get("ok").and_then(Value::as_bool) != Some(true) {
             return Err(AppError::Provider(format!(
                 "Telegram getUpdates failed: {}",
