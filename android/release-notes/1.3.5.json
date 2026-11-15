@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.3.5",
+  "notes": {
+    "en": {
+      "client": [
+        "Improved the home layout, event refresh controls and empty states. Failed or partial market refreshes retain previous quotes explicitly marked as old, with the actual quote time shown. Treasury yields use percent and their changes use basis points.",
+        "Data-source changes now isolate cached events, follows and AI state and prevent old requests from writing back. Changing or removing backend settings explains which local data will be cleared; saving settings happens before connection verification and is not rolled back on failure.",
+        "Company logos now have a bounded disk cache with background refresh. Notification language follows the app, and backend redirects carrying device identity are blocked."
+      ],
+      "backend": [
+        "Stricter cross-source event identity, reporting-period and release-stage checks prevent duplicate imports and incorrect release-value matching. A separate offline historical-duplicate repair tool requires a dry run and explicit approval for each group; upgrading does not automatically merge existing events.",
+        "Market collection rejects stale or invalid-time quotes. Market reactions require a genuine pre-release baseline and never use samples later than the requested horizon.",
+        "Translation review evidence is persisted with Telegram administrator approval controls. API diagnostics are unified under /test_api; optional file logging is available, and Telegram HTTP errors no longer expose Bot Token URLs.",
+        "Deploy and restart the backend for these server changes. Back up the database before startup migrations 029–032. The configuration template has changed, so automatic deployment may require manual baseline confirmation. The client can be upgraded independently."
+      ]
+    },
+    "zh-CN": {
+      "client": [
+        "优化首页布局、事件刷新入口和空状态。行情刷新失败或部分缺失时保留旧报价并明确标记，显示真实报价时间；美债收益率以百分比、涨跌以基点展示。",
+        "切换数据来源时隔离本地事件、关注和 AI 状态，阻止旧请求回写。更换或移除后端配置前明确提示将清理的数据；先保存配置再验证连接，验证失败不会恢复旧配置。",
+        "公司 Logo 新增有界磁盘缓存与后台刷新。通知语言跟随应用，并阻止携带设备身份的后端重定向。"
+      ],
+      "backend": [
+        "加强跨源事件身份、统计期和初终值阶段校验，防止重复录入与公布值错配。新增独立的离线历史重复修复工具，需预演并逐组明确批准；升级不会自动合并已有事件。",
+        "行情采集拒绝过期或时间异常的报价；市场反应必须使用真实的公布前基准，不再使用晚于目标时点的样本。",
+        "持久化翻译审校证据并提供 Telegram 管理员审批；API 诊断统一到 /test_api，新增可选文件日志，Telegram HTTP 错误不再暴露 Bot Token URL。",
+        "后端改进需部署并重启后生效。启动迁移 029–032 前请备份数据库；配置模板有变化，自动部署可能需要人工确认新基线。客户端可独立覆盖升级。"
+      ]
+    },
+    "zh-TW": {
+      "client": [
+        "改善首頁版面、事件重新整理入口與空白狀態。行情重新整理失敗或部分缺漏時保留舊報價並明確標示，顯示實際報價時間；美債殖利率以百分比、漲跌以基點顯示。",
+        "切換資料來源時隔離本機事件、關注與 AI 狀態，阻止舊請求回寫。更換或移除後端設定前明確提示將清除的資料；先儲存設定再驗證連線，驗證失敗不會還原舊設定。",
+        "公司 Logo 新增有界磁碟快取與背景重新整理。通知語言跟隨應用程式，並阻止攜帶裝置身分的後端重新導向。"
+      ],
+      "backend": [
+        "加強跨來源事件身分、統計期與初終值階段校驗，防止重複匯入與公布值錯配。新增獨立的離線歷史重複修復工具，需預演並逐組明確核准；升級不會自動合併既有事件。",
+        "行情採集拒絕過期或時間異常的報價；市場反應必須使用真實的公布前基準，不再使用晚於目標時點的樣本。",
+        "持久化翻譯審校證據並提供 Telegram 管理員審批；API 診斷統一至 /test_api，新增選用檔案日誌，Telegram HTTP 錯誤不再暴露 Bot Token URL。",
+        "後端改善需部署並重新啟動後生效。啟動遷移 029–032 前請備份資料庫；設定範本有變動，自動部署可能需要人工確認新基線。用戶端可獨立覆蓋升級。"
+      ]
+    }
+  }
+}
