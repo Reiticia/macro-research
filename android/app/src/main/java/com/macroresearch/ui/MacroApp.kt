@@ -145,6 +145,13 @@ fun MacroApp(
                     onEvent = { navController.navigate("event/$it") },
                     onFollowedEvents = { navController.navigate("followed") },
                     onCalendar = { navController.navigate("calendar") { launchSingleTop = true } },
+                    onMarket = {
+                        navController.navigate("market") {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
                 )
             }
             composable("calendar") {

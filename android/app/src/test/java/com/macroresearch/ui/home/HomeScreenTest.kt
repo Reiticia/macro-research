@@ -7,16 +7,18 @@ import java.time.ZoneId
 import java.util.Locale
 
 class HomeScreenTest {
-    @Test fun narrowPhonesKeepReadableCardsInsteadOfStackingRows() {
-        val width = marketOverviewCardWidth(360f, 1f, 3)
-        assertEquals(140f, width, 0.01f)
-        assertTrue(width * 3 + 12 > 360) // Horizontal overflow, not vertical rows.
-        assertEquals(280f, marketOverviewCardWidth(360f, 2f, 4), 0.01f)
+    @Test fun pixelWidthShowsThreeMarketsAcrossAndFourAsTwoByTwo() {
+        assertEquals(3, marketOverviewColumns(387f, 1f, 3))
+        assertEquals(2, marketOverviewColumns(387f, 1f, 4))
+        assertEquals(2, marketOverviewColumns(387f, 1f, 2))
     }
 
-    @Test fun wideWindowsFitCardsAndEmptySelectionIsSafe() {
-        assertEquals(240f, marketOverviewCardWidth(732f, 1f, 3), 0.01f)
-        assertTrue(marketOverviewCardWidth(0f, Float.NaN, 0).isFinite())
+    @Test fun narrowWindowsAndLargeFontsReduceColumnsWithoutHorizontalScrolling() {
+        assertEquals(2, marketOverviewColumns(296f, 1f, 3))
+        assertEquals(2, marketOverviewColumns(387f, 1.3f, 3))
+        assertEquals(1, marketOverviewColumns(296f, 2f, 4))
+        assertEquals(3, marketOverviewColumns(732f, 1f, 3))
+        assertEquals(1, marketOverviewColumns(0f, Float.NaN, 0))
     }
 
     @Test fun sameDayTimeIsShortButOldQuotesKeepTheDate() {
