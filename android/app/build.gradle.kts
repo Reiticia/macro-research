@@ -16,8 +16,8 @@ android {
         applicationId = "com.macroresearch"
         minSdk = 26
         targetSdk = 35
-        versionCode = 25
-        versionName = "1.3.5"
+        versionCode = 26
+        versionName = "1.3.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

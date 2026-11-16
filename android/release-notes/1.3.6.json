@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.3.6",
+  "notes": {
+    "en": {
+      "client": [
+        "The home market overview now uses a compact, non-scrolling grid showing the asset, price and change. Tap any asset to open the Market page; stale and closed-market quotes remain clearly marked.",
+        "Calendar startup, Today (local) navigation and the current-day highlight now use the device date, fixing navigation to yesterday when New York is still on the previous day. Earnings retain their New York market dates.",
+        "Fixed local event filtering and ordering around midnight and mixed timestamp precision. Room database v12 preserves original timestamps and adds second/nanosecond sort keys through an incremental migration, without clearing events, follows, AI history or earnings favorites."
+      ],
+      "backend": []
+    },
+    "zh-CN": {
+      "client": [
+        "首页市场概览改为不滚动的紧凑网格，仅显示标的、价格和涨跌；点击任意标的进入市场页，旧报价及闭市状态仍明确提示。",
+        "日历初始日期、“今天（本地）”跳转和今天高亮统一使用设备本地日期，修复纽约仍为前一天时跳到昨天的问题；财报保持纽约市场日期口径。",
+        "修复午夜附近及不同时间精度下的本地事件筛选和排序。Room 数据库升级至 v12，增量迁移保留原始时间并新增秒/纳秒排序列，不清空事件、关注、AI 历史或财报收藏。"
+      ],
+      "backend": []
+    },
+    "zh-TW": {
+      "client": [
+        "首頁市場概覽改為不捲動的緊湊網格，僅顯示標的、價格與漲跌；點擊任意標的進入市場頁，舊報價及休市狀態仍明確提示。",
+        "日曆初始日期、「今天（本地）」跳轉及今天標示統一使用裝置本地日期，修正紐約仍為前一天時跳至昨天的問題；財報維持紐約市場日期口徑。",
+        "修正午夜附近及不同時間精度下的本機事件篩選與排序。Room 資料庫升級至 v12，增量遷移保留原始時間並新增秒／奈秒排序欄位，不清空事件、關注、AI 歷史或財報收藏。"
+      ],
+      "backend": []
+    }
+  }
+}
