@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.ZoneId
 
 internal interface MonthEconomicSource {
     val settings: StateFlow<BackendSettings>
@@ -46,8 +47,10 @@ internal class MonthCalendarViewModel(
     private val displayMode: StateFlow<CalendarDisplayMode> = MutableStateFlow(CalendarDisplayMode.ALL),
     private val earningsSort: StateFlow<EarningsSort> =
         earnings?.sort ?: MutableStateFlow(EarningsSort()),
+    private val deviceZone: () -> ZoneId = ZoneId::systemDefault,
 ) : ViewModel() {
-    private val today get() = clock().atZone(EARNINGS_ZONE).toLocalDate()
+    private val today get() = clock().atZone(deviceZone()).toLocalDate()
+    private val earningsToday get() = clock().atZone(EARNINGS_ZONE).toLocalDate()
     private val mutable = MutableStateFlow(MonthCalendarState(
         month = YearMonth.from(today), selectedDate = today, presentation = initialPresentation,
         countries = economic.countries.value, earningsAvailable = earnings != null,
@@ -166,7 +169,7 @@ internal class MonthCalendarViewModel(
         val repository = earnings ?: return
         if (!mutable.value.showEarnings) return
         earningsRequest = viewModelScope.launch {
-            val supported = dates.filter { supportsEarnings(it, today) }
+            val supported = dates.filter { supportsEarnings(it, earningsToday) }
             // Read local snapshots first; the default week must never trigger a hidden month fetch.
             for (date in supported) {
                 if (mutable.value.earnings[date]?.calendar == null) {
@@ -183,7 +186,7 @@ internal class MonthCalendarViewModel(
                 val selected = mutable.value.selectedDate
                 val date = when {
                     selected in pending -> selected
-                    today in pending -> today
+                    earningsToday in pending -> earningsToday
                     else -> pending.first()
                 }
                 pending.remove(date)

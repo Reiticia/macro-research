@@ -42,7 +42,7 @@ class EarningsFavoritesPersistenceTest {
                     override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = error("Use Room migrations")
                 }).build())
             fun open() = Room.databaseBuilder(context, MacroDatabase::class.java, name)
-                .addMigrations(MacroDatabase.MIGRATION_8_9, MacroDatabase.MIGRATION_9_10, MacroDatabase.MIGRATION_10_11).build()
+                .addMigrations(MacroDatabase.MIGRATION_8_9, MacroDatabase.MIGRATION_9_10, MacroDatabase.MIGRATION_10_11, MacroDatabase.MIGRATION_11_12).build()
             val favorite = FavoriteEarnings(LocalDate.of(2026,11,3), EarningsEvent("AAPL", "Apple", "nasdaq"))
             try {
                 helper.use { it.writableDatabase }

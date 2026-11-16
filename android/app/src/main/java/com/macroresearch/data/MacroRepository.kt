@@ -8,6 +8,7 @@ import com.macroresearch.data.local.AnalysisDao
 import com.macroresearch.data.local.EventDao
 import com.macroresearch.data.local.FollowedEventEntity
 import com.macroresearch.data.local.asEntity
+import com.macroresearch.data.local.localDayBounds
 import com.macroresearch.data.local.asExternalModel
 import com.macroresearch.data.model.AiAnalysis
 import com.macroresearch.data.model.AiUsage
@@ -380,10 +381,8 @@ class MacroRepository(
 
     fun observeCalendar(start: LocalDate, end: LocalDate): Flow<List<EconomicEvent>> {
         val zone = ZoneId.systemDefault()
-        return dao.observeRange(
-            start.atStartOfDay(zone).toInstant().toString(),
-            end.plusDays(1).atStartOfDay(zone).toInstant().minusNanos(1).toString(),
-        ).map { rows -> rows.map { it.asExternalModel() } }
+        val (from, until) = localDayBounds(start, end, zone)
+        return dao.observeRange(from.toString(), until.toString()).map { rows -> rows.map { it.asExternalModel() } }
     }
 
     /** One bounded range request for the month grid, not one request per date. */
@@ -463,9 +462,8 @@ class MacroRepository(
         minimumImportance: Int? = null,
     ): List<EconomicEvent> {
         val zone = ZoneId.systemDefault()
-        val from = date.atStartOfDay(zone).toInstant().toString()
-        val to = date.plusDays(1).atStartOfDay(zone).toInstant().minusSeconds(1).toString()
-        val cached = dao.cachedRange(from, to)
+        val (from, until) = localDayBounds(date, date, zone)
+        val cached = dao.cachedCalendarRange(from.toString(), until.toString())
         val cacheCanAnswer = cached.isNotEmpty() &&
             (date != LocalDate.now() || networkPreferences.upcomingSyncFresh(UPCOMING_CACHE_MS))
         val rows = if (cacheCanAnswer) {

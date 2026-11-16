@@ -133,7 +133,7 @@ internal fun CalendarMonthContent(
             Text(stringResource(R.string.calendar_overview), Modifier.weight(1f),
                 style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick = { onToday(); todayRequest++ }, modifier = Modifier.testTag("calendar-today")) {
-                Text(stringResource(R.string.earnings_today))
+                Text(stringResource(R.string.calendar_local_today))
             }
             IconButton(onClick = onRefresh) {
                 Icon(Icons.Outlined.Refresh, stringResource(R.string.calendar_refresh))

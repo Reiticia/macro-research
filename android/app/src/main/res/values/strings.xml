@@ -493,4 +493,5 @@
     <string name="backend_remove_warning">Switch to direct mode and remove the backend address and key? Local macro events, follows, AI briefings and conversations will be cleared. Display preferences and source-isolated earnings favorites are kept.</string>
     <string name="backend_remove_direct_warning">Remove the saved backend address and key? Direct-mode events and follows will be kept.</string>
     <string name="backend_save_explanation">Saves this configuration before checking the connection. A failed check does not restore the previous configuration. A device key may bind to this installation.</string>
+    <string name="calendar_local_today">Today (local)</string>
 </resources>

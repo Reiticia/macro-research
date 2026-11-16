@@ -129,25 +129,28 @@ class EventReleaseRefreshTest {
     private class FakeEventDao : EventDao {
         val rows = linkedMapOf<Long, CachedEventEntity>()
 
-        override fun observeUpcoming(from: String): Flow<List<CachedEventEntity>> = flowOf(emptyList())
+        override fun observeUpcomingAt(second: Long, nano: Int): Flow<List<CachedEventEntity>> = flowOf(emptyList())
         override fun observeEvent(id: Long): Flow<CachedEventEntity?> = flowOf(rows[id])
         override suspend fun event(id: Long): CachedEventEntity? = rows[id]
-        override suspend fun history(before: String, countries: List<String>, category: String?, limit: Int, offset: Int, importance: List<Int>) =
+        override suspend fun historyAt(second: Long, nano: Int, countries: List<String>, category: String?, limit: Int, offset: Int, importance: List<Int>) =
             emptyList<CachedEventEntity>()
-        override suspend fun cachedRange(from: String, to: String) =
-            rows.values.filter { it.eventTime in from..to }
-        override fun observeRange(from: String, to: String): Flow<List<CachedEventEntity>> =
-            flowOf(rows.values.filter { it.eventTime in from..to })
+        override suspend fun cachedRangeAt(startSecond: Long, startNano: Int, endSecond: Long, endNano: Int, inclusive: Boolean) =
+            rows.values.filter {
+                val time = Instant.parse(it.eventTime)
+                val end = Instant.ofEpochSecond(endSecond, endNano.toLong())
+                time >= Instant.ofEpochSecond(startSecond, startNano.toLong()) && (time < end || inclusive && time == end)
+            }
+        override fun observeRangeAt(startSecond: Long, startNano: Int, endSecond: Long, endNano: Int): Flow<List<CachedEventEntity>> = flowOf(emptyList())
         override suspend fun translations(names: List<String>) = emptyList<CachedTranslation>()
         override suspend fun updateTranslation(name: String, zhCn: String, zhTw: String) {
             rows.replaceAll { _, row ->
                 if (row.event == name) row.copy(eventZhCn = zhCn, eventZhTw = zhTw) else row
             }
         }
-        override suspend fun upsert(events: List<CachedEventEntity>) {
+        override suspend fun upsertTimestamped(events: List<CachedEventEntity>) {
             events.forEach { rows[it.id] = it }
         }
-        override suspend fun deleteOlderThan(before: String) = Unit
+        override suspend fun deleteOlderThanAt(second: Long, nano: Int) = Unit
         override suspend fun deleteByProviders(providers: List<String>) = Unit
         override suspend fun clearEvents() {
             rows.clear()

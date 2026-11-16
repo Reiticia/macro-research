@@ -58,6 +58,49 @@ class MonthCalendarTest {
             stores += ViewModelStore().also { it.put("month", vm) }
         }
 
+    @Test fun todayNavigationUsesDeviceDateAcrossNewYorkMidnightAndDst() = runTest {
+        for ((instant, zoneName, expected) in listOf(
+            Triple("2026-11-13T01:00:00Z", "Asia/Shanghai", LocalDate.of(2026, 11, 13)),
+            Triple("2026-03-08T04:30:00Z", "Asia/Shanghai", LocalDate.of(2026, 3, 8)),
+            Triple("2026-11-01T03:30:00Z", "Asia/Shanghai", LocalDate.of(2026, 11, 1)),
+            Triple("2026-01-01T01:00:00Z", "Asia/Shanghai", LocalDate.of(2026, 1, 1)),
+            Triple("2026-11-13T06:30:00Z", "America/Los_Angeles", LocalDate.of(2026, 11, 12)),
+        )) {
+            var time = Instant.parse(instant)
+            val vm = MonthCalendarViewModel(Economic(settings), null, clock = { time },
+                deviceZone = { ZoneId.of(zoneName) })
+            stores += ViewModelStore().also { it.put(instant + zoneName, vm) }
+            advanceUntilIdle()
+            assertEquals(expected, vm.state.value.selectedDate)
+            vm.selectDate(expected.minusWeeks(2))
+            vm.selectToday()
+            assertEquals(expected, vm.state.value.selectedDate)
+            assertEquals(weekDates(expected), vm.state.value.visibleDates)
+            vm.showMonth()
+            vm.selectMonth(YearMonth.from(expected).minusMonths(2))
+            vm.selectToday()
+            assertEquals(expected, vm.state.value.selectedDate)
+            assertEquals(YearMonth.from(expected), vm.state.value.month)
+            time = time.plusSeconds(86400)
+            vm.selectToday()
+            assertEquals(time.atZone(ZoneId.of(zoneName)).toLocalDate(), vm.state.value.selectedDate)
+        }
+    }
+
+    @Test fun localTodaySelectionKeepsEarningsOnTheirOriginalNewYorkDates() = runTest {
+        val time = Instant.parse("2026-11-03T01:00:00Z")
+        val requests = mutableListOf<LocalDate>()
+        val vm = MonthCalendarViewModel(Economic(settings), earnings { date -> requests += date; calendar(date) },
+            clock = { time }, deviceZone = { ZoneId.of("Asia/Shanghai") })
+        stores += ViewModelStore().also { it.put("local-with-earnings", vm) }
+        advanceUntilIdle()
+        assertEquals(LocalDate.of(2026, 11, 3), vm.state.value.selectedDate)
+        val nyDate = time.atZone(EARNINGS_ZONE).toLocalDate()
+        assertEquals(LocalDate.of(2026, 11, 2), nyDate)
+        assertEquals(nyDate.toString(), vm.state.value.earnings[nyDate]?.calendar?.date)
+        assertEquals(7, requests.size)
+    }
+
     @Test fun sortChangesUpdateStateWithoutReloadingEitherProvider() = runTest {
         val source = Economic(settings)
         val sort = MutableStateFlow(EarningsSort())

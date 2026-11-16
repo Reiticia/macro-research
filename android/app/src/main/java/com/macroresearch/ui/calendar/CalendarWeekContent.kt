@@ -64,7 +64,7 @@ internal fun CalendarWeekContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             TextButton(onClick = onToday, modifier = Modifier.testTag("calendar-week-today")) {
-                Text(stringResource(R.string.earnings_today))
+                Text(stringResource(R.string.calendar_local_today))
             }
             IconButton(onClick = onRefresh) {
                 Icon(Icons.Outlined.Refresh, stringResource(R.string.calendar_refresh))

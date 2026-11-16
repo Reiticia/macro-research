@@ -26,8 +26,8 @@ data class MonthEarningsDay(
 )
 
 data class MonthCalendarState(
-    val month: YearMonth = YearMonth.now(EARNINGS_ZONE),
-    val selectedDate: LocalDate = LocalDate.now(EARNINGS_ZONE),
+    val month: YearMonth = YearMonth.now(),
+    val selectedDate: LocalDate = LocalDate.now(),
     val weekDate: LocalDate = selectedDate,
     val presentation: CalendarPresentation = CalendarPresentation.WEEK,
     val content: CalendarContent = CalendarContent.ALL,

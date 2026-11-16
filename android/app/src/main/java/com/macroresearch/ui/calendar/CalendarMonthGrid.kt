@@ -60,7 +60,8 @@ internal fun CalendarMonthGrid(
     val economic = remember(state.economic, state.countries, state.importance) {
         economicByDate(state.filteredEconomic, ZoneId.systemDefault())
     }
-    val today = LocalDate.now(EARNINGS_ZONE)
+    val today = LocalDate.now()
+    val earningsToday = LocalDate.now(EARNINGS_ZONE)
     val locale = appLocale()
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
@@ -84,8 +85,8 @@ internal fun CalendarMonthGrid(
                                 ) else emptyList()
                             }
                             val events = if (state.showEconomic) economic[date].orEmpty() else emptyList()
-                            val unsupported = state.showEarnings && !supportsEarnings(date, today)
-                            val pending = (state.showEarnings && supportsEarnings(date, today) && state.earnings[date]?.loaded != true) ||
+                            val unsupported = state.showEarnings && !supportsEarnings(date, earningsToday)
+                            val pending = (state.showEarnings && supportsEarnings(date, earningsToday) && state.earnings[date]?.loaded != true) ||
                                 (state.showEconomic && !state.economicLoaded && !state.economicFailed)
                             val failed = (state.showEarnings && state.earnings[date]?.let { it.error != null || it.calendar?.stale == true } == true) ||
                                 (state.showEconomic && state.economicFailed)

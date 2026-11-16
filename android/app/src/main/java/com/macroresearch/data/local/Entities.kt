@@ -3,10 +3,11 @@ package com.macroresearch.data.local
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.Index
 import com.macroresearch.data.model.EconomicEvent
 import com.macroresearch.data.model.currentStatus
 
-@Entity(tableName = "cached_event")
+@Entity(tableName = "cached_event", indices = [Index(value = ["eventEpochSecond", "eventNano"])])
 data class CachedEventEntity(
     @PrimaryKey val id: Long,
     val provider: String,
@@ -27,6 +28,8 @@ data class CachedEventEntity(
     val unit: String?,
     val status: String,
     @ColumnInfo(defaultValue = "1") val timeExact: Boolean = true,
+    val eventEpochSecond: Long? = parseEventTimestamp(eventTime)?.epochSecond,
+    val eventNano: Int? = parseEventTimestamp(eventTime)?.nano,
 )
 
 @Entity(tableName = "followed_event")

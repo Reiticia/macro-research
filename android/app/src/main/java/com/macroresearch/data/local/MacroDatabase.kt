@@ -7,7 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [CachedEventEntity::class, FollowedEventEntity::class, AiAnalysisEntity::class, AiConversationEntity::class, AiAutoRefreshEntity::class, EarningsCacheEntity::class, EarningsFavoriteEntity::class],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 abstract class MacroDatabase : RoomDatabase() {
@@ -16,6 +16,30 @@ abstract class MacroDatabase : RoomDatabase() {
     abstract fun earningsDao(): EarningsDao
 
     companion object {
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE cached_event ADD COLUMN eventEpochSecond INTEGER")
+                db.execSQL("ALTER TABLE cached_event ADD COLUMN eventNano INTEGER")
+                // Parse using the same nanosecond-preserving JVM implementation as new writes.
+                // Page by signed ID (direct-mode hashes can be negative), never load the entire cache.
+                var after: Long? = null
+                while (true) {
+                    val rows = mutableListOf<Pair<Long, String>>()
+                    val cursor = if (after == null) db.query("SELECT id,eventTime FROM cached_event ORDER BY id LIMIT 500")
+                        else db.query("SELECT id,eventTime FROM cached_event WHERE id>? ORDER BY id LIMIT 500", arrayOf(after))
+                    cursor.use { while (it.moveToNext()) rows += it.getLong(0) to it.getString(1) }
+                    if (rows.isEmpty()) break
+                    for ((id, raw) in rows) {
+                        val time = parseEventTimestamp(raw)
+                        db.execSQL("UPDATE cached_event SET eventEpochSecond=?,eventNano=? WHERE id=?",
+                            arrayOf<Any?>(time?.epochSecond, time?.nano, id))
+                    }
+                    after = rows.last().first
+                }
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_cached_event_eventEpochSecond_eventNano ON cached_event(eventEpochSecond,eventNano)")
+            }
+        }
+
         val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS earnings_favorite (sourceKey TEXT NOT NULL, date TEXT NOT NULL, symbol TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(sourceKey, date, symbol))")

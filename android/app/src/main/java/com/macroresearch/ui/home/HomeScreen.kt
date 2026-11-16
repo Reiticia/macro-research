@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Notifications
@@ -191,31 +194,30 @@ private fun MarketOverview(
     selectedMarkets: List<String>,
 ) {
     val live = liveQuotes.associateBy { it.symbol }
-    val rows = if (ResearchLayout.stackMetadata) selectedMarkets.chunked(1) else marketOverviewRows(selectedMarkets)
-    // Glanceable strip: compact header and one dense row per market line, so the event list below
-    // keeps most of the screen.
-    Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
+    // Never turn the glanceable strip into 3–4 full-width rows on high-density phones.
+    val fontScale = LocalDensity.current.fontScale
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(stringResource(R.string.market_overview), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-        Column(verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
-            rows.forEach { rowMarkets ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap)) {
-                    rowMarkets.forEach { symbol ->
-                        MarketMiniCard(
-                            symbol = symbol,
-                            label = assetLabel(symbol),
-                            liveQuote = live[symbol],
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val cardWidth = marketOverviewCardWidth(maxWidth.value, fontScale, selectedMarkets.size).dp
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(selectedMarkets, key = { it }) { symbol ->
+                    MarketMiniCard(symbol, assetLabel(symbol), live[symbol], Modifier.width(cardWidth))
                 }
             }
         }
     }
 }
 
-internal fun marketOverviewRows(selectedMarkets: List<String>): List<List<String>> {
-    val columns = if (selectedMarkets.size == 4) 2 else selectedMarkets.size.coerceAtLeast(1)
-    return selectedMarkets.chunked(columns)
+/** Fit selected cards when readable; otherwise keep one horizontally scrollable row. */
+internal fun marketOverviewCardWidth(widthDp: Float, fontScale: Float, count: Int): Float {
+    val scale = fontScale.takeIf { it.isFinite() && it > 0 } ?: 1f
+    val width = widthDp.takeIf { it.isFinite() && it > 0 } ?: 360f
+    val minimum = 140f * scale.coerceAtLeast(1f)
+    return ((width - 6f * (count.coerceIn(1, 4) - 1)) / count.coerceIn(1, 4)).coerceAtLeast(minimum)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -312,18 +314,14 @@ private fun MarketMiniCard(
     Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(ResearchLayout.miniCardPadding),
-            verticalArrangement = Arrangement.spacedBy(ResearchLayout.denseGap),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(label, style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                 overflow = TextOverflow.Ellipsis)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                Text(price?.let { formatMarketQuoteValue(symbol, it, locale) } ?: "—",
-                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(price?.let { formatMarketQuoteValue(symbol, it, locale) } ?: "—",
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (liveQuote != null && !liveQuote.stale && !marketClosed) {
                     val changeText = formatMarketQuoteChange(liveQuote, locale, basisPointsLabel)
                     val change = liveQuote.changePercent
@@ -336,16 +334,16 @@ private fun MarketMiniCard(
                         )
                     }
                 }
-            }
             Text(stringResource(when {
                 price == null -> R.string.waiting_quotes
                 liveQuote.stale -> R.string.market_stale
                 marketClosed -> R.string.market_closed
                 else -> R.string.live_snapshot
-            }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+            }), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             liveQuote?.let { quote ->
-                com.macroresearch.ui.market.quoteTimeLabel(quote.timestamp, locale)?.let { time ->
-                    Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                homeQuoteTime(quote.timestamp, locale)?.let { time ->
+                    Text(time, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }

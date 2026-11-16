@@ -56,6 +56,8 @@ MacroRepository            ── 缓存、翻译补全、模式切换
 
 ## 日历
 
+Room v12 为宏观事件缓存新增 `eventEpochSecond` / `eventNano` 两个整数排序列及索引；原 `eventTime` 文本保持不变。11 → 12 按原始时间逐批解析回填，不清空事件、关注、AI 简报/对话或财报数据。合法偏移、整秒与小数秒按同一瞬时比较，保留纳秒精度；无法解析的旧值保留原行和关注，但不参与日期范围/历史筛选或按时间清理。所有 DAO 写入重新生成排序列，避免 `copy(eventTime=...)` 遗留旧键。日历读取统一使用 `[本地当天零点, 次日零点)`，轮询/同一发生时刻合并仍使用闭区间；历史分页和关注排序同样改用整数时间，不用 SQLite 日期浮点转换。
+
 客户端默认请求 **TradingView → BiQuote → Forex Factory**，优先使用首个非空且解析成功的数据源。BiQuote 备用源接入细节、覆盖边界与配置见 [BiQuote 日历接入](biquote-calendar.md)。Room v9 增加 `timeExact`，保留旧缓存与关注，不把日期占位时间当作精确公布时间触发前台轮询。
 
 TradingView 主源按日期区间请求经济日历 JSON 接口（`economic-calendar.tradingview.com/events`，无需 API Key，请求带 `Origin` 头），并解析事件标题、国家（ISO 代码映射为全名）、分类（indicator）、发布时间、重要度（-1/0/1 映射为 1/2/3）和 Actual / Previous / Forecast。该接口只提供一个市场预期值（`forecast`），客户端会同时写入 `consensus` 与 `forecast`，否则规则引擎失去对比基准，会把所有事件判为中性信号。

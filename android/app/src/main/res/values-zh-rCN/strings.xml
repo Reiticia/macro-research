@@ -492,4 +492,5 @@
     <string name="backend_remove_warning">移除后端地址与 Key，并切回直连模式？本地宏观事件、关注、AI 简报和追问将被清空。显示偏好和按来源隔离的财报收藏保留。</string>
     <string name="backend_remove_direct_warning">移除已保存的后端地址与 Key？直连事件和关注将保留。</string>
     <string name="backend_save_explanation">先保存配置，再验证连接。验证失败不会恢复旧配置；设备 Key 可能在验证时绑定本次安装。</string>
+    <string name="calendar_local_today">今天（本地）</string>
 </resources>
