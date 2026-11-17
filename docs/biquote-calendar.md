@@ -1,7 +1,6 @@
 # BiQuote 财经日历备用源
 
-Android 直连和 Rust 后端均按 **TradingView → BiQuote → Forex Factory** 请求。
-前一源失败、数据格式无效或返回空时才尝试下一源；非空主源成功时不混入备用源。
+Android 直连日历仍按 **TradingView → BiQuote → Forex Factory** 回退。Rust 后端的日历身份/日程也保留同样优先级，但 **Actual 独立优先采用 BiQuote**：TradingView 返回非空日历时仍查询 BiQuote，仅在既有精确身份、统计期/阶段、单位及唯一性检查通过后将 Actual 转换到主源单位，不替换名称、ID、主源身份、预期或前值。BiQuote 无值/失败时使用 TradingView 值，Forex Factory 仍为最后备用。
 失败不清空已有缓存，回退结果会携带降级提示。现有股票/外汇 BiQuote 行情接入不变。
 
 ## 接口与字段
@@ -55,8 +54,7 @@ BiQuote 日历和行情；默认直连。Telegram `/test_api` 的宏观日历分
 Android 日历使用设置中的日历代理，各源独立记录熔断和 Retry-After；升级后旧 TradingView
 熔断时间不会误用于 BiQuote。Room v8 → v9 只新增时间精度列，不清空事件、关注或 AI 缓存。
 
-公开日历入库先要求同国家、同一精确时刻，再按非空英文 `a-z0-9` 小写键相等或非空中文名完全一致去重（同源 ID 更换、同批重复也适用）；原有已验证的跨源别名回退继续保留，未扩充表。唯一匹配时原位更新，保留旧事件 ID、关注、译文和关联数据；旧/新上游身份通过迁移 027 的别名表均可查询。已有多候选时不猜选/删行，跳过新身份而不继续制造重复，详见 [事件去重](event-deduplication.md)。来源优先级为 TradingView > BiQuote > Forex Factory；优先级低的备用源不能覆盖已存在的公布值，但可以填补
-缺失值。认证 Trading Economics 历史导入不参与公共源身份迁移。
+公开日历入库先要求同国家、同一精确时刻，再按非空英文 `a-z0-9` 小写键相等或非空中文名完全一致去重（同源 ID 更换、同批重复也适用）；原有已验证的跨源别名回退继续保留，未扩充表。唯一匹配时原位更新，保留旧事件 ID、关注、译文和关联数据；旧/新上游身份通过迁移 027 的别名表均可查询。已有多候选时不猜选/删行，跳过新身份而不继续制造重复，详见 [事件去重](event-deduplication.md)。日历身份优先级为 TradingView > BiQuote > Forex Factory；后端 Actual 单独优先 BiQuote，非历史记录中已通过校验的 BiQuote Actual 不被后来的 TradingView 数值覆盖。快速窗口中已有 TradingView 临时值仍继续查询 BiQuote，升级不重复发送首次公布通知；历史归档保护不放宽，也不批量修复存量值。Android 直连合并规则本次不变。认证 Trading Economics 历史导入不参与公共源身份迁移。
 
 ## 数据边界
 

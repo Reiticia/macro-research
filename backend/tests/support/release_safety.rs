@@ -336,7 +336,7 @@ async fn incompatible_promotion_preserves_old_row_without_relabeling_its_basis()
             .unwrap()
             .is_none()
     );
-    // An authoritative primary value can subsequently promote the row without copying old values.
+    // A TradingView value cannot promote/relabel an incompatible preferred BiQuote value.
     let mut primary = target;
     primary.actual = Some(Decimal::from(3));
     app.state
@@ -345,10 +345,10 @@ async fn incompatible_promotion_preserves_old_row_without_relabeling_its_basis()
         .await
         .unwrap();
     let updated = app.state.events.get(id).await.unwrap();
-    assert_eq!(updated.provider, primary.provider);
-    assert_eq!(updated.actual, primary.actual);
-    assert_eq!(updated.consensus, primary.consensus);
-    assert_eq!(updated.unit, primary.unit);
+    assert_eq!(updated.provider, old.provider);
+    assert_eq!(updated.actual, old.actual);
+    assert_eq!(updated.consensus, old.consensus);
+    assert_eq!(updated.unit, old.unit);
 }
 
 #[tokio::test]

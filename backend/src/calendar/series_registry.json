@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "mode": "shadow_only",
+  "evidence": "2026-11-16/17 public calendar metadata snapshots; observed correspondences, not production-write approval",
+  "entries": [
+    {"canonical":"ca.cpi.headline.mom","country":"Canada","unit":"percent","tvSeries":"ECONOMICS:CAIRMM","tvTitle":"Inflation Rate MoM","bqSeries":"mql5:124010003","bqTitle":"CPI m/m"},
+    {"canonical":"ca.cpi.headline.yoy","country":"Canada","unit":"percent","tvSeries":"ECONOMICS:CAIRYY","tvTitle":"Inflation Rate YoY","bqSeries":"mql5:124010004","bqTitle":"CPI y/y"},
+    {"canonical":"ca.cpi.core.mom","country":"Canada","unit":"percent","tvSeries":"ECONOMICS:CACIRMM","tvTitle":"Core Inflation Rate MoM","bqSeries":"mql5:124010005","bqTitle":"Core CPI m/m"},
+    {"canonical":"ca.cpi.core.yoy","country":"Canada","unit":"percent","tvSeries":"ECONOMICS:CACIR","tvTitle":"Core Inflation Rate YoY","bqSeries":"mql5:124010006","bqTitle":"Core CPI y/y"},
+    {"canonical":"ca.cpi.median.yoy","country":"Canada","unit":"percent","tvSeries":"ECONOMICS:CACPIM","tvTitle":"CPI Median YoY","bqSeries":"mql5:124010033","bqTitle":"Median CPI y/y"},
+    {"canonical":"ca.cpi.trimmed.yoy","country":"Canada","unit":"percent","tvSeries":"ECONOMICS:CACPITM","tvTitle":"CPI Trimmed-Mean YoY","bqSeries":"mql5:124010034","bqTitle":"Trimmed CPI y/y"},
+    {"canonical":"eu.industrial_production.mom","country":"Euro Area","unit":"percent","tvSeries":"ECONOMICS:EUIPMM","tvTitle":"Industrial Production MoM","bqSeries":"mql5:999030007","bqTitle":"Industrial Production m/m"},
+    {"canonical":"eu.industrial_production.yoy","country":"Euro Area","unit":"percent","tvSeries":"ECONOMICS:EUIPYY","tvTitle":"Industrial Production YoY","bqSeries":"mql5:999030008","bqTitle":"Industrial Production y/y"},
+    {"canonical":"us.retail.headline.mom","country":"United States","unit":"percent","tvSeries":"ECONOMICS:USRSMM","tvTitle":"Retail Sales MoM","bqSeries":"mql5:840020010","bqTitle":"Retail Sales m/m"},
+    {"canonical":"us.retail.ex_autos.mom","country":"United States","unit":"percent","tvSeries":"ECONOMICS:USRSEA","tvTitle":"Retail Sales Ex Autos MoM","bqSeries":"mql5:840020011","bqTitle":"Core Retail Sales m/m"},
+    {"canonical":"us.retail.control.mom","country":"United States","unit":"percent","tvSeries":"ECONOMICS:USRSCG","tvTitle":"Retail Sales Control Group","bqSeries":"mql5:840020012","bqTitle":"Retail Control m/m"},
+    {"canonical":"us.retail.ex_autos_gas.mom","country":"United States","unit":"percent","tvSeries":"ECONOMICS:USRSEGAMM","tvTitle":"Retail Sales Ex Gas/Autos MoM","bqSeries":"mql5:840020021","bqTitle":"Retail Sales excl. Autos and Gas m/m"},
+    {"canonical":"us.retail.headline.yoy","country":"United States","unit":"percent","tvSeries":"ECONOMICS:USRSYY","tvTitle":"Retail Sales YoY","bqSeries":"mql5:840020025","bqTitle":"Retail Sales y/y"}
+  ]
+}

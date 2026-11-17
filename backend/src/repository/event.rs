@@ -168,7 +168,8 @@ impl EventRepository {
                     // Do not relabel a valued fallback row as primary if its value cannot
                     // be expressed in the primary comparison basis. Leave it intact.
                     if provider_priority(&event.provider) >= provider_priority(&old.provider)
-                        && event.actual.is_none()
+                        && (event.actual.is_none()
+                            || old.release_metadata.actual_source.as_deref() == Some("biquote"))
                         && old.actual.is_some()
                         && release_value_for(&event, &old, &peers).is_err()
                     {
@@ -202,9 +203,21 @@ impl EventRepository {
                 if observed.actual.is_some()
                     && observed.actual == old.actual
                     && old.release_metadata.actual_source.as_deref()
-                        == Some(observed.provider.as_str())
+                        == Some(
+                            observed
+                                .release_metadata
+                                .actual_source
+                                .as_deref()
+                                .unwrap_or(&observed.provider),
+                        )
                     && old.release_metadata.actual_source_id.as_deref()
-                        == Some(observed.provider_id.as_str())
+                        == Some(
+                            observed
+                                .release_metadata
+                                .actual_source_id
+                                .as_deref()
+                                .unwrap_or(&observed.provider_id),
+                        )
                 {
                     event.release_metadata.actual_source =
                         old.release_metadata.actual_source.clone();
@@ -222,7 +235,10 @@ impl EventRepository {
                         continue;
                     }
                     remember_identity(&mut transaction, &observed, old.id).await?;
-                    if old.actual.is_some()
+                    let preferred_biquote = observed.provider == "biquote"
+                        && !conflicting
+                        && old.status != EventStatus::Historical;
+                    if old.actual.is_some() && !preferred_biquote
                         || event.actual.is_none()
                         || old.status == EventStatus::Historical
                             && observed.status != EventStatus::Historical
@@ -243,7 +259,13 @@ impl EventRepository {
                         actual: Some(actual),
                         ..old.clone()
                     };
-                    inherit_actual_provenance(&mut event, &observed);
+                    if old.actual != Some(actual)
+                        || old.release_metadata.actual_source.as_deref() != Some("biquote")
+                        || old.release_metadata.actual_source_id.as_deref()
+                            != Some(&observed.provider_id)
+                    {
+                        inherit_actual_provenance(&mut event, &observed);
+                    }
                 } else {
                     if !same_identity
                         && old.status == EventStatus::Historical
@@ -292,7 +314,14 @@ impl EventRepository {
                                 && event.time_exact
                                 && old.country == event.country
                                 && old.event_time == event.event_time)
-                        && event.actual.is_none()
+                        && (event.actual.is_none()
+                            || old.release_metadata.actual_source.as_deref() == Some("biquote")
+                                && observed
+                                    .release_metadata
+                                    .actual_source
+                                    .as_deref()
+                                    .unwrap_or(&observed.provider)
+                                    != "biquote")
                         && old.actual.is_some()
                     {
                         if !same_identity {
@@ -932,7 +961,7 @@ impl EventRepository {
         rows.into_iter().map(event_from_row).collect()
     }
 
-    /// Missing exact-time releases only; no network traffic outside the configured window.
+    /// Missing releases or provisional non-BiQuote Actuals, only within the configured window.
     pub async fn biquote_release_candidates(
         &self,
         now: DateTime<Utc>,
@@ -940,8 +969,9 @@ impl EventRepository {
         minimum_importance: u8,
     ) -> Result<Vec<EconomicEvent>, AppError> {
         let rows = sqlx::query(
-            "SELECT * FROM economic_event WHERE actual IS NULL AND time_exact=1
-             AND status IN ('scheduled','watching','data_unavailable') AND importance >= ?
+            "SELECT * FROM economic_event WHERE time_exact=1
+             AND (actual IS NULL OR COALESCE(json_extract(release_metadata,'$.actualSource'),provider) != 'biquote')
+             AND status IN ('scheduled','watching','data_unavailable','released','collecting_market_data') AND importance >= ?
              AND julianday(event_time) <= julianday(?) AND julianday(event_time) >= julianday(?)
              ORDER BY event_time,id",
         )
@@ -967,7 +997,7 @@ impl EventRepository {
         rows.into_iter().map(event_from_row).collect()
     }
 
-    /// Atomic first-value fill. Keep every existing ID/topic and the target comparison basis.
+    /// Atomic first-value fill or preferred-source upgrade. Keep ID/topic and comparison basis.
     /// Verified source pairs may fill legacy duplicate rows without stealing their aliases.
     pub async fn fill_biquote_release(
         &self,
@@ -989,7 +1019,15 @@ impl EventRepository {
             || current.country != expected.country
             || current.event != expected.event
             || current.event_time != expected.event_time
+            || current.actual != expected.actual
+            || current.release_metadata.actual_source != expected.release_metadata.actual_source
             || current.actual.is_some()
+                && current
+                    .release_metadata
+                    .actual_source
+                    .as_deref()
+                    .unwrap_or(&current.provider)
+                    == "biquote"
             || !current.time_exact
             || !source.time_exact
             || current.country != source.country
@@ -1052,7 +1090,7 @@ impl EventRepository {
         let metadata = serde_json::to_string(&metadata)
             .map_err(|_| AppError::Internal("cannot encode release metadata".into()))?;
         let filled = sqlx::query("UPDATE economic_event SET actual=?,release_metadata=?,updated_at=?
-            WHERE id=? AND actual IS NULL AND status IN ('scheduled','watching','data_unavailable')")
+            WHERE id=? AND status IN ('scheduled','watching','data_unavailable','released','collecting_market_data')")
             .bind(actual.to_string()).bind(metadata).bind(now.to_rfc3339()).bind(current.id)
             .execute(&mut *transaction).await?.rows_affected() == 1;
         if filled && owner.is_none() {

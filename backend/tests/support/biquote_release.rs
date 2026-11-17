@@ -172,6 +172,54 @@ async fn polls_every_two_seconds_independent_of_slow_primary_and_stops_after_act
 }
 
 #[tokio::test]
+async fn preferred_biquote_upgrades_provisional_actual_without_duplicate_notification() {
+    let mut app = app().await;
+    let event = missing_event(&app).await;
+    sqlx::query(
+        "UPDATE economic_event SET actual='100',status='collecting_market_data' WHERE id=?",
+    )
+    .bind(event.id)
+    .execute(&app.pool)
+    .await
+    .unwrap();
+    let provisional = app.state.events.get(event.id).await.unwrap();
+    let source = print_for(&provisional);
+    let calls = use_feed(&mut app, vec![source], 1);
+    let mut receiver = app.state.event_bus.subscribe();
+    let task = tokio::spawn(biquote_release_loop(app.state.clone()));
+    tokio::time::sleep(StdDuration::from_millis(180)).await;
+    task.abort();
+    let stored = app.state.events.get(event.id).await.unwrap();
+    assert_eq!(stored.actual, Some(Decimal::ZERO));
+    assert_eq!(stored.provider, provisional.provider);
+    assert_eq!(stored.previous, provisional.previous);
+    assert_eq!(stored.consensus, provisional.consensus);
+    assert_eq!(stored.status, EventStatus::CollectingMarketData);
+    assert_eq!(
+        stored.release_metadata.actual_source.as_deref(),
+        Some("biquote")
+    );
+    assert_eq!(calls.lock().unwrap().len(), 1);
+    assert!(receiver.try_recv().is_err());
+    assert!(
+        app.state
+            .events
+            .biquote_release_candidates(Utc::now(), 30, 3)
+            .await
+            .unwrap()
+            .iter()
+            .all(|e| e.id != event.id)
+    );
+    let mut late_primary = provisional;
+    late_primary.actual = Some(Decimal::from(999));
+    app.state.events.save_events(&[late_primary]).await.unwrap();
+    assert_eq!(
+        app.state.events.get(event.id).await.unwrap().actual,
+        Some(Decimal::ZERO)
+    );
+}
+
+#[tokio::test]
 async fn merges_simultaneous_releases_and_never_uses_primary_or_weekly_feed() {
     let mut app = app().await;
     let first = missing_event(&app).await;
@@ -225,6 +273,9 @@ async fn no_requests_before_release_after_timeout_for_inexact_low_priority_or_va
         event.time_exact = exact;
         event.importance = importance;
         event.actual = actual;
+        if actual.is_some() {
+            event.release_metadata.actual_source = Some("biquote".into());
+        }
         app.state.events.save_events(&[event]).await.unwrap();
     }
     let calls = use_feed(&mut app, Vec::new(), 1);

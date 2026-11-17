@@ -262,7 +262,7 @@ fn event(provider: &str, id: &str) -> EconomicEvent {
 #[tokio::test]
 async fn production_priority_is_tradingview_then_biquote_then_weekly() {
     for (primary, secondary, expected) in [
-        (2, 2, vec!["trading_view"]),
+        (2, 2, vec!["trading_view", "biquote"]),
         (0, 2, vec!["trading_view", "biquote"]),
         (1, 2, vec!["trading_view", "biquote"]),
         (0, 0, vec!["trading_view", "biquote", "forex_factory"]),
@@ -286,9 +286,95 @@ async fn production_priority_is_tradingview_then_biquote_then_weekly() {
             .await
             .unwrap();
         assert_eq!(*calls.lock().unwrap(), expected);
-        assert_eq!(result.events[0].provider, *expected.last().unwrap());
+        assert_eq!(
+            result.events[0].provider,
+            if primary == 2 {
+                "trading_view"
+            } else {
+                *expected.last().unwrap()
+            }
+        );
         assert_eq!(result.degraded_detail.is_some(), primary != 2);
     }
+}
+
+#[tokio::test]
+async fn preferred_actual_conversion_keeps_primary_basis_and_rejects_ambiguity() {
+    use market_event_analyzer::calendar::prefer_biquote_actual;
+    let mut target = event("trading_view", "tv");
+    target.actual = Some(Decimal::ONE);
+    let mut source = event("biquote", "bq");
+    source.actual = Some(Decimal::ZERO);
+    source.previous = Some(Decimal::from(999));
+    let mut targets = vec![target.clone()];
+    prefer_biquote_actual(&mut targets, &[source.clone()]);
+    assert_eq!(targets[0].actual, Some(Decimal::ZERO));
+    assert_eq!(targets[0].previous, target.previous);
+    assert_eq!(targets[0].provider, target.provider);
+    assert_eq!(
+        targets[0].release_metadata.actual_source.as_deref(),
+        Some("biquote")
+    );
+    let mut wrong = source.clone();
+    wrong.unit = Some("USD".into());
+    targets = vec![target.clone()];
+    prefer_biquote_actual(&mut targets, &[wrong]);
+    assert_eq!(targets[0].actual, target.actual);
+    targets = vec![target.clone()];
+    let mut duplicate = source.clone();
+    duplicate.provider_id = "other".into();
+    prefer_biquote_actual(&mut targets, &[source, duplicate]);
+    assert_eq!(targets[0].actual, target.actual);
+}
+
+#[tokio::test]
+async fn preferred_provenance_survives_primary_ingest_and_repeated_refresh() {
+    use market_event_analyzer::calendar::prefer_biquote_actual;
+    let repo = repository().await;
+    let mut tv = event("trading_view", "tv:preferred");
+    tv.actual = Some(Decimal::ONE);
+    let id = repo.save_events(&[tv.clone()]).await.unwrap()[0];
+    let mut bq = event("biquote", "bq:preferred");
+    bq.actual = Some(Decimal::ZERO);
+    let mut enriched = vec![tv.clone()];
+    prefer_biquote_actual(&mut enriched, &[bq.clone()]);
+    repo.save_events(&enriched).await.unwrap();
+    let stored = repo.get(id).await.unwrap();
+    assert_eq!(stored.actual, Some(Decimal::ZERO));
+    assert_eq!(
+        stored.release_metadata.actual_source.as_deref(),
+        Some("biquote")
+    );
+    assert_eq!(
+        stored.release_metadata.actual_source_id.as_deref(),
+        Some("bq:preferred")
+    );
+    let first_receipt = stored.release_metadata.actual_observed_at;
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    prefer_biquote_actual(&mut enriched, &[bq.clone()]);
+    repo.save_events(&enriched).await.unwrap();
+    assert_eq!(
+        repo.get(id)
+            .await
+            .unwrap()
+            .release_metadata
+            .actual_observed_at,
+        first_receipt
+    );
+    repo.save_events(&[tv]).await.unwrap();
+    assert_eq!(repo.get(id).await.unwrap().actual, Some(Decimal::ZERO));
+    repo.save_events(&[bq.clone()]).await.unwrap();
+    assert_eq!(
+        repo.get(id)
+            .await
+            .unwrap()
+            .release_metadata
+            .actual_observed_at,
+        first_receipt
+    );
+    bq.actual = Some(Decimal::from(2));
+    repo.save_events(&[bq]).await.unwrap();
+    assert_eq!(repo.get(id).await.unwrap().actual, Some(Decimal::from(2)));
 }
 
 #[tokio::test]

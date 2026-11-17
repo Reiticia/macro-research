@@ -4,6 +4,7 @@ mod forex_factory;
 pub mod parse;
 mod provider;
 pub mod release_identity;
+pub mod series_registry;
 pub mod trading_economics;
 pub mod trading_economics_api;
 mod tradingview;
@@ -214,6 +215,26 @@ impl CalendarService {
             });
         }
 
+        // Schedule ownership remains TradingView, but Actual is independently preferred from
+        // BiQuote. Failure preserves primary values; it never demotes the event identity/basis.
+        if let Some(secondary) = &self.secondary {
+            match secondary.fetch_events(start, end).await {
+                Ok(rows) => {
+                    if let Some(health) = &self.health {
+                        health.record_success(SECONDARY_KEY).await;
+                    }
+                    prefer_biquote_actual(&mut primary_events, &rows);
+                }
+                Err(error) => {
+                    if let Some(health) = &self.health {
+                        health
+                            .record_failure(SECONDARY_KEY, error.to_string())
+                            .await;
+                    }
+                    tracing::warn!(%error, "preferred Actual source unavailable; retaining TradingView values");
+                }
+            }
+        }
         Ok(CalendarFetch {
             events: primary_events,
             degraded_detail,
@@ -250,6 +271,30 @@ impl CalendarService {
             tracing::warn!(%error, "event-name translation failed; saving source names");
         }
         events
+    }
+}
+
+/// Unique exact occurrences only; never infer aliases, dimensions or reporting periods.
+pub fn prefer_biquote_actual(targets: &mut [EconomicEvent], sources: &[EconomicEvent]) {
+    series_registry::log_shadow(targets, sources);
+    let mut peers = targets.to_vec();
+    peers.extend_from_slice(sources);
+    for target in targets.iter_mut() {
+        let candidates: Vec<_> = sources
+            .iter()
+            .filter(|s| s.provider == "biquote" && parse::same_occurrence(target, s))
+            .collect();
+        let [source] = candidates.as_slice() else {
+            continue;
+        };
+        if parse::conflicting_duplicate_actual(source, sources) {
+            continue;
+        }
+        let Ok(value) = release_identity::release_value_for(target, source, &peers) else {
+            continue;
+        };
+        target.actual = Some(value);
+        release_identity::inherit_actual_provenance(target, source);
     }
 }
 

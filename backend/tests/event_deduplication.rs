@@ -195,7 +195,7 @@ async fn blank_keys_or_chinese_whitespace_differences_do_not_merge_unrelated_row
     assert_eq!(count(&repo).await, 4);
 }
 #[tokio::test]
-async fn lower_priority_aliases_cannot_overwrite_primary_values_or_move_its_schedule() {
+async fn biquote_actual_wins_without_moving_primary_identity_or_schedule() {
     let repo = repository().await;
     let mut main = event("trading_view", "tv", "CPI");
     main.actual = Some(Decimal::new(31, 1));
@@ -210,7 +210,13 @@ async fn lower_priority_aliases_cannot_overwrite_primary_values_or_move_its_sche
     assert_eq!(repo.save_events(&[fallback]).await.unwrap(), vec![id]);
     let stored = repo.get(id).await.unwrap();
     assert_eq!(stored.provider, "trading_view");
-    assert_eq!(stored.actual, main.actual);
+    assert_eq!(stored.actual, Some(Decimal::new(99, 1)));
+    assert_eq!(
+        stored.release_metadata.actual_source.as_deref(),
+        Some("biquote")
+    );
+    repo.save_events(&[main.clone()]).await.unwrap();
+    assert_eq!(repo.get(id).await.unwrap().actual, stored.actual);
     assert_eq!(stored.event_time, main.event_time);
     assert_eq!(count(&repo).await, 1);
 }
